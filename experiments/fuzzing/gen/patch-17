@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36149,6 +36149,8 @@
+         *pres = atom;
+         return 0;
+     }
++    if (atom < s->first_atom)
++        funlogline();
+     atom -= s->first_atom;
+     if (atom < s->atom_to_idx_size && s->atom_to_idx[atom] != 0) {
+         *pres = s->atom_to_idx[atom];
+@@ -36189,6 +36189,8 @@
+ 
+     v = s->idx_to_atom_count++;
+     s->idx_to_atom[v] = atom + s->first_atom;
++    if (atom + s->first_atom < s->first_atom) /* overflow check */
++        funlogline();
+     v += s->first_atom;
+     s->atom_to_idx[atom] = v;
+     *pres = v;

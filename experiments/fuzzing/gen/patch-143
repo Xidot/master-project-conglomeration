@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52260,6 +52260,8 @@
+     int i;
+ 
+     ctx->class_proto[JS_CLASS_OBJECT] = JS_NewObjectProto(ctx, JS_NULL);
++    if (JS_IsException(ctx->class_proto[JS_CLASS_OBJECT]))
++        funlogline();
+     JS_SetImmutablePrototype(ctx, ctx->class_proto[JS_CLASS_OBJECT]);
+     
+     ctx->function_proto = JS_NewCFunction3(ctx, js_function_proto, "", 0,
+@@ -52309,6 +52311,8 @@
+     /* the array prototype is an array */
+     ctx->class_proto[JS_CLASS_ARRAY] =
+         JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                JS_CLASS_ARRAY);
++    if (JS_IsException(ctx->class_proto[JS_CLASS_ARRAY]))
++        funlogline();
+ 
+     ctx->array_shape = js_new_shape2(ctx, get_proto_obj(ctx->class_proto[JS_CLASS_ARRAY]),
+                                      JS_PROP_INITIAL_HASH_SIZE, 1);
++    if (!ctx->array_shape)
++        funlogline();
+     add_shape_property(ctx, &ctx->array_shape, NULL,
+                        JS_ATOM_length, JS_PROP_WRITABLE | JS_PROP_LENGTH);

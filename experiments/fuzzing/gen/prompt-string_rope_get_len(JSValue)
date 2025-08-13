@@ -1,0 +1,146 @@
+Target function: "string_rope_get_len(JSValue)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 4221
+static uint32_t string_rope_get_len(JSValueConst val)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING)
+        return JS_VALUE_GET_STRING(val)->len;
+    else
+        return JS_VALUE_GET_STRING_ROPE(val)->len;
+}
+
+/// Line number here: 4194
+typedef struct {
+    JSValueConst stack[JS_STRING_ROPE_MAX_DEPTH];
+    int stack_len;
+} JSStringRopeIter
+
+/// Line number here: 4229
+static int js_string_rope_compare(JSContext *ctx, JSValueConst op1,
+                                  JSValueConst op2, BOOL eq_only)
+{
+    uint32_t len1, len2, len, pos1, pos2, l;
+    int res;
+    JSStringRopeIter it1, it2;
+    JSString *p1, *p2;
+    
+    len1 = string_rope_get_len(op1);
+    len2 = string_rope_get_len(op2);
+    /* no need to go further for equality test if
+       different length */
+    if (eq_only && len1 != len2)
+        return 1; 
+    len = min_uint32(len1, len2);
+    string_rope_iter_init(&it1, op1);
+    string_rope_iter_init(&it2, op2);
+    p1 = string_rope_iter_next(&it1);
+    p2 = string_rope_iter_next(&it2);
+    pos1 = 0;
+    pos2 = 0;
+    while (len != 0) {
+        l = min_uint32(p1->len - pos1, p2->len - pos2);
+        l = min_uint32(l, len);
+        res = js_string_memcmp(p1, pos1, p2, pos2, l);
+        if (res != 0)
+            return res;
+        len -= l;
+        pos1 += l;
+        if (pos1 >= p1->len) {
+            p1 = string_rope_iter_next(&it1);
+            pos1 = 0;
+        }
+        pos2 += l;
+        if (pos2 >= p2->len) {
+            p2 = string_rope_iter_next(&it2);
+            pos2 = 0;
+        }
+    }
+
+    if (len1 == len2)
+        res = 0;
+    else if (len1 < len2)
+        res = -1;
+    else
+        res = 1;
+    return res;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)";
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)" -> "string_rope_get_len(JSValue)";
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)" -> "min_uint32(uint32_t, uint32_t)";
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)" -> "string_rope_iter_init(JSStringRopeIter *, JSValue)";
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)" -> "string_rope_iter_next(JSStringRopeIter *)";
+"js_string_rope_compare(JSContext *, JSValue, JSValue, BOOL)" -> "js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+}

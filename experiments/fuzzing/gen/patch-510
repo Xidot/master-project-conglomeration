@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50145,6 +50145,9 @@
+     result_promise = js_new_promise_capability(ctx, resolving_funcs, ctor);
+     JS_FreeValue(ctx, ctor);
+     if (JS_IsException(result_promise))
+         return result_promise;
++    if (!resolving_funcs[0] || !resolving_funcs[1]) {
++        funlogline();
++    }
+     ret = perform_promise_then(ctx, this_val, argv,
+                                (JSValueConst *)resolving_funcs);
+     for(i = 0; i < 2; i++)

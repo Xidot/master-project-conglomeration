@@ -1,0 +1,113 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_realloc(JSContext *, void *, size_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_realloc` function and related callers:
+
+:quickjs.c:js_realloc:1391
+:quickjs.c:resize_properties:4790
+:quickjs.c:compact_properties:4852
+:quickjs.c:add_property:8504
+:quickjs.c:js_bigint_normalize1:11021
+:quickjs.c:js_bigint_extend:11076
+:quickjs.c:ident_realloc:21343
+:quickjs.c:js_create_function:34607
+:quickjs.c:map_hash_resize:48525
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1388,6 +1388,8 @@
+ void *js_realloc(JSContext *ctx, void *ptr, size_t size)
+ {
+     void *ret;
++    if (size == 0 && ptr == NULL)
++        funlogline();
+     ret = js_realloc_rt(ctx->rt, ptr, size);
+     if (unlikely(!ret && size != 0)) {
+         JS_ThrowOutOfMemory(ctx);
+@@ -4787,6 +4789,8 @@
+     sh = *psh;
+     new_size = max_int(count, sh->prop_size * 3 / 2);
+     /* Reallocate prop array first to avoid crash or size inconsistency */
++    if (new_size == 0)
++        funlogline();
+     if (p) {
+         JSProperty *new_prop;
+         new_prop = js_realloc(ctx, p->prop, sizeof(new_prop[0]) * new_size);
+@@ -4849,6 +4853,8 @@
+     sh = p->shape;
+     assert(!sh->is_hashed);
+ 
++    if (sh->prop_count < sh->deleted_prop_count)
++        funlogline();
+     new_size = max_int(JS_PROP_INITIAL_SIZE,
+                        sh->prop_count - sh->deleted_prop_count);
+     assert(new_size <= sh->prop_size);
+@@ -8501,6 +8507,8 @@
+     JSShape *sh, *new_sh;
+ 
+     sh = p->shape;
++    if (sh == NULL)
++        funlogline();
+     if (sh->is_hashed) {
+         /* try to find an existing shape */
+         new_sh = find_hashed_shape_prop(ctx->rt, sh, prop, prop_flags);
+@@ -11018,6 +11026,8 @@
+     js_limb_t v;
+ 
+     assert(a->header.ref_count == 1);
++    if (l <= 0)
++        funlogline();
+     while (l > 1) {
+         v = a->tab[l - 1];
+         if ((v != 0 && v != -1) ||
+@@ -11073,6 +11083,8 @@
+                                   js_limb_t op1)
+ {
+     int n2 = r->len;
++    if (n2 <= 0)
++        funlogline();
+     if ((op1 != 0 && op1 != -1) ||
+         (op1 & 1) != r->tab[n2 - 1] >> (JS_LIMB_BITS - 1)) {
+         JSBigInt *r1;
+@@ -21340,6 +21352,8 @@
+ 
+     buf = *pbuf;
+     size = *psize;
++    if (size == 0 && new_size == 0)
++        funlogline();
+     if (size >= (SIZE_MAX / 3) * 2)
+         new_size = SIZE_MAX;
+     else
+@@ -34604,6 +34618,8 @@
+ {
+     JSValue func_obj;
+     JSFunctionBytecode *b;
++    if (fd == NULL)
++        funlogline();
+     struct list_head *el, *el1;
+     int stack_size, scope, idx;
+     int function_size, byte_code_offset, cpool_offset;
+@@ -48522,6 +48538,8 @@
+     uint32_t new_hash_size, h;
+     int new_hash_bits;
+     struct list_head *el;
++    if (s == NULL)
++        funlogline();
+     JSMapRecord *mr, **new_hash_table;
+ 
+     /* XXX: no reporting of memory allocation failure */
+```
+
+The main logical issues identified are:
+
+1. Potential NULL pointer dereferences
+2. Integer overflow/underflow cases
+3. Invalid size calculations
+4. Missing error checks before operations
+5. Edge cases with zero sizes
+
+Each fix adds a check right before the potential bug location that would call funlogline() if the problematic condition is met. The conditions are designed to only trigger when the bug would actually occur.

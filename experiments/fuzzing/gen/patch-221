@@ -1,0 +1,53 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14446,6 +14446,9 @@
+     op1 = sp[-2];
+     op2 = sp[-1];
+     tag1 = JS_VALUE_GET_NORM_TAG(op1);
++    if (unlikely(tag1 == JS_TAG_EXCEPTION)) {
++        goto exception;
++    }
+     tag2 = JS_VALUE_GET_NORM_TAG(op2);
+ 
+     if (tag1 == JS_TAG_SHORT_BIG_INT && tag2 == JS_TAG_SHORT_BIG_INT) {
+@@ -14493,6 +14496,9 @@
+             if (v2 > (JS_LIMB_BITS - 1)) {
+                 goto slow_big_int;
+             } else if (v2 < 0) {
++                if (v2 == INT32_MIN) {
++                    goto slow_big_int;
++                }
+                 if (v2 < -(JS_LIMB_BITS - 1))
+                     goto slow_big_int;
+                 v2 = -v2;
+@@ -14503,6 +14509,9 @@
+             if (v2 > (JS_LIMB_BITS - 1)) {
+                 goto slow_big_int;
+             } else if (v2 < 0) {
++                if (v2 == INT32_MIN) {
++                    goto slow_big_int;
++                }
+                 if (v2 < -(JS_LIMB_BITS - 1))
+                     goto slow_big_int;
+                 v2 = -v2;
+                 goto bigint_sar;
+@@ -14544,6 +14553,9 @@
+     op1 = JS_ToNumericFree(ctx, op1);
+     if (JS_IsException(op1)) {
+         JS_FreeValue(ctx, op2);
++        if (JS_VALUE_GET_TAG(op2) == JS_TAG_EXCEPTION) {
++            funlogline();
++        }
+         goto exception;
+     }
+     op2 = JS_ToNumericFree(ctx, op2);
+@@ -14597,6 +14609,9 @@
+                 shift = js_bigint_get_si_sat(p2);
+                 if (shift > INT32_MAX)
+                     shift = INT32_MAX;
++                else if (shift == INT32_MIN) {
++                    shift = -INT32_MAX;
++                }
+                 else if (shift < -INT32_MAX)
+                     shift = -INT32_MAX;
+                 if (op == OP_sar)

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8323,6 +8323,8 @@
+ /* val must be a symbol */
+ static JSAtom js_symbol_to_atom(JSContext *ctx, JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_SYMBOL)
++        funlogline();
+     JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+     return js_get_atom_index(ctx->rt, p);
+ }
+@@ -2640,6 +2642,8 @@
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p1;
+ 
++        if (p->hash & (rt->atom_hash_size - 1) >= rt->atom_hash_size)
++            funlogline();
+         i = rt->atom_hash[p->hash & (rt->atom_hash_size - 1)];
+         p1 = rt->atom_array[i];
+         while (p1 != p) {

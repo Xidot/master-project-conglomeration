@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7374,6 +7374,8 @@
+ JSValue JS_GetPrototype(JSContext *ctx, JSValueConst obj)
+ {
+     JSValue val;
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) {
+         JSObject *p;
+         p = JS_VALUE_GET_OBJ(obj);
+@@ -7382,6 +7384,8 @@
+             if (em && em->get_prototype) {
+                 return em->get_prototype(ctx, obj);
+             }
+         }
++        if (p->shape == NULL)
++            funlogline();
+         p = p->shape->proto;
+         if (!p)
+             val = JS_NULL;
+@@ -7389,6 +7393,8 @@
+             val = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p));
+     } else {
+         val = JS_DupValue(ctx, JS_GetPrototypePrimitive(ctx, obj));
++        if (JS_IsException(val))
++            funlogline();
+     }
+     return val;
+ }

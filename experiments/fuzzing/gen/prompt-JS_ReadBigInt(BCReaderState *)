@@ -1,0 +1,462 @@
+Target function: "JS_ReadBigInt(BCReaderState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 274
+static inline JSValue __JS_NewShortBigInt(JSContext *ctx, int64_t d)
+{
+    JSValue v;
+    v.tag = JS_TAG_SHORT_BIG_INT;
+    v.u.short_big_int = d;
+    return v;
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 37179
+static JSValue JS_ReadBigInt(BCReaderState *s)
+{
+    JSValue obj = JS_UNDEFINED;
+    uint32_t len, i, n;
+    JSBigInt *p;
+    js_limb_t v;
+    uint8_t v8;
+    
+    if (bc_get_leb128(s, &len))
+        goto fail;
+    bc_read_trace(s, "len=%" PRId64 "\n", (int64_t)len);
+    if (len == 0) {
+        /* zero case */
+        bc_read_trace(s, "}\n");
+        return __JS_NewShortBigInt(s->ctx, 0);
+    }
+    p = js_bigint_new(s->ctx, (len - 1) / (JS_LIMB_BITS / 8) + 1);
+    if (!p)
+        goto fail;
+    for(i = 0; i < len / (JS_LIMB_BITS / 8); i++) {
+#if JS_LIMB_BITS == 32
+        if (bc_get_u32(s, &v))
+            goto fail;
+#else
+        if (bc_get_u64(s, &v))
+            goto fail;
+#endif
+        p->tab[i] = v;
+    }
+    n = len % (JS_LIMB_BITS / 8);
+    if (n != 0) {
+        int shift;
+        v = 0;
+        for(i = 0; i < n; i++) {
+            if (bc_get_u8(s, &v8))
+                goto fail;
+            v |= (js_limb_t)v8 << (i * 8);
+        }
+        shift = JS_LIMB_BITS - n * 8;
+        /* extend the sign */
+        if (shift != 0) {
+            v = (js_slimb_t)(v << shift) >> shift;
+        }
+        p->tab[p->len - 1] = v;
+    }
+    bc_read_trace(s, "}\n");
+    return JS_CompactBigInt(s->ctx, p);
+ fail:
+    JS_FreeValue(s->ctx, obj);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 36986
+static int bc_get_leb128(BCReaderState *s, uint32_t *pval)
+{
+    int ret;
+    ret = get_leb128(pval, s->ptr, s->buf_end);
+    if (unlikely(ret < 0))
+        return bc_read_error_end(s);
+    s->ptr += ret;
+    return 0;
+}
+
+/// Line number here: 10880
+static JSBigInt *js_bigint_new(JSContext *ctx, int len)
+{
+    JSBigInt *r;
+    if (len > JS_BIGINT_MAX_SIZE) {
+        JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+        return NULL;
+    }
+    r = js_malloc(ctx, sizeof(JSBigInt) + len * sizeof(js_limb_t));
+    if (!r)
+        return NULL;
+    r->header.ref_count = 1;
+    r->len = len;
+    return r;
+}
+
+/// Line number here: 36971
+static int bc_get_u64(BCReaderState *s, uint64_t *pval)
+{
+    uint64_t v;
+    if (unlikely(s->buf_end - s->ptr < 8)) {
+        *pval = 0; /* avoid warning */
+        return bc_read_error_end(s);
+    }
+    v = get_u64(s->ptr);
+    if (is_be())
+        v = bswap64(v);
+    *pval = v;
+    s->ptr += 8;
+    return 0;
+}
+
+/// Line number here: 36931
+static int bc_get_u8(BCReaderState *s, uint8_t *pval)
+{
+    if (unlikely(s->buf_end - s->ptr < 1)) {
+        *pval = 0; /* avoid warning */
+        return bc_read_error_end(s);
+    }
+    *pval = *s->ptr++;
+    return 0;
+}
+
+/* if possible transform a BigInt to short big and free it, otherwise
+   return a normal bigint */
+/// Line number here: 12013
+static JSValue JS_CompactBigInt(JSContext *ctx, JSBigInt *p)
+{
+    JSValue res;
+    if (p->len == 1) {
+        res = __JS_NewShortBigInt(ctx, (js_slimb_t)p->tab[0]);
+        js_free(ctx, p);
+        return res;
+    } else {
+        return JS_MKPTR(JS_TAG_BIG_INT, p);
+    }
+}
+
+/*******************************************************************/
+/* binary object writer & reader */
+/// Line number here: 36030
+enum BCTagEnum {
+    BC_TAG_NULL = 1,
+    BC_TAG_UNDEFINED,
+    BC_TAG_BOOL_FALSE,
+    BC_TAG_BOOL_TRUE,
+    BC_TAG_INT32,
+    BC_TAG_FLOAT64,
+    BC_TAG_STRING,
+    BC_TAG_OBJECT,
+    BC_TAG_ARRAY,
+    BC_TAG_BIG_INT,
+    BC_TAG_TEMPLATE_OBJECT,
+    BC_TAG_FUNCTION_BYTECODE,
+    BC_TAG_MODULE,
+    BC_TAG_TYPED_ARRAY,
+    BC_TAG_ARRAY_BUFFER,
+    BC_TAG_SHARED_ARRAY_BUFFER,
+    BC_TAG_DATE,
+    BC_TAG_OBJECT_VALUE,
+    BC_TAG_OBJECT_REFERENCE,
+}
+
+/// Line number here: 485
+typedef union JSFloat64Union {
+    double d;
+    uint64_t u64;
+    uint32_t u32[2];
+} JSFloat64Union
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 37789
+static JSValue JS_ReadObjectRec(BCReaderState *s)
+{
+    JSContext *ctx = s->ctx;
+    uint8_t tag;
+    JSValue obj = JS_UNDEFINED;
+
+    if (js_check_stack_overflow(ctx->rt, 0))
+        return JS_ThrowStackOverflow(ctx);
+
+    if (bc_get_u8(s, &tag))
+        return JS_EXCEPTION;
+
+    bc_read_trace(s, "%s {\n", bc_tag_str[tag]);
+
+    switch(tag) {
+    case BC_TAG_NULL:
+        obj = JS_NULL;
+        break;
+    case BC_TAG_UNDEFINED:
+        obj = JS_UNDEFINED;
+        break;
+    case BC_TAG_BOOL_FALSE:
+    case BC_TAG_BOOL_TRUE:
+        obj = JS_NewBool(ctx, tag - BC_TAG_BOOL_FALSE);
+        break;
+    case BC_TAG_INT32:
+        {
+            int32_t val;
+            if (bc_get_sleb128(s, &val))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%d\n", val);
+            obj = JS_NewInt32(ctx, val);
+        }
+        break;
+    case BC_TAG_FLOAT64:
+        {
+            JSFloat64Union u;
+            if (bc_get_u64(s, &u.u64))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%g\n", u.d);
+            obj = __JS_NewFloat64(ctx, u.d);
+        }
+        break;
+    case BC_TAG_STRING:
+        {
+            JSString *p;
+            p = JS_ReadString(s);
+            if (!p)
+                return JS_EXCEPTION;
+            obj = JS_MKPTR(JS_TAG_STRING, p);
+        }
+        break;
+    case BC_TAG_FUNCTION_BYTECODE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        obj = JS_ReadFunctionTag(s);
+        break;
+    case BC_TAG_MODULE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        obj = JS_ReadModule(s);
+        break;
+    case BC_TAG_OBJECT:
+        obj = JS_ReadObjectTag(s);
+        break;
+    case BC_TAG_ARRAY:
+    case BC_TAG_TEMPLATE_OBJECT:
+        obj = JS_ReadArray(s, tag);
+        break;
+    case BC_TAG_TYPED_ARRAY:
+        obj = JS_ReadTypedArray(s);
+        break;
+    case BC_TAG_ARRAY_BUFFER:
+        obj = JS_ReadArrayBuffer(s);
+        break;
+    case BC_TAG_SHARED_ARRAY_BUFFER:
+        if (!s->allow_sab || !ctx->rt->sab_funcs.sab_dup)
+            goto invalid_tag;
+        obj = JS_ReadSharedArrayBuffer(s);
+        break;
+    case BC_TAG_DATE:
+        obj = JS_ReadDate(s);
+        break;
+    case BC_TAG_OBJECT_VALUE:
+        obj = JS_ReadObjectValue(s);
+        break;
+    case BC_TAG_BIG_INT:
+        obj = JS_ReadBigInt(s);
+        break;
+    case BC_TAG_OBJECT_REFERENCE:
+        {
+            uint32_t val;
+            if (!s->allow_reference)
+                return JS_ThrowSyntaxError(ctx, "object references are not allowed");
+            if (bc_get_leb128(s, &val))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%u\n", val);
+            if (val >= s->objects_count) {
+                return JS_ThrowSyntaxError(ctx, "invalid object reference (%u >= %u)",
+                                           val, s->objects_count);
+            }
+            obj = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, s->objects[val]));
+        }
+        break;
+    default:
+    invalid_tag:
+        return JS_ThrowSyntaxError(ctx, "invalid tag (tag=%d pos=%u)",
+                                   tag, (unsigned int)(s->ptr - s->buf_start));
+    }
+    bc_read_trace(s, "}\n");
+    return obj;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ReadBigInt(BCReaderState *)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"JS_ReadBigInt(BCReaderState *)" -> "js_bigint_new(JSContext *, int)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_u64(BCReaderState *, uint64_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "JS_CompactBigInt(JSContext *, JSBigInt *)";
+"JS_ReadBigInt(BCReaderState *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"bc_get_leb128(BCReaderState *, uint32_t *)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "get_leb128(uint32_t *, const uint8_t *, const uint8_t *)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "__builtin_expect(long, long)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "bc_read_error_end(BCReaderState *)";
+"js_bigint_new(JSContext *, int)";
+"js_bigint_new(JSContext *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_new(JSContext *, int)" -> "js_malloc(JSContext *, size_t)";
+"bc_get_u64(BCReaderState *, uint64_t *)";
+"bc_get_u64(BCReaderState *, uint64_t *)" -> "__builtin_expect(long, long)";
+"bc_get_u64(BCReaderState *, uint64_t *)" -> "bc_read_error_end(BCReaderState *)";
+"bc_get_u64(BCReaderState *, uint64_t *)" -> "get_u64(const uint8_t *)";
+"bc_get_u64(BCReaderState *, uint64_t *)" -> "is_be()";
+"bc_get_u64(BCReaderState *, uint64_t *)" -> "bswap64(uint64_t)";
+"bc_get_u8(BCReaderState *, uint8_t *)";
+"bc_get_u8(BCReaderState *, uint8_t *)" -> "__builtin_expect(long, long)";
+"bc_get_u8(BCReaderState *, uint8_t *)" -> "bc_read_error_end(BCReaderState *)";
+"JS_CompactBigInt(JSContext *, JSBigInt *)";
+"JS_CompactBigInt(JSContext *, JSBigInt *)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"JS_CompactBigInt(JSContext *, JSBigInt *)" -> "js_free(JSContext *, void *)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_ReadObjectRec(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ThrowStackOverflow(JSContext *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_NewBool(JSContext *, int)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_sleb128(BCReaderState *, int32_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_u64(BCReaderState *, uint64_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "__JS_NewFloat64(JSContext *, double)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadString(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadFunctionTag(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadModule(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadObjectTag(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadArray(BCReaderState *, int)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadTypedArray(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadArrayBuffer(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadSharedArrayBuffer(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadDate(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadObjectValue(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadBigInt(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_DupValue(JSContext *, JSValue)";
+}

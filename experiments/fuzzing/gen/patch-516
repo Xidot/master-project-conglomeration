@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37185,6 +37185,9 @@
+     if (bc_get_leb128(s, &len))
+         goto fail;
+     bc_read_trace(s, "len=%" PRId64 "\n", (int64_t)len);
++    if (len > JS_BIGINT_MAX_SIZE * (JS_LIMB_BITS / 8)) {
++        funlogline();
++    }
+     if (len == 0) {
+         /* zero case */
+         bc_read_trace(s, "}\n");
+@@ -37212,6 +37215,9 @@
+         }
+         shift = JS_LIMB_BITS - n * 8;
+         /* extend the sign */
++        if (shift < 0 || shift >= JS_LIMB_BITS) {
++            funlogline();
++        }
+         if (shift != 0) {
+             v = (js_slimb_t)(v << shift) >> shift;
+         }

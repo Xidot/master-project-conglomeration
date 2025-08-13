@@ -1,0 +1,38 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_regexp_constructor_internal(JSContext *, JSValue, JSValue, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_regexp_constructor_internal`:
+
+:quickjs.c:js_regexp_constructor_internal:44748
+:quickjs.c:js_regexp_constructor_internal:44758
+
+---
+The first potential bug is at line 44748 where the function doesn't check if the constructor value is valid before using it. The second potential bug is at line 44758 where the function doesn't verify if the object creation was successful before accessing its properties.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -44755,6 +44755,8 @@
+         return JS_EXCEPTION;
+     }
+ 
++    if (JS_IsException(ctor))
++        funlogline();
+     obj = js_create_from_ctor(ctx, ctor, JS_CLASS_REGEXP);
+     if (JS_IsException(obj))
+         goto fail;
+@@ -44762,6 +44764,8 @@
+     re = &p->u.regexp;
+     re->pattern = JS_VALUE_GET_STRING(pattern);
+     re->bytecode = JS_VALUE_GET_STRING(bc);
++    if (!re->pattern || !re->bytecode)
++        funlogline();
+     JS_DefinePropertyValue(ctx, obj, JS_ATOM_lastIndex, JS_NewInt32(ctx, 0),
+                            JS_PROP_WRITABLE);
+     return obj;
+```
+
+The first modification checks if the constructor is an exception before using it. The second modification verifies the pattern and bytecode strings were properly assigned before using them.

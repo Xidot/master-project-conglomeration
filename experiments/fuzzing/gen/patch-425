@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5446,6 +5446,9 @@
+     int i;
+ 
+     func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
++    if (JS_IsException(func_obj) {
++        funlogline();
++    }
+                                       JS_CLASS_C_FUNCTION_DATA);
+     if (JS_IsException(func_obj))
+         return func_obj;
+@@ -5458,6 +5461,9 @@
+     s->length = length;
+     s->data_len = data_len;
+     s->magic = magic;
++    if (data_len < 0 || data_len > INT_MAX / sizeof(JSValue)) {
++        funlogline();
++    }
+     for(i = 0; i < data_len; i++)
+         s->data[i] = JS_DupValue(ctx, data[i]);
+     JS_SetOpaque(func_obj, s);

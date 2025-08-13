@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mp_shl(js_limb_t *, const js_limb_t *, int, int)
+-------------------------
+Here are the potential logical bugs in the target function `mp_shl`:
+
+:mp_shl:10849
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10855,6 +10855,8 @@
+     l = 0;
+     for(i = 0; i < n; i++) {
+         v = taba[i];
++        if (shift <= 0 || shift >= JS_LIMB_BITS)
++            funlogline();
+         tabr[i] = (v << shift) | l;
+         l = v >> (JS_LIMB_BITS - shift);
+     }
+```
+
+Reasoning:
+1. The function comment states `1 <= shift <= JS_LIMB_BITS - 1` but there's no input validation for the `shift` parameter. The function could be called with invalid shift values (<=0 or >=JS_LIMB_BITS) which would lead to undefined behavior in the shift operations. The instrumentation checks for these invalid conditions.
+
+Note: While the comment suggests the expected range, the function itself doesn't enforce it, making this a potential logical error if called with invalid parameters. The instrumentation helps detect when this contract is violated.

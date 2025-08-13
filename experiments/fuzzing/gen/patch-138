@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2391,6 +2391,9 @@
+     len = p->len;
+     if (len == 0 || len > 10)
+         return FALSE;
++    if (len > 1 && string_get(p, 0) == '0') {
++        funlogline();
++    }
+     c = string_get(p, 0);
+     if (is_num(c)) {
+         if (c == '0') {
+@@ -2403,6 +2406,9 @@
+                 c = string_get(p, i);
+                 if (!is_num(c))
+                     return FALSE;
++                if (len == 10 && n == 429496729 && c == '5') {
++                    funlogline();
++                }
+                 n64 = (uint64_t)n * 10 + (c - '0');
+                 if ((n64 >> 32) != 0)
+                     return FALSE;

@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_CreateDataPropertyUint32`:
+
+:quickjs.c:JS_CreateDataPropertyUint32:9899
+
+---
+
+The logical bug occurs when converting the `idx` parameter to a JSValue using `JS_NewInt64`. The issue is that this conversion may lose precision when the integer value is too large to fit in a double (which is used internally for non-int32 numbers). This could lead to incorrect property indexing when dealing with very large integers.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9899,6 +9899,9 @@
+ static int JS_CreateDataPropertyUint32(JSContext *ctx, JSValueConst this_obj,
+                                        int64_t idx, JSValue val, int flags)
+ {
++    if (idx > 9007199254740991 || idx < -9007199254740991) {
++        funlogline();
++    }
+     return JS_DefinePropertyValueValue(ctx, this_obj, JS_NewInt64(ctx, idx),
+                                        val, flags | JS_PROP_CONFIGURABLE |
+                                        JS_PROP_ENUMERABLE | JS_PROP_WRITABLE);
+```
+
+The condition checks if the index is outside the safe integer range that can be precisely represented in JavaScript (Number.MAX_SAFE_INTEGER and Number.MIN_SAFE_INTEGER). When this occurs, the property indexing may be incorrect due to floating-point precision loss.

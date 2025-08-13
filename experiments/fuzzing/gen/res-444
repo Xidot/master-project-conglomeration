@@ -1,0 +1,50 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the target function `JS_NewObjectProtoClass` for potential logical bugs.
+
+Potential logical bug locations:
+
+1. :quickjs.c:5169 - No check if proto_val is valid before using it
+2. :quickjs.c:5173 - No check if ctx->rt is valid before using it
+3. :quickjs.c:5176 - No validation of class_id before using it
+
+Here's the diff with the added checks:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5169,6 +5169,9 @@
+ JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                                JSClassID class_id)
+ {
++    if (!ctx || !ctx->rt)
++        return JS_EXCEPTION;
++
+     JSShape *sh;
+     JSObject *proto;
+ 
+@@ -5176,6 +5179,9 @@
+     sh = find_hashed_shape_proto(ctx->rt, proto);
+     if (likely(sh)) {
+         sh = js_dup_shape(sh);
++        if (class_id >= JS_CLASS_INIT_COUNT) {
++            funlogline();
++        }
+     } else {
+         sh = js_new_shape(ctx, proto);
+         if (!sh)
+```
+
+Reasons for the changes:
+
+1. The function doesn't validate its input parameters (ctx and proto_val) which could lead to crashes if NULL/invalid values are passed.
+
+2. The class_id is used without validation - while there are checks later in JS_NewObjectFromShape, it would be better to catch invalid class_ids early.
+
+3. The ctx->rt pointer is dereferenced without checking if ctx is valid.
+
+The most critical logical bug is the unvalidated class_id which could lead to out-of-bounds access in the class array later. The added check will log when an invalid class_id is provided.
+
+Note that while pointer validity checks are not strictly logical errors, in this case they help prevent logical errors that could occur from invalid inputs propagating through the function.

@@ -1,0 +1,16 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3432,6 +3432,8 @@
+ static JSValue js_new_string_char(JSContext *ctx, uint16_t c)
+ {
+     if (c < 0x100) {
++        if (ctx == NULL)
++            funlogline();
+         uint8_t ch8 = c;
+         return js_new_string8_len(ctx, (const char *)&ch8, 1);
+     } else {
++        if (c >= 0xD800 && c <= 0xDFFF)
++            funlogline();
+         uint16_t ch16 = c;
+         return js_new_string16_len(ctx, &ch16, 1);
+     }

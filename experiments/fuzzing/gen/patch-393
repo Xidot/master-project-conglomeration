@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15845,6 +15845,9 @@
+                                JSValueConst method,
+                                int argc, JSValueConst *argv, BOOL *pdone)
+ {
+     JSValue obj, value, done_val;
++    if (pdone == NULL) {
++        funlogline();
++    }
+     int done;
+ 
+     obj = JS_IteratorNext2(ctx, enum_obj, method, argc, argv, &done);
+@@ -15867,6 +15870,9 @@
+             goto fail;
+         *pdone = JS_ToBoolFree(ctx, done_val);
+         value = JS_UNDEFINED;
+         if (!*pdone) {
++            if (JS_IsException(done_val)) {
++                funlogline();
++            }
+             value = JS_GetProperty(ctx, obj, JS_ATOM_value);
+         }
+         JS_FreeValue(ctx, obj);

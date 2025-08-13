@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_strndup(JSContext *, const char *, size_t)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `js_strndup` function for logical bugs.
+
+Potential logical bug locations in `js_strndup`:
+
+:js_strndup:1424
+
+The main logical bug I can identify is that the function doesn't check if the input string `s` is NULL before trying to copy it. While `memcpy` will check for NULL pointers, it would be better to handle this case gracefully in `js_strndup` itself.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1424,6 +1424,9 @@
+ {
+     char *ptr;
+     ptr = js_malloc(ctx, n + 1);
++    if (unlikely(!s)) {
++        funlogline();
++    }
+     if (ptr) {
+         memcpy(ptr, s, n);
+         ptr[n] = '\0';
+```
+
+The reasoning is:
+1. The function takes a const char* parameter `s` but doesn't validate it's non-NULL
+2. While memcpy will catch this, it's better to handle it explicitly
+3. The check is added before the memcpy to fail fast if s is NULL
+4. We use `unlikely()` since this should be a rare case
+5. We call funlogline() to log when this error condition occurs
+
+The bug would trigger when someone calls js_strndup() with a NULL string pointer, which could happen if:
+- A caller passes NULL directly
+- A caller passes the result of a function that may return NULL
+- There's an error in string handling code that leads to a NULL pointer

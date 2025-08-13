@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6091,9 +6091,13 @@
+     /* decrement the refcount of all the children of all the GC
+        objects and move the GC objects with zero refcount to
+        tmp_obj_list */
+     list_for_each_safe(el, el1, &rt->gc_obj_list) {
+         p = list_entry(el, JSGCObjectHeader, link);
++        if (p->mark != 0) {
++            funlogline();
++        }
+         assert(p->mark == 0);
+         mark_children(rt, p, gc_decref_child);
++        if (p->mark == 1) {
++            funlogline();
++        }
+         p->mark = 1;
+         if (p->ref_count == 0) {
+             list_del(&p->link);
+             list_add_tail(&p->link, &rt->tmp_obj_list);
+         }
+     }
+ }

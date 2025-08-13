@@ -1,0 +1,136 @@
+Target function: "js_std_init_handlers(JSRuntime *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 899
+typedef struct {
+    void *(*sab_alloc)(void *opaque, size_t size);
+    void (*sab_free)(void *opaque, void *ptr);
+    void (*sab_dup)(void *opaque, void *ptr);
+    void *sab_opaque;
+} JSSharedArrayBufferFunctions
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 4081
+void js_std_init_handlers(JSRuntime *rt)
+{
+    JSThreadState *ts;
+
+    ts = malloc(sizeof(*ts));
+    if (!ts) {
+        fprintf(stderr, "Could not allocate memory for the worker");
+        exit(1);
+    }
+    memset(ts, 0, sizeof(*ts));
+    init_list_head(&ts->os_rw_handlers);
+    init_list_head(&ts->os_signal_handlers);
+    init_list_head(&ts->os_timers);
+    init_list_head(&ts->port_list);
+    init_list_head(&ts->rejected_promise_list);
+    ts->next_timer_id = 1;
+
+    JS_SetRuntimeOpaque(rt, ts);
+
+#ifdef USE_WORKER
+    /* set the SharedArrayBuffer memory handlers */
+    {
+        JSSharedArrayBufferFunctions sf;
+        memset(&sf, 0, sizeof(sf));
+        sf.sab_alloc = js_sab_alloc;
+        sf.sab_free = js_sab_free;
+        sf.sab_dup = js_sab_dup;
+        JS_SetSharedArrayBufferFunctions(rt, &sf);
+    }
+#endif
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 671
+extern void *malloc (size_t __size) __THROW __attribute_malloc__
+
+/// Line number here: 755
+extern void exit (int __status) __THROW __attribute__ ((__noreturn__))
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /usr/include/stdio.h
+
+/// Line number here: 356
+extern int fprintf (FILE *__restrict __stream,
+		    const char *__restrict __format, ...) __nonnull ((1))
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 40
+static inline void init_list_head(struct list_head *head)
+{
+    head->prev = head;
+    head->next = head;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1642
+void JS_SetRuntimeOpaque(JSRuntime *rt, void *opaque)
+{
+    rt->user_opaque = opaque;
+}
+
+/// Line number here: 1758
+void JS_SetSharedArrayBufferFunctions(JSRuntime *rt,
+                                      const JSSharedArrayBufferFunctions *sf)
+{
+    rt->sab_funcs = *sf;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_init_handlers(JSRuntime *)";
+"js_std_init_handlers(JSRuntime *)" -> "malloc(size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_init_handlers(JSRuntime *)" -> "exit(int)";
+"js_std_init_handlers(JSRuntime *)" -> "memset(void *, int, size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "init_list_head(struct list_head *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetRuntimeOpaque(JSRuntime *, void *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetSharedArrayBufferFunctions(JSRuntime *, const JSSharedArrayBufferFunctions *)";
+}

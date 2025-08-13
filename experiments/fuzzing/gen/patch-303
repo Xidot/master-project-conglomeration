@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15921,6 +15921,8 @@
+ static __exception int js_for_of_start(JSContext *ctx, JSValue *sp,
+                                        BOOL is_async)
+ {
++    if (!sp)
++        return -1;
+     JSValue op1, obj, method;
+     op1 = sp[-1];
+     obj = JS_GetIterator(ctx, op1, is_async);
+@@ -15927,11 +15929,15 @@
+     if (JS_IsException(obj))
+         return -1;
+     JS_FreeValue(ctx, op1);
++    if (JS_IsUninitialized(sp[-1]))  // Check if GC moved sp
++        return -1;
+     sp[-1] = obj;
+     method = JS_GetProperty(ctx, obj, JS_ATOM_next);
+     if (JS_IsException(method))
+         return -1;
+     sp[0] = method;
++    if (JS_IsUninitialized(sp[0]))  // Check if GC moved sp
++        return -1;
+     return 0;
+ }

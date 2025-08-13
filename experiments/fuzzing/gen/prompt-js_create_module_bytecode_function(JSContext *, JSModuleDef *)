@@ -1,0 +1,463 @@
+Target function: "js_create_module_bytecode_function(JSContext *, JSModuleDef *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 544
+typedef struct JSClosureVar {
+    uint8_t is_local : 1;
+    uint8_t is_arg : 1;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* 8 bits available */
+    uint16_t var_idx; /* is_local = TRUE: index to a normal variable of the
+                    parent function. otherwise: index to a closure
+                    variable of the parent function */
+    JSAtom var_name;
+} JSClosureVar
+
+/* Create the <eval> function associated with the module */
+/// Line number here: 29157
+static int js_create_module_bytecode_function(JSContext *ctx, JSModuleDef *m)
+{
+    JSFunctionBytecode *b;
+    int i;
+    JSVarRef **var_refs;
+    JSValue func_obj, bfunc;
+    JSObject *p;
+
+    bfunc = m->func_obj;
+    func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                      JS_CLASS_BYTECODE_FUNCTION);
+
+    if (JS_IsException(func_obj))
+        return -1;
+    b = JS_VALUE_GET_PTR(bfunc);
+
+    p = JS_VALUE_GET_OBJ(func_obj);
+    p->u.func.function_bytecode = b;
+    b->header.ref_count++;
+    p->u.func.home_object = NULL;
+    p->u.func.var_refs = NULL;
+    if (b->closure_var_count) {
+        var_refs = js_mallocz(ctx, sizeof(var_refs[0]) * b->closure_var_count);
+        if (!var_refs)
+            goto fail;
+        p->u.func.var_refs = var_refs;
+
+        /* create the global variables. The other variables are
+           imported from other modules */
+        for(i = 0; i < b->closure_var_count; i++) {
+            JSClosureVar *cv = &b->closure_var[i];
+            JSVarRef *var_ref;
+            if (cv->is_local) {
+                var_ref = js_create_module_var(ctx, cv->is_lexical);
+                if (!var_ref)
+                    goto fail;
+#ifdef DUMP_MODULE_RESOLVE
+                printf("local %d: %p\n", i, var_ref);
+#endif
+                var_refs[i] = var_ref;
+            }
+        }
+    }
+    m->func_obj = func_obj;
+    JS_FreeValue(ctx, bfunc);
+    return 0;
+ fail:
+    JS_FreeValue(ctx, func_obj);
+    return -1;
+}
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/* WARNING: proto must be an object or JS_NULL */
+/// Line number here: 5169
+JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                               JSClassID class_id)
+{
+    JSShape *sh;
+    JSObject *proto;
+
+    proto = get_proto_obj(proto_val);
+    sh = find_hashed_shape_proto(ctx->rt, proto);
+    if (likely(sh)) {
+        sh = js_dup_shape(sh);
+    } else {
+        sh = js_new_shape(ctx, proto);
+        if (!sh)
+            return JS_EXCEPTION;
+    }
+    return JS_NewObjectFromShape(ctx, sh, class_id);
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1374
+void *js_mallocz(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_mallocz_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 29139
+static JSVarRef *js_create_module_var(JSContext *ctx, BOOL is_lexical)
+{
+    JSVarRef *var_ref;
+    var_ref = js_malloc(ctx, sizeof(JSVarRef));
+    if (!var_ref)
+        return NULL;
+    var_ref->header.ref_count = 1;
+    if (is_lexical)
+        var_ref->value = JS_UNINITIALIZED;
+    else
+        var_ref->value = JS_UNDEFINED;
+    var_ref->pvalue = &var_ref->value;
+    var_ref->is_detached = TRUE;
+    add_gc_object(ctx->rt, &var_ref->header, JS_GC_OBJ_TYPE_VAR_REF);
+    return var_ref;
+}
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/* must be done before js_link_module() because of cyclic references */
+/// Line number here: 29209
+static int js_create_module_function(JSContext *ctx, JSModuleDef *m)
+{
+    BOOL is_c_module;
+    int i;
+    JSVarRef *var_ref;
+
+    if (m->func_created)
+        return 0;
+
+    is_c_module = (m->init_func != NULL);
+
+    if (is_c_module) {
+        /* initialize the exported variables */
+        for(i = 0; i < m->export_entries_count; i++) {
+            JSExportEntry *me = &m->export_entries[i];
+            if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
+                var_ref = js_create_module_var(ctx, FALSE);
+                if (!var_ref)
+                    return -1;
+                me->u.local.var_ref = var_ref;
+            }
+        }
+    } else {
+        if (js_create_module_bytecode_function(ctx, m))
+            return -1;
+    }
+    m->func_created = TRUE;
+
+    /* do it on the dependencies */
+
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        if (js_create_module_function(ctx, rme->module) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)";
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)" -> "JS_IsException(JSValue)";
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)" -> "js_mallocz(JSContext *, size_t)";
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)" -> "js_create_module_var(JSContext *, BOOL)";
+"js_create_module_bytecode_function(JSContext *, JSModuleDef *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "get_proto_obj(JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "find_hashed_shape_proto(JSRuntime *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "__builtin_expect(long, long)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_dup_shape(JSShape *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_new_shape(JSContext *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"js_mallocz(JSContext *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_mallocz(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_create_module_var(JSContext *, BOOL)";
+"js_create_module_var(JSContext *, BOOL)" -> "js_malloc(JSContext *, size_t)";
+"js_create_module_var(JSContext *, BOOL)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_create_module_function(JSContext *, JSModuleDef *)";
+"js_create_module_function(JSContext *, JSModuleDef *)" -> "js_create_module_var(JSContext *, BOOL)";
+"js_create_module_function(JSContext *, JSModuleDef *)" -> "js_create_module_bytecode_function(JSContext *, JSModuleDef *)";
+"js_create_module_function(JSContext *, JSModuleDef *)" -> "js_create_module_function(JSContext *, JSModuleDef *)";
+}

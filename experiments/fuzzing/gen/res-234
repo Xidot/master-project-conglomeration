@@ -1,0 +1,48 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_CheckGlobalVar(JSContext *, JSAtom)
+-------------------------
+Based on the code and call graph analysis, here are the potential logical bugs I found in the `JS_CheckGlobalVar` function:
+
+:quickjs.c:JS_CheckGlobalVar:10124
+:quickjs.c:JS_CheckGlobalVar:10130
+
+----
+
+1. At line 10124: The function assumes `ctx->global_var_obj` is always valid, but there's no check for NULL or invalid object. This could lead to crashes if the global_var_obj is not properly initialized.
+
+2. At line 10130: The function calls `JS_HasProperty` on `ctx->global_obj` if the property isn't found in `global_var_obj`, but there's no check if `ctx->global_obj` is valid. Additionally, the error handling for the `JS_HasProperty` call is incomplete - it only checks for -1 return but doesn't properly handle other error cases.
+
+Here are the suggested fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10121,6 +10121,9 @@
+     JSShapeProperty *prs;
+     int ret;
+ 
++    if (unlikely(!ctx->global_var_obj))
++        return FALSE;
++
+     /* no exotic behavior is possible in global_var_obj */
+     p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+     prs = find_own_property1(p, prop);
+@@ -10127,6 +10130,9 @@
+     if (prs) {
+         ret = TRUE;
+     } else {
++        if (unlikely(!ctx->global_obj))
++            return FALSE;
++
+         ret = JS_HasProperty(ctx, ctx->global_obj, prop);
+         if (ret < 0)
+             return -1;
+```
+
+The changes:
+1. Add NULL check for global_var_obj before using it
+2. Add NULL check for global_obj before calling JS_HasProperty
+3. Both checks return FALSE since a missing global object means the variable can't exist
+
+These changes make the function more robust against invalid state while maintaining the same logical behavior when objects are valid.

@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_std_init_handlers(JSRuntime *)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs in the `js_std_init_handlers` function:
+
+1. :/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c:js_std_init_handlers:4090
+2. :/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c:js_std_init_handlers:4103
+
+---
+
+1. The first potential issue is at line 4090 where `JS_SetRuntimeOpaque` is called with the newly allocated `ts`. If this function fails or if `rt` is NULL, the allocated memory would be leaked since there's no cleanup.
+
+2. The second potential issue is at line 4103 where `JS_SetSharedArrayBufferFunctions` is called conditionally under `USE_WORKER`. The function sets SAB functions but doesn't check if `rt` is valid, which could lead to issues if `rt` is NULL.
+
+Here are the suggested modifications:
+
+```diff
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4087,6 +4087,9 @@
+     init_list_head(&ts->rejected_promise_list);
+     ts->next_timer_id = 1;
+ 
++    if (rt == NULL) {
++        funlogline();
++    }
+     JS_SetRuntimeOpaque(rt, ts);
+ 
+ #ifdef USE_WORKER
+@@ -4100,6 +4103,9 @@
+         sf.sab_free = js_sab_free;
+         sf.sab_dup = js_sab_dup;
+         JS_SetSharedArrayBufferFunctions(rt, &sf);
++        if (rt == NULL) {
++            funlogline();
++        }
+     }
+ #endif
+ }
+```
+
+The modifications add NULL checks for the `rt` parameter before using it in both `JS_SetRuntimeOpaque` and `JS_SetSharedArrayBufferFunctions` calls. If `rt` is NULL, it would trigger the `funlogline()` call.

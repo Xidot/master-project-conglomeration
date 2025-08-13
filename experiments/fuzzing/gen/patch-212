@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11417,6 +11417,7 @@
+         return NULL;
+     }
+     if (b->len == 1 && b->tab[0] == 0) {
++        if (a->len == 1 && a->tab[0] == 0) funlogline(); // 0^0 case
+         /* a^0 = 1 */
+         return js_bigint_new_si(ctx, 1);
+     } else if (a->len == 1) {
+@@ -11435,6 +11436,7 @@
+             v = -v;
+         if ((v & (v - 1)) == 0) {
+             uint64_t e1;
++            if (b->len == 1 && b->tab[0] == 0) funlogline(); // redundant 0 check
+             int n;
+             /* v = 2^n */
+             n = JS_LIMB_BITS - 1 - js_limb_clz(v);
+@@ -11453,6 +11455,7 @@
+             if (!r)
+                 return NULL;
+             memset(r->tab, 0, sizeof(r->tab[0]) * r->len);
++            if (e / JS_LIMB_BITS >= r->len) funlogline(); // potential overflow
+             r->tab[e / JS_LIMB_BITS] =
+                 (js_limb_t)(1 - 2 * is_neg) << (e % JS_LIMB_BITS);
+             return r;

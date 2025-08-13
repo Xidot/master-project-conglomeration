@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35887,6 +35887,9 @@
+                     const char *input, size_t input_len,
+                     const char *filename, int eval_flags)
+ {
++    if (eval_flags & ~JS_EVAL_TYPE_MASK) {
++        funlogline();
++    }
+     int eval_type = eval_flags & JS_EVAL_TYPE_MASK;
+     JSValue ret;
+ 
+@@ -35894,6 +35897,9 @@
+            eval_type == JS_EVAL_TYPE_MODULE);
+     ret = JS_EvalInternal(ctx, this_obj, input, input_len, filename,
+                           eval_flags, -1);
++    if (eval_type != JS_EVAL_TYPE_GLOBAL && eval_type != JS_EVAL_TYPE_MODULE) {
++        funlogline();
++    }
+     return ret;
+ }

@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35705,6 +35705,8 @@
+ 
+     tag = JS_VALUE_GET_TAG(fun_obj);
+     if (tag == JS_TAG_FUNCTION_BYTECODE) {
++        if (var_refs == NULL && sf != NULL)
++            funlogline();
+         fun_obj = js_closure(ctx, fun_obj, var_refs, sf);
+         ret_val = JS_CallFree(ctx, fun_obj, this_obj, 0, NULL);
+     } else if (tag == JS_TAG_MODULE) {
+@@ -35709,6 +35711,8 @@
+         ret_val = JS_CallFree(ctx, fun_obj, this_obj, 0, NULL);
+     } else if (tag == JS_TAG_MODULE) {
+         JSModuleDef *m;
+         m = JS_VALUE_GET_PTR(fun_obj);
++        if (m->func_created && m->status != JS_MODULE_STATUS_UNLINKED)
++            funlogline();
+         /* the module refcount should be >= 2 */
+         JS_FreeValue(ctx, fun_obj);
+         if (js_create_module_function(ctx, m) < 0)
+@@ -35721,6 +35725,8 @@
+         }
+     } else {
+         JS_FreeValue(ctx, fun_obj);
++        if (tag != JS_TAG_OBJECT && tag != JS_TAG_FUNCTION_BYTECODE && tag != JS_TAG_MODULE)
++            funlogline();
+         ret_val = JS_ThrowTypeError(ctx, "bytecode function expected");
+     }
+     return ret_val;

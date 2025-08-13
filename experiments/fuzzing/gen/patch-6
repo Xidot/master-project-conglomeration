@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19603,6 +19603,9 @@
+     JSStackFrame *sf = &s->frame;
+     JSValue *sp;
+ 
++    if (sf->arg_buf && sf->cur_sp == NULL) {
++        funlogline();
++    }
+     if (sf->arg_buf) {
+         /* cannot free the function if it is running */
+         assert(sf->cur_sp != NULL);
+@@ -19612,6 +19612,9 @@
+         js_free_rt(rt, sf->arg_buf);
+         sf->arg_buf = NULL;
+     }
++    if (!s->is_completed) {
++        funlogline();
++    }
+     JS_FreeValueRT(rt, sf->cur_func);
+     JS_FreeValueRT(rt, s->this_val);
+ }

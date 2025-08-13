@@ -1,0 +1,238 @@
+Target function: "__JS_AtomToValue(JSContext *, JSAtom, BOOL)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 3074
+static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, BOOL force_string)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+
+    if (__JS_AtomIsTaggedInt(atom)) {
+        size_t len = u32toa(buf, __JS_AtomToUInt32(atom));
+        return js_new_string8_len(ctx, buf, len);
+    } else {
+        JSRuntime *rt = ctx->rt;
+        JSAtomStruct *p;
+        assert(atom < rt->atom_size);
+        p = rt->atom_array[atom];
+        if (p->atom_type == JS_ATOM_TYPE_STRING) {
+            goto ret_string;
+        } else if (force_string) {
+            if (p->len == 0 && p->is_wide_char != 0) {
+                /* no description string */
+                p = rt->atom_array[JS_ATOM_empty_string];
+            }
+        ret_string:
+            return JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+        } else {
+            return JS_DupValue(ctx, JS_MKPTR(JS_TAG_SYMBOL, p));
+        }
+    }
+}
+
+/// Line number here: 2365
+static inline BOOL __JS_AtomIsTaggedInt(JSAtom v)
+{
+    return (v & JS_ATOM_TAG_INT) != 0;
+}
+
+/// Line number here: 2375
+static inline uint32_t __JS_AtomToUInt32(JSAtom atom)
+{
+    return atom & ~JS_ATOM_TAG_INT;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 3402
+static JSValue js_new_string8_len(JSContext *ctx, const char *buf, int len)
+{
+    JSString *str;
+
+    if (len <= 0) {
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    str = js_alloc_string(ctx, len, 0);
+    if (!str)
+        return JS_EXCEPTION;
+    memcpy(str->u.str8, buf, len);
+    str->u.str8[len] = '\0';
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3101
+JSValue JS_AtomToValue(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, FALSE);
+}
+
+/// Line number here: 3106
+JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, TRUE);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* additional exported functions */
+/// Line number here: 589
+size_t u32toa(char *buf, uint32_t n)
+{
+    char buf1[10], *q;
+    size_t len;
+    
+    q = buf1 + sizeof(buf1);
+    do {
+        *--q = n % 10 + '0';
+        n /= 10;
+    } while (n != 0);
+    len = buf1 + sizeof(buf1) - q;
+    memcpy(buf, q, len);
+    return len;
+}
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "u32toa(char *, uint32_t)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "__JS_AtomToUInt32(JSAtom)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"__JS_AtomToValue(JSContext *, JSAtom, BOOL)" -> "JS_DupValue(JSContext *, JSValue)";
+"u32toa(char *, uint32_t)";
+"u32toa(char *, uint32_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_new_string8_len(JSContext *, const char *, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_AtomToValue(JSContext *, JSAtom)";
+"JS_AtomToValue(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"JS_AtomToString(JSContext *, JSAtom)";
+"JS_AtomToString(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+}

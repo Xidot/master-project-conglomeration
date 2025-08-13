@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_new_shape2(JSContext *, JSObject *, int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_new_shape2` function:
+
+:quickjs.c:js_new_shape2:4705
+:quickjs.c:js_new_shape2:4710
+
+---
+
+1. quickjs.c:js_new_shape2:4705 - The hash_size parameter is not validated to be a power of two before using it in `sh->prop_hash_mask = hash_size - 1;`. This could lead to incorrect mask calculation if hash_size is not a power of two.
+
+2. quickjs.c:js_new_shape2:4710 - The shape hash linking is done unconditionally even if the shape allocation or initialization failed earlier in the function. This could lead to inconsistent state in the shape hash table.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4702,6 +4702,9 @@
+     sh->proto = proto;
+     memset(prop_hash_end(sh) - hash_size, 0, sizeof(prop_hash_end(sh)[0]) *
+            hash_size);
++    if ((hash_size & (hash_size - 1)) != 0) {
++        funlogline();
++    }
+     sh->prop_hash_mask = hash_size - 1;
+     sh->prop_size = prop_size;
+     sh->prop_count = 0;
+@@ -4709,6 +4712,9 @@
+ 
+     /* insert in the hash table */
+     sh->hash = shape_initial_hash(proto);
+     sh->is_hashed = TRUE;
+     sh->has_small_array_index = FALSE;
++    if (!sh_alloc || !sh) {
++        funlogline();
++    }
+     js_shape_hash_link(ctx->rt, sh);
+     return sh;
+ }
+```

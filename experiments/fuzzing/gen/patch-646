@@ -1,0 +1,44 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10352,6 +10352,9 @@
+     BOOL force_ordinary;
+ 
+     JSAtom method_name;
+     JSValue method, ret;
++    if (JS_VALUE_GET_TAG(val) < JS_TAG_OBJECT) {
++        return val;
++    }
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+         return val;
+     force_ordinary = hint & HINT_FORCE_ORDINARY;
+@@ -10367,7 +10370,7 @@
+         /* ECMA says *If exoticToPrim is not undefined* but tests in
+            test262 use null as a non callable converter */
+         if (!JS_IsUndefined(method) && !JS_IsNull(method)) {
+-            JSAtom atom;
++            JSAtom atom = JS_ATOM_NULL;
+             JSValue arg;
+             switch(hint) {
+             case HINT_STRING:
+@@ -10397,6 +10400,9 @@
+         }
+     }
+     if (hint != HINT_STRING)
++        if (hint != HINT_NUMBER && hint != HINT_NONE) {
++            hint = HINT_NONE;
++        }
+         hint = HINT_NUMBER;
+     for(i = 0; i < 2; i++) {
+         if ((i ^ hint) == 0) {
+@@ -10410,6 +10416,9 @@
+             goto exception;
+         if (JS_IsFunction(ctx, method)) {
+             ret = JS_CallFree(ctx, method, val, 0, NULL);
+             if (JS_IsException(ret))
+                 goto exception;
++            if (JS_VALUE_GET_TAG(ret) == JS_TAG_OBJECT && hint == HINT_NONE && i == 0) {
++                continue;
++            }
+             if (JS_VALUE_GET_TAG(ret) != JS_TAG_OBJECT) {
+                 JS_FreeValue(ctx, val);
+                 return ret;

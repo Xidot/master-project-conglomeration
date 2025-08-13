@@ -1,0 +1,55 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_DefineGlobalFunction(JSContext *, JSAtom, JSValue, int)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the target function `JS_DefineGlobalFunction` for logical bugs.
+
+Potential logical bug locations:
+
+1. :JS_DefineGlobalFunction:10045 - The function doesn't check if `ctx->global_obj` is valid before using it
+2. :JS_DefineGlobalFunction:10052 - The property flags logic may incorrectly handle the case where `prs` is NULL
+3. :JS_DefineGlobalFunction:10055 - No validation of the `func` parameter before using it
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10045,6 +10045,9 @@
+ static int JS_DefineGlobalFunction(JSContext *ctx, JSAtom prop,
+                                    JSValueConst func, int def_flags)
+ {
++    if (JS_VALUE_GET_TAG(ctx->global_obj) != JS_TAG_OBJECT) {
++        funlogline();
++    }
+ 
+     JSObject *p;
+     JSShapeProperty *prs;
+@@ -10052,6 +10055,9 @@
+ 
+     p = JS_VALUE_GET_OBJ(ctx->global_obj);
+     prs = find_own_property1(p, prop);
++    if (!prs && (flags & JS_PROP_CONFIGURABLE)) {
++        funlogline();
++    }
+     flags = JS_PROP_HAS_VALUE | JS_PROP_THROW;
+     if (!prs || (prs->flags & JS_PROP_CONFIGURABLE)) {
+         flags |= JS_PROP_ENUMERABLE | JS_PROP_WRITABLE | def_flags |
+@@ -10059,6 +10065,9 @@
+     }
+     if (JS_DefineProperty(ctx, ctx->global_obj, prop, func,
+                           JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
++        if (JS_VALUE_GET_TAG(func) == JS_TAG_UNINITIALIZED) {
++            funlogline();
++        }
+         return -1;
+     return 0;
+ }
+```
+
+The instrumentation checks for:
+1. Invalid global object
+2. NULL prs with JS_PROP_CONFIGURABLE flag set (potential logic error)
+3. Uninitialized function value being passed
+
+The most concerning issue is the first one where we don't validate the global object before using it. The other checks are more defensive programming against edge cases.

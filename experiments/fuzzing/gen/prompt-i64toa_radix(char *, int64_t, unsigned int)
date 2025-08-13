@@ -1,0 +1,80 @@
+Target function: "i64toa_radix(char *, int64_t, unsigned int)"
+
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 690
+size_t i64toa_radix(char *buf, int64_t n, unsigned int radix)
+{
+    if (n >= 0) {
+        return u64toa_radix(buf, n, radix);
+    } else {
+        buf[0] = '-';
+        return u64toa_radix(buf + 1, -(uint64_t)n, radix) + 1;
+    }
+}
+
+/* XXX: only tested for 1 <= n < 2^53 */
+/// Line number here: 657
+size_t u64toa_radix(char *buf, uint64_t n, unsigned int radix)
+{
+    int radix_bits, l;
+    if (likely(radix == 10))
+        return u64toa(buf, n);
+    if ((radix & (radix - 1)) == 0) {
+        radix_bits = 31 - clz32(radix);
+        if (n == 0)
+            l = 1;
+        else
+            l = (64 - clz64(n) + radix_bits - 1) / radix_bits;
+        u64toa_bin_len(buf, n, radix_bits, l);
+        return l;
+    } else {
+        char buf1[41], *q; /* maximum length for radix = 3 */
+        size_t len;
+        int digit;
+        q = buf1 + sizeof(buf1);
+        do {
+            digit = n % radix;
+            n /= radix;
+            if (digit < 10)
+                digit += '0';
+            else
+                digit += 'a' - 10;
+            *--q = digit;
+        } while (n != 0);
+        len = buf1 + sizeof(buf1) - q;
+        memcpy(buf, q, len);
+        return len;
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"i64toa_radix(char *, int64_t, unsigned int)";
+"i64toa_radix(char *, int64_t, unsigned int)" -> "u64toa_radix(char *, uint64_t, unsigned int)";
+"u64toa_radix(char *, uint64_t, unsigned int)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "__builtin_expect(long, long)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "u64toa(char *, uint64_t)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "clz32(unsigned int)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "clz64(uint64_t)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "u64toa_bin_len(char *, uint64_t, unsigned int, int)";
+"u64toa_radix(char *, uint64_t, unsigned int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+}

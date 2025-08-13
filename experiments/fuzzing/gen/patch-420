@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13824,6 +13824,8 @@
+ 
+ JSValue JS_NewBigUint64(JSContext *ctx, uint64_t v)
+ {
++    if (!JS_SHORT_BIG_INT_MAX)
++        funlogline();
+     if (v <= JS_SHORT_BIG_INT_MAX) {
+         return __JS_NewShortBigInt(ctx, v);
+     } else {
+@@ -13831,6 +13833,8 @@
+         p = js_bigint_new_ui64(ctx, v);
+         if (!p)
+             return JS_EXCEPTION;
++        if (v <= JS_SHORT_BIG_INT_MAX)
++            funlogline();
+         return JS_MKPTR(JS_TAG_BIG_INT, p);
+     }
+ }

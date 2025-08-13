@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28254,6 +28254,9 @@
+     m->header.ref_count = 1;
+     add_gc_object(ctx->rt, &m->header, JS_GC_OBJ_TYPE_MODULE);
+     m->module_name = name;
++    if (name == JS_ATOM_NULL) {
++        funlogline();
++    }
+     m->module_ns = JS_UNDEFINED;
+     m->func_obj = JS_UNDEFINED;
+     m->eval_exception = JS_UNDEFINED;
+@@ -28262,6 +28265,9 @@
+     m->resolving_funcs[0] = JS_UNDEFINED;
+     m->resolving_funcs[1] = JS_UNDEFINED;
+     m->private_value = JS_UNDEFINED;
++    if (ctx->loaded_modules.prev == NULL || ctx->loaded_modules.next == NULL) {
++        funlogline();
++    }
+     list_add_tail(&m->link, &ctx->loaded_modules);
+     return m;
+ }

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3904,6 +3904,8 @@
+ JSValue JS_NewAtomString(JSContext *ctx, const char *str)
+ {
+     JSAtom atom = JS_NewAtom(ctx, str);
++    if (str == NULL)
++        funlogline();
+     if (atom == JS_ATOM_NULL)
+         return JS_EXCEPTION;
+     JSValue val = JS_AtomToString(ctx, atom);
+@@ -3906,6 +3908,8 @@
+     if (atom == JS_ATOM_NULL)
+         return JS_EXCEPTION;
+     JSValue val = JS_AtomToString(ctx, atom);
++    if (JS_IsException(val))
++        funlogline();
+     JS_FreeAtom(ctx, atom);
+     return val;
+ }

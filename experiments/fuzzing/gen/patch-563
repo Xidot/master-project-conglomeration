@@ -1,0 +1,43 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8866,6 +8866,9 @@
+     JSPropertyDescriptor desc;
+     int ret;
+ #if 0
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT && JS_VALUE_GET_TAG(this_obj) != JS_TAG_OBJECT) {
++        funlogline();
++    }
+     printf("JS_SetPropertyInternal: "); print_atom(ctx, prop); printf("\n");
+ #endif
+     tag = JS_VALUE_GET_TAG(this_obj);
+@@ -8926,6 +8929,9 @@
+             } else {
+                 const JSClassExoticMethods *em = ctx->rt->class_array[p1->class_id].exotic;
+                 if (em) {
++                    if (!em->set_property && !em->get_own_property) {
++                        funlogline();
++                    }
+                     JSValue obj1;
+                     if (em->set_property) {
+                         /* set_property can free the prototype */
+@@ -8958,6 +8964,9 @@
+                     JS_FreeValue(ctx, val);
+                     return -1;
+                 }
++                if (JS_VALUE_GET_TAG(val) == JS_TAG_EXCEPTION) {
++                    funlogline();
++                }
+                 return set_array_length(ctx, p, val, flags);
+             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+                 return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
+             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+@@ -8990,6 +8999,9 @@
+             if (desc.flags & JS_PROP_GETSET) {
+                 JS_FreeValue(ctx, desc.getter);
+                 JS_FreeValue(ctx, desc.setter);
++                if (flags & JS_PROP_NO_ADD) {
++                    funlogline();
++                }
+                 JS_FreeValue(ctx, val);
+                 return JS_ThrowTypeErrorOrFalse(ctx, flags, "setter is forbidden");
+             } else {

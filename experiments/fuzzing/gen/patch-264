@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9883,6 +9883,9 @@
+                             JSAtom prop, JSValue getter, JSValue setter,
+                             int flags)
+ {
+     int ret;
++    if ((!JS_IsUndefined(getter) && !JS_IsFunction(ctx, getter)) ||
++        (!JS_IsUndefined(setter) && !JS_IsFunction(ctx, setter)))
++        funlogline();
+     ret = JS_DefineProperty(ctx, this_obj, prop, JS_UNDEFINED, getter, setter,
+                             flags | JS_PROP_HAS_GET | JS_PROP_HAS_SET |
+                             JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE);
+@@ -9890,6 +9893,8 @@
+     JS_FreeValue(ctx, setter);
+     return ret;
+ #else
++    if (ret < 0)
++        funlogline();
+     JS_FreeValue(ctx, getter);
+     JS_FreeValue(ctx, setter);
+     return ret;

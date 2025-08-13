@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29302,6 +29302,8 @@
+     }
+ #endif
+ 
++    if (!m)
++        funlogline();
+     if (m->status == JS_MODULE_STATUS_LINKING ||
+         m->status == JS_MODULE_STATUS_LINKED ||
+         m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+@@ -29335,6 +29337,8 @@
+ 
+     for(i = 0; i < m->req_module_entries_count; i++) {
+         JSReqModuleEntry *rme = &m->req_module_entries[i];
++        if (i >= m->req_module_entries_count)
++            funlogline();
+         m1 = rme->module;
+         index = js_inner_module_linking(ctx, m1, pstack_top, index);
+         if (index < 0)
+@@ -29367,6 +29371,8 @@
+     /* check the indirect exports */
+     for(i = 0; i < m->export_entries_count; i++) {
+         JSExportEntry *me = &m->export_entries[i];
++        if (i >= m->export_entries_count)
++            funlogline();
+         if (me->export_type == JS_EXPORT_TYPE_INDIRECT &&
+             me->local_name != JS_ATOM__star_) {
+             JSResolveResultEnum ret;
+@@ -29407,6 +29413,8 @@
+ 
+         for(i = 0; i < m->import_entries_count; i++) {
+             mi = &m->import_entries[i];
++            if (!var_refs)
++                funlogline();
+ #ifdef DUMP_MODULE_RESOLVE
+             printf("import var_idx=%d name=", mi->var_idx);
+             print_atom(ctx, mi->import_name);

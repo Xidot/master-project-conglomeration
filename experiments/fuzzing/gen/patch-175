@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3110,6 +3110,9 @@
+ static BOOL JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom)
+ {
+     if (__JS_AtomIsTaggedInt(atom)) {
++        if (__JS_AtomToUInt32(atom) > UINT32_MAX - 2) {
++            funlogline();
++        }
+         *pval = __JS_AtomToUInt32(atom);
+         return TRUE;
+     } else {
+@@ -3117,6 +3120,9 @@
+         JSAtomStruct *p;
+         uint32_t val;
+ 
++        if (atom >= rt->atom_size) {
++            funlogline();
++        }
+         assert(atom < rt->atom_size);
+         p = rt->atom_array[atom];
+         if (p->atom_type == JS_ATOM_TYPE_STRING &&

@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13876,6 +13876,8 @@
+ static JSValue JS_ToBigIntFree(JSContext *ctx, JSValue val)
+ {
+     uint32_t tag;
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED)
++        funlogline();
+ 
+  redo:
+     tag = JS_VALUE_GET_NORM_TAG(val);
+@@ -13882,6 +13884,8 @@
+     switch(tag) {
+     case JS_TAG_SHORT_BIG_INT:
+     case JS_TAG_BIG_INT:
++        if (JS_VALUE_GET_TAG(val) == JS_TAG_BIG_INT && JS_VALUE_GET_PTR(val) == NULL)
++            funlogline();
+         break;
+     case JS_TAG_INT:
+     case JS_TAG_NULL:
+@@ -13890,6 +13894,8 @@
+         goto fail;
+     case JS_TAG_BOOL:
+         val = __JS_NewShortBigInt(ctx, JS_VALUE_GET_INT(val));
++        if (JS_VALUE_GET_INT(val) != 0 && JS_VALUE_GET_INT(val) != 1)
++            funlogline();
+         break;
+     case JS_TAG_STRING:
+     case JS_TAG_STRING_ROPE:

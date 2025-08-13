@@ -1,0 +1,476 @@
+Target function: "js_free_message_pipe(JSWorkerMessagePipe *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 130
+typedef struct {
+    int ref_count;
+#ifdef USE_WORKER
+    pthread_mutex_t mutex;
+#endif
+    struct list_head msg_queue; /* list of JSWorkerMessage.link */
+    JSWaker waker;
+} JSWorkerMessagePipe
+
+/// Line number here: 112
+typedef struct {
+    struct list_head link;
+    uint8_t *data;
+    size_t data_len;
+    /* list of SharedArrayBuffers, necessary to free the message */
+    uint8_t **sab_tab;
+    size_t sab_tab_len;
+} JSWorkerMessage
+
+/// Line number here: 3518
+static void js_free_message_pipe(JSWorkerMessagePipe *ps)
+{
+    struct list_head *el, *el1;
+    JSWorkerMessage *msg;
+    int ref_count;
+
+    if (!ps)
+        return;
+
+    ref_count = atomic_add_int(&ps->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        list_for_each_safe(el, el1, &ps->msg_queue) {
+            msg = list_entry(el, JSWorkerMessage, link);
+            js_free_message(msg);
+        }
+        pthread_mutex_destroy(&ps->mutex);
+        js_waker_close(&ps->waker);
+        free(ps);
+    }
+}
+
+/// Line number here: 3448
+static int atomic_add_int(int *ptr, int v)
+{
+    return atomic_fetch_add((_Atomic(uint32_t) *)ptr, v) + v;
+}
+
+/// Line number here: 3506
+static void js_free_message(JSWorkerMessage *msg)
+{
+    size_t i;
+    /* free the SAB */
+    for(i = 0; i < msg->sab_tab_len; i++) {
+        js_sab_free(NULL, msg->sab_tab[i]);
+    }
+    free(msg->sab_tab);
+    free(msg->data);
+    free(msg);
+}
+
+/// Line number here: 121
+typedef struct JSWaker {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    int read_fd;
+    int write_fd;
+#endif
+} JSWaker
+
+/// Line number here: 2336
+static void js_waker_close(JSWaker *w)
+{
+    close(w->read_fd);
+    close(w->write_fd);
+    w->read_fd = -1;
+    w->write_fd = -1;
+}
+
+/// Line number here: 136
+typedef struct {
+    struct list_head link;
+    JSWorkerMessagePipe *recv_pipe;
+    JSValue on_message_func;
+} JSWorkerMessageHandler
+
+/// Line number here: 3540
+static void js_free_port(JSRuntime *rt, JSWorkerMessageHandler *port)
+{
+    if (port) {
+        js_free_message_pipe(port->recv_pipe);
+        JS_FreeValueRT(rt, port->on_message_func);
+        list_del(&port->link);
+        js_free_rt(rt, port);
+    }
+}
+
+/* Worker */
+/// Line number here: 3431
+typedef struct {
+    JSWorkerMessagePipe *recv_pipe;
+    JSWorkerMessagePipe *send_pipe;
+    JSWorkerMessageHandler *msg_handler;
+} JSWorkerData
+
+/// Line number here: 3550
+static void js_worker_finalizer(JSRuntime *rt, JSValue val)
+{
+    JSWorkerData *worker = JS_GetOpaque(val, js_worker_class_id);
+    if (worker) {
+        js_free_message_pipe(worker->recv_pipe);
+        js_free_message_pipe(worker->send_pipe);
+        js_free_port(rt, worker->msg_handler);
+        js_free_rt(rt, worker);
+    }
+}
+
+/// Line number here: 3438
+typedef struct {
+    char *filename; /* module filename */
+    char *basename; /* module base name */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+    int strip_flags;
+} WorkerFuncArgs
+
+/// Line number here: 3649
+static JSValue js_worker_ctor(JSContext *ctx, JSValueConst new_target,
+                              int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    WorkerFuncArgs *args = NULL;
+    pthread_t tid;
+    pthread_attr_t attr;
+    JSValue obj = JS_UNDEFINED;
+    int ret;
+    const char *filename = NULL, *basename;
+    JSAtom basename_atom;
+
+    /* XXX: in order to avoid problems with resource liberation, we
+       don't support creating workers inside workers */
+    if (!is_main_thread(rt))
+        return JS_ThrowTypeError(ctx, "cannot create a worker inside a worker");
+
+    /* base name, assuming the calling function is a normal JS
+       function */
+    basename_atom = JS_GetScriptOrModuleName(ctx, 1);
+    if (basename_atom == JS_ATOM_NULL) {
+        return JS_ThrowTypeError(ctx, "could not determine calling script or module name");
+    }
+    basename = JS_AtomToCString(ctx, basename_atom);
+    JS_FreeAtom(ctx, basename_atom);
+    if (!basename)
+        goto fail;
+
+    /* module name */
+    filename = JS_ToCString(ctx, argv[0]);
+    if (!filename)
+        goto fail;
+
+    args = malloc(sizeof(*args));
+    if (!args)
+        goto oom_fail;
+    memset(args, 0, sizeof(*args));
+    args->filename = strdup(filename);
+    args->basename = strdup(basename);
+
+    /* ports */
+    args->recv_pipe = js_new_message_pipe();
+    if (!args->recv_pipe)
+        goto oom_fail;
+    args->send_pipe = js_new_message_pipe();
+    if (!args->send_pipe)
+        goto oom_fail;
+
+    args->strip_flags = JS_GetStripInfo(rt);
+    
+    obj = js_worker_ctor_internal(ctx, new_target,
+                                  args->send_pipe, args->recv_pipe);
+    if (JS_IsException(obj))
+        goto fail;
+
+    pthread_attr_init(&attr);
+    /* no join at the end */
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    ret = pthread_create(&tid, &attr, worker_func, args);
+    pthread_attr_destroy(&attr);
+    if (ret != 0) {
+        JS_ThrowTypeError(ctx, "could not create worker");
+        goto fail;
+    }
+    JS_FreeCString(ctx, basename);
+    JS_FreeCString(ctx, filename);
+    return obj;
+ oom_fail:
+    JS_ThrowOutOfMemory(ctx);
+ fail:
+    JS_FreeCString(ctx, basename);
+    JS_FreeCString(ctx, filename);
+    if (args) {
+        free(args->filename);
+        free(args->basename);
+        js_free_message_pipe(args->recv_pipe);
+        js_free_message_pipe(args->send_pipe);
+        free(args);
+    }
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/* TODO:
+   - add socket calls
+*/
+/// Line number here: 90
+typedef struct {
+    struct list_head link;
+    int fd;
+    JSValue rw_func[2];
+} JSOSRWHandler
+
+/// Line number here: 96
+typedef struct {
+    struct list_head link;
+    int sig_num;
+    JSValue func;
+} JSOSSignalHandler
+
+/// Line number here: 103
+typedef struct {
+    struct list_head link;
+    int timer_id;
+    int64_t timeout;
+    JSValue func;
+} JSOSTimer
+
+/// Line number here: 142
+typedef struct {
+    struct list_head link;
+    JSValue promise;
+    JSValue reason;
+} JSRejectedPromiseEntry
+
+/// Line number here: 4113
+void js_std_free_handlers(JSRuntime *rt)
+{
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    struct list_head *el, *el1;
+
+    list_for_each_safe(el, el1, &ts->os_rw_handlers) {
+        JSOSRWHandler *rh = list_entry(el, JSOSRWHandler, link);
+        free_rw_handler(rt, rh);
+    }
+
+    list_for_each_safe(el, el1, &ts->os_signal_handlers) {
+        JSOSSignalHandler *sh = list_entry(el, JSOSSignalHandler, link);
+        free_sh(rt, sh);
+    }
+
+    list_for_each_safe(el, el1, &ts->os_timers) {
+        JSOSTimer *th = list_entry(el, JSOSTimer, link);
+        free_timer(rt, th);
+    }
+
+    list_for_each_safe(el, el1, &ts->rejected_promise_list) {
+        JSRejectedPromiseEntry *rp = list_entry(el, JSRejectedPromiseEntry, link);
+        JS_FreeValueRT(rt, rp->promise);
+        JS_FreeValueRT(rt, rp->reason);
+        free(rp);
+    }
+
+#ifdef USE_WORKER
+    /* XXX: free port_list ? */
+    js_free_message_pipe(ts->recv_pipe);
+    js_free_message_pipe(ts->send_pipe);
+#endif
+
+    free(ts);
+    JS_SetRuntimeOpaque(rt, NULL); /* fail safe */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/pthreadtypes.h
+
+/// Line number here: 71
+typedef union
+{
+  struct __pthread_mutex_s __data;
+  char __size[__SIZEOF_PTHREAD_MUTEX_T];
+  long int __align;
+} pthread_mutex_t
+
+/// Line number here: 26
+typedef unsigned long int pthread_t
+
+/// Line number here: 61
+typedef union pthread_attr_t pthread_attr_t
+
+---- File: /usr/include/pthread.h
+
+/// Line number here: 785
+extern int pthread_mutex_destroy (pthread_mutex_t *__mutex)
+     __THROW __nonnull ((1))
+
+/// Line number here: 36
+enum
+{
+  PTHREAD_CREATE_JOINABLE,
+#define PTHREAD_CREATE_JOINABLE	PTHREAD_CREATE_JOINABLE
+  PTHREAD_CREATE_DETACHED
+#define PTHREAD_CREATE_DETACHED	PTHREAD_CREATE_DETACHED
+}
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 686
+extern void free (void *__ptr) __THROW
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "atomic_add_int(int *, int)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_free_message(JSWorkerMessage *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "pthread_mutex_destroy(pthread_mutex_t *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_waker_close(JSWaker *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "free(void *)";
+"js_free_message(JSWorkerMessage *)";
+"js_free_message(JSWorkerMessage *)" -> "js_sab_free(void *, void *)";
+"js_free_message(JSWorkerMessage *)" -> "free(void *)";
+"js_waker_close(JSWaker *)";
+"js_waker_close(JSWaker *)" -> "close(int)";
+"js_free_port(JSRuntime *, JSWorkerMessageHandler *)";
+"js_free_port(JSRuntime *, JSWorkerMessageHandler *)" -> "js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_free_port(JSRuntime *, JSWorkerMessageHandler *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_port(JSRuntime *, JSWorkerMessageHandler *)" -> "list_del(struct list_head *)";
+"js_free_port(JSRuntime *, JSWorkerMessageHandler *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_worker_finalizer(JSRuntime *, JSValue)";
+"js_worker_finalizer(JSRuntime *, JSValue)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"js_worker_finalizer(JSRuntime *, JSValue)" -> "js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_worker_finalizer(JSRuntime *, JSValue)" -> "js_free_port(JSRuntime *, JSWorkerMessageHandler *)";
+"js_worker_finalizer(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_GetRuntime(JSContext *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "is_main_thread(JSRuntime *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_GetScriptOrModuleName(JSContext *, int)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "malloc(size_t)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "memset(void *, int, size_t)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "strdup(const char *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "js_new_message_pipe()";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_GetStripInfo(JSRuntime *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "pthread_attr_init(pthread_attr_t *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "pthread_attr_setdetachstate(pthread_attr_t *, int)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "pthread_create(pthread_t *restrict, const pthread_attr_t *restrict, void *(*)(void *), void *restrict)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "pthread_attr_destroy(pthread_attr_t *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "free(void *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_worker_ctor(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_free_handlers(JSRuntime *)";
+"js_std_free_handlers(JSRuntime *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_std_free_handlers(JSRuntime *)" -> "free_rw_handler(JSRuntime *, JSOSRWHandler *)";
+"js_std_free_handlers(JSRuntime *)" -> "free_sh(JSRuntime *, JSOSSignalHandler *)";
+"js_std_free_handlers(JSRuntime *)" -> "free_timer(JSRuntime *, JSOSTimer *)";
+"js_std_free_handlers(JSRuntime *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_std_free_handlers(JSRuntime *)" -> "free(void *)";
+"js_std_free_handlers(JSRuntime *)" -> "js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_std_free_handlers(JSRuntime *)" -> "JS_SetRuntimeOpaque(JSRuntime *, void *)";
+}

@@ -1,0 +1,308 @@
+Target function: "JS_GetFunctionBytecode(JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* return NULL without exception if not a function or no bytecode */
+/// Line number here: 5275
+static JSFunctionBytecode *JS_GetFunctionBytecode(JSValueConst val)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return NULL;
+    p = JS_VALUE_GET_OBJ(val);
+    if (!js_class_has_bytecode(p->class_id))
+        return NULL;
+    return p->u.func.function_bytecode;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 5266
+static BOOL js_class_has_bytecode(JSClassID class_id)
+{
+    return (class_id == JS_CLASS_BYTECODE_FUNCTION ||
+            class_id == JS_CLASS_GENERATOR_FUNCTION ||
+            class_id == JS_CLASS_ASYNC_FUNCTION ||
+            class_id == JS_CLASS_ASYNC_GENERATOR_FUNCTION);
+}
+
+/// Line number here: 197
+typedef enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+} JSErrorEnum
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 7029
+static JSValue JS_ThrowError(JSContext *ctx, JSErrorEnum error_num,
+                             const char *fmt, va_list ap)
+{
+    JSRuntime *rt = ctx->rt;
+    JSStackFrame *sf;
+    BOOL add_backtrace;
+
+    /* the backtrace is added later if called from a bytecode function */
+    sf = rt->current_stack_frame;
+    add_backtrace = !rt->in_out_of_memory &&
+        (!sf || (JS_GetFunctionBytecode(sf->cur_func) == NULL));
+    return JS_ThrowError2(ctx, error_num, fmt, ap, add_backtrace);
+}
+
+/* XXX: not 100% compatible, but mozilla seems to use a similar
+   implementation to ensure that caller in non strict mode does not
+   throw (ES5 compatibility) */
+/// Line number here: 15342
+static JSValue js_throw_type_error(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv)
+{
+    JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
+    if (!b || (b->js_mode & JS_MODE_STRICT) || !b->has_prototype || argc >= 1) {
+        return JS_ThrowTypeError(ctx, "invalid property access");
+    }
+    return JS_UNDEFINED;
+}
+
+/// Line number here: 15352
+static JSValue js_function_proto_fileName(JSContext *ctx,
+                                          JSValueConst this_val)
+{
+    JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
+    if (b && b->has_debug) {
+        return JS_AtomToString(ctx, b->debug.filename);
+    }
+    return JS_UNDEFINED;
+}
+
+/// Line number here: 15362
+static JSValue js_function_proto_lineNumber(JSContext *ctx,
+                                            JSValueConst this_val, int is_col)
+{
+    JSFunctionBytecode *b = JS_GetFunctionBytecode(this_val);
+    if (b && b->has_debug) {
+        int line_num, col_num;
+        line_num = find_line_num(ctx, b, -1, &col_num);
+        if (is_col)
+            return JS_NewInt32(ctx, col_num);
+        else
+            return JS_NewInt32(ctx, line_num);
+    }
+    return JS_UNDEFINED;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_GetFunctionBytecode(JSValue)";
+"JS_GetFunctionBytecode(JSValue)" -> "js_class_has_bytecode(JSClassID)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_GetFunctionBytecode(JSValue)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)";
+"js_throw_type_error(JSContext *, JSValue, int, JSValue *)";
+"js_throw_type_error(JSContext *, JSValue, int, JSValue *)" -> "JS_GetFunctionBytecode(JSValue)";
+"js_throw_type_error(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_function_proto_fileName(JSContext *, JSValue)";
+"js_function_proto_fileName(JSContext *, JSValue)" -> "JS_GetFunctionBytecode(JSValue)";
+"js_function_proto_fileName(JSContext *, JSValue)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_function_proto_lineNumber(JSContext *, JSValue, int)";
+"js_function_proto_lineNumber(JSContext *, JSValue, int)" -> "JS_GetFunctionBytecode(JSValue)";
+"js_function_proto_lineNumber(JSContext *, JSValue, int)" -> "find_line_num(JSContext *, JSFunctionBytecode *, uint32_t, int *)";
+"js_function_proto_lineNumber(JSContext *, JSValue, int)" -> "JS_NewInt32(JSContext *, int32_t)";
+}

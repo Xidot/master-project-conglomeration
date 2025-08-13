@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8160,6 +8160,8 @@
+     prs = find_own_property(&pr, p, prop);
+     if (prs) {
+         if (desc) {
++            if (prs->flags & JS_PROP_UNINITIALIZED)
++                funlogline();
+             desc->flags = prs->flags & JS_PROP_C_W_E;
+             desc->getter = JS_UNDEFINED;
+             desc->setter = JS_UNDEFINED;
+@@ -8179,6 +8181,8 @@
+                     }
+                 } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+                     JSValue val = *pr->u.var_ref->pvalue;
+                     if (unlikely(JS_IsUninitialized(val))) {
++                        if (desc == NULL)
++                            funlogline();
+                         JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
+                         return -1;
+                     }
+@@ -8200,6 +8204,8 @@
+         if (p->is_exotic) {
+             if (p->fast_array) {
+                 /* specific case for fast arrays */
+                 if (__JS_AtomIsTaggedInt(prop)) {
++                    if (p->u.array.count == 0)
++                        funlogline();
+                     uint32_t idx;
+                     idx = __JS_AtomToUInt32(prop);
+                     if (idx < p->u.array.count) {

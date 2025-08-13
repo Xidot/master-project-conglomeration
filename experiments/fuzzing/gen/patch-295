@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -30032,6 +30032,8 @@
+         JSPromiseStateEnum state;
+ 
+         promise = js_async_function_call(ctx, m->func_obj, JS_UNDEFINED, 0, NULL, 0);
++        if (JS_VALUE_GET_TAG(promise) == JS_TAG_NULL)
++            funlogline();
+         if (JS_IsException(promise))
+             goto fail;
+         state = JS_PromiseState(ctx, promise);
+@@ -30039,6 +30041,8 @@
+             JS_FreeValue(ctx, promise);
+         } else if (state == JS_PROMISE_REJECTED) {
+             *pvalue = JS_PromiseResult(ctx, promise);
++            if (JS_IsException(*pvalue))
++                funlogline();
+             JS_FreeValue(ctx, promise);
+             return -1;
+         } else {

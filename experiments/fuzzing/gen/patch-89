@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5737,6 +5737,8 @@
+     /* free all the fields */
+     sh = p->shape;
+     pr = get_shape_prop(sh);
++    if (sh->prop_count > 0 && p->prop == NULL)
++        funlogline();
+     for(i = 0; i < sh->prop_count; i++) {
+         free_property(rt, &p->prop[i], pr->flags);
+         pr++;
+@@ -5750,6 +5752,8 @@
+     p->prop = NULL;
+ 
+     finalizer = rt->class_array[p->class_id].finalizer;
++    if (finalizer && (p->shape != NULL || p->prop != NULL))
++        funlogline();
+     if (finalizer)
+         (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+ 
+@@ -5768,6 +5772,8 @@
+             list_add_tail(&p->header.link, &rt->gc_zero_ref_count_list);
+         }
+     } else {
++        if (p->header.ref_count == 0 && p->weakref_count == 0 && rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES)
++            funlogline();
+         /* keep the object structure in case there are weak references to it */
+         if (p->weakref_count == 0) {
+             js_free_rt(rt, p);

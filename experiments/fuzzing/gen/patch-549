@@ -1,0 +1,14 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38217,6 +38217,9 @@
+ static void JS_SetConstructor2(JSContext *ctx,
+                                JSValueConst func_obj,
+                                JSValueConst proto,
+                                int proto_flags, int ctor_flags)
+ {
++    if (!JS_IsObject(func_obj) || !JS_IsObject(proto)) {
++        funlogline();
++    }
+     JS_DefinePropertyValue(ctx, func_obj, JS_ATOM_prototype,
+                            JS_DupValue(ctx, proto), proto_flags);
+     JS_DefinePropertyValue(ctx, proto, JS_ATOM_constructor,

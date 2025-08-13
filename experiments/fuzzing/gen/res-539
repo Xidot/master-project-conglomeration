@@ -1,0 +1,58 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ResizeAtomHash(JSRuntime *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_ResizeAtomHash` function:
+
+:JS_ResizeAtomHash:2530
+:JS_ResizeAtomHash:2537
+:JS_ResizeAtomHash:2548
+
+---
+
+Here's the reasoning for each:
+
+1. Line 2530: The function assumes `new_hash_size` is a power of two via assert, but doesn't handle the case where it might not be (assert could be disabled in production).
+
+2. Line 2537: The loop iterates up to `rt->atom_hash_size` but doesn't verify this value is valid/sane compared to `new_hash_size`.
+
+3. Line 2548: Updates `rt->atom_hash_size` after freeing old hash but before assigning new one - potential race condition if accessed concurrently.
+
+Here's the diff with instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2527,6 +2527,8 @@
+     JSAtomStruct *p;
+     uint32_t new_hash_mask, h, i, hash_next1, j, *new_hash;
+ 
++    if ((new_hash_size & (new_hash_size - 1)) != 0)
++        funlogline();
+     assert((new_hash_size & (new_hash_size - 1)) == 0); /* power of two */
+     new_hash_mask = new_hash_size - 1;
+     new_hash = js_mallocz_rt(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
+@@ -2534,6 +2536,8 @@
+         return -1;
+     for(i = 0; i < rt->atom_hash_size; i++) {
+         h = rt->atom_hash[i];
++        if (h >= rt->atom_size)
++            funlogline();
+         while (h != 0) {
+             p = rt->atom_array[h];
+             hash_next1 = p->hash_next;
+@@ -2545,6 +2549,8 @@
+         }
+     }
+     js_free_rt(rt, rt->atom_hash);
++    if (rt->atom_hash_size != new_hash_size)
++        funlogline();
+     rt->atom_hash = new_hash;
+     rt->atom_hash_size = new_hash_size;
+     rt->atom_count_resize = JS_ATOM_COUNT_RESIZE(new_hash_size);
+```
+
+The instrumentation checks for:
+1. Non-power-of-two hash size
+2. Invalid hash entries pointing beyond atom array
+3. Hash size mismatch during transition

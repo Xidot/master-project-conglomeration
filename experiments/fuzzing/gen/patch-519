@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37247,6 +37247,7 @@
+     int function_size, cpool_offset, byte_code_offset;
+     int closure_var_offset, vardefs_offset;
+ 
++    if (sizeof(bc) != sizeof(JSFunctionBytecode)) funlogline();
+     memset(&bc, 0, sizeof(bc));
+     bc.header.ref_count = 1;
+     //bc.gc_header.mark = 0;
+@@ -37297,6 +37298,7 @@
+     if (bc_get_leb128_int(s, &local_count))
+         goto fail;
+ 
++    if (local_count != b->arg_count + b->var_count) funlogline();
+     if (bc.has_debug) {
+         function_size = sizeof(*b);
+     } else {
+@@ -37347,6 +37349,7 @@
+         bc_read_trace(s, "}\n");
+     }
+     if (b->closure_var_count != 0) {
++        if (b->closure_var_count > MAX_CLOSURE_VARS) funlogline();
+         bc_read_trace(s, "closure vars {\n");
+         for(i = 0; i < b->closure_var_count; i++) {
+             JSClosureVar *cv = &b->closure_var[i];

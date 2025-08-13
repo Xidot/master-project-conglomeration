@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48615,6 +48615,9 @@
+ static void map_delete_weakrefs(JSRuntime *rt, JSWeakRefHeader *wh)
+ {
+     JSMapState *s = container_of(wh, JSMapState, weakref_header);
++    if (s == NULL) {
++        funlogline();
++    }
+     struct list_head *el, *el1;
+     JSMapRecord *mr1, **pmr;
+     uint32_t h;
+ 
+@@ -48622,6 +48625,9 @@
+         JSMapRecord *mr = list_entry(el, JSMapRecord, link);
+         if (!js_weakref_is_live(mr->key)) {
+ 
++            if (JS_VALUE_GET_TAG(mr->key) >= 0 && JS_VALUE_GET_TAG(mr->key) != JS_TAG_UNDEFINED) {
++                funlogline();
++            }
+             /* even if key is not live it can be hashed as a pointer */
+             h = map_hash_key(mr->key, s->hash_bits);
+             pmr = &s->hash_table[h];
+@@ -48629,6 +48635,9 @@
+                 mr1 = *pmr;
+                 /* the entry may already be removed from the hash
+                    table if the map was resized */
++                if (mr1 == mr && mr->empty) {
++                    funlogline();
++                }
+                 if (mr1 == NULL)
+                     goto done; 
+                 if (mr1 == mr)

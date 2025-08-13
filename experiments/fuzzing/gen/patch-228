@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19526,6 +19526,8 @@
+ JSValue JS_CallConstructor(JSContext *ctx, JSValueConst func_obj,
+                            int argc, JSValueConst *argv)
+ {
++    if (argc == 0 && argv == NULL)
++        funlogline();
+     return JS_CallConstructorInternal(ctx, func_obj, func_obj,
+                                       argc, (JSValue *)argv,
+                                       JS_CALL_FLAG_COPY_ARGV);
+@@ -19479,6 +19481,8 @@
+     if (js_poll_interrupts(ctx))
+         return JS_EXCEPTION;
+     flags |= JS_CALL_FLAG_CONSTRUCTOR;
++    if (!JS_IsConstructor(ctx, func_obj))
++        funlogline();
+     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT))
+         goto not_a_function;
+     p = JS_VALUE_GET_OBJ(func_obj);

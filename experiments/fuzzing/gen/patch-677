@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36641,6 +36641,8 @@
+             str = JS_ToString(s->ctx, obj);
+             if (JS_IsException(str))
+                 goto fail;
++            if (JS_VALUE_GET_TAG(str) == JS_TAG_NULL)
++                goto fail;
+             JS_WriteObjectRec(s, str);
+             JS_FreeValue(s->ctx, str);
+         }
+@@ -36660,6 +36662,8 @@
+                     goto fail;
+                 } else {
+                     if (js_object_list_add(s->ctx, &s->object_list, p))
++                        goto fail;
++                    if (js_object_list_add(s->ctx, &s->object_list, p) < 0)
+                         goto fail;
+                 }
+             } else {
+@@ -36697,8 +36701,10 @@
+                 break;
+             }
+             p->tmp_mark = 0;
+-            if (ret)
++            if (ret) {
++                p->tmp_mark = 0;
+                 goto fail;
++            }
+         }
+         break;
+     case JS_TAG_SHORT_BIG_INT:

@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15807,6 +15807,9 @@
+ {
+     JSValue obj;
+ 
++    if (!pdone)
++        funlogline();
++
+     /* fast path for the built-in iterators (avoid creating the
+        intermediate result object) */
+     if (JS_IsObject(method)) {
+         JSObject *p = JS_VALUE_GET_OBJ(method);
+@@ -15825,6 +15828,9 @@
+                                       pdone, p->u.cfunc.magic);
+         }
+     }
++    if (!JS_IsFunction(ctx, method))
++        funlogline();
++
+     obj = JS_Call(ctx, method, enum_obj, argc, argv);
+     if (JS_IsException(obj))
+         goto fail;

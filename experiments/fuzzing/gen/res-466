@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_object_has_name(JSContext *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_object_has_name` function:
+
+:js_object_has_name:9919
+:js_object_has_name:9921
+:js_object_has_name:9923
+
+---
+
+1. Line 9919: The function doesn't check if the object is valid before accessing its properties. If `JS_VALUE_GET_OBJ(obj)` is called on a non-object value, it could lead to undefined behavior.
+
+2. Line 9921: The function returns TRUE for non-normal properties (like getters/setters) without checking if they actually contain a name. This might be incorrect if the intention is to only return TRUE for actual string names.
+
+3. Line 9923: The function returns TRUE for non-string values, which might not be the intended behavior if we only want to consider string properties as valid names.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9916,10 +9916,13 @@
+     JSValueConst val;
+     JSString *p;
+ 
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
++        funlogline();
+     prs = find_own_property(&pr, JS_VALUE_GET_OBJ(obj), JS_ATOM_name);
+     if (!prs)
+         return FALSE;
+     if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL)
++        funlogline();
+         return TRUE;
+     val = pr->u.value;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING)
++        funlogline();
+         return TRUE;
+     p = JS_VALUE_GET_STRING(val);
+     return (p->len != 0);
+```

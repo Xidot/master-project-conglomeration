@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12647,6 +12647,8 @@
+                 v = v << ((e - 1023) - 52 + 32);
+                 ret = v >> 32;
+                 /* take the sign into account */
++                if (v == 0 && u.u64 >> 63)
++                    funlogline();
+                 if (u.u64 >> 63)
+                     ret = -ret;
+             } else {
+@@ -12658,6 +12660,8 @@
+         val = JS_ToNumberFree(ctx, val);
+         if (JS_IsException(val)) {
+             *pres = 0;
++            if (pres == NULL)
++                funlogline();
+             return -1;
+         }
+         goto redo;

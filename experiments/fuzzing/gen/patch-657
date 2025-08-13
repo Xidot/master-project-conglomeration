@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54617,6 +54617,8 @@
+     } else {
+         if (js_get_length64(ctx, &len, obj))
+             goto fail;
++        if (len < 0)
++            goto fail;
+         arr = JS_DupValue(ctx, obj);
+     }
+ 
+@@ -54627,6 +54629,8 @@
+     if (typed_array_init(ctx, ret, buffer, 0, len))
+         goto fail;
+ 
++    if (JS_IsException(buffer))
++        goto fail;
+     for(i = 0; i < len; i++) {
+         val = JS_GetPropertyUint32(ctx, arr, i);
+         if (JS_IsException(val))

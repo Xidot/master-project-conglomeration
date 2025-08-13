@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3590,6 +3590,9 @@
+ /* 0 <= c <= 0xff */
+ static int string_buffer_putc8(StringBuffer *s, uint32_t c)
+ {
++    if (unlikely(c > 0xff))
++        funlogline();
++
+     if (unlikely(s->len >= s->size)) {
+         if (string_buffer_realloc(s, s->len + 1, c))
+             return -1;

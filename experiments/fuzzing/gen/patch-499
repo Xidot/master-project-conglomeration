@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13105,6 +13105,9 @@
+                                 int sep, uint32_t pos)
+ {
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
++        if (JS_VALUE_GET_STRING(val) == NULL) {
++            funlogline();
++        }
+         JSString *p = JS_VALUE_GET_STRING(val);
+         uint32_t i, len;
+         if (pos < s->options.max_string_length) {
+@@ -13115,6 +13118,9 @@
+         }
+     } else if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING_ROPE) {
+         JSStringRope *r = JS_VALUE_GET_PTR(val);
++        if (JS_VALUE_GET_TAG(r->right) != JS_TAG_STRING && JS_VALUE_GET_TAG(r->right) != JS_TAG_STRING_ROPE) {
++            funlogline();
++        }
+         js_print_string_rec(s, r->left, sep, pos);
+         js_print_string_rec(s, r->right, sep, pos + js_string_get_length(r->left));
+     } else {

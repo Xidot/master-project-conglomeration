@@ -1,0 +1,548 @@
+Target function: "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 545
+typedef struct JSClassDef {
+    const char *class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+    /* if call != NULL, the object is a function. If (flags &
+       JS_CALL_FLAG_CONSTRUCTOR) != 0, the function is called as a
+       constructor. In this case, 'this_val' is new.target. A
+       constructor call only happens if the object constructor bit is
+       set (see JS_SetConstructorBit()). */
+    JSClassCall *call;
+    /* XXX: suppress this indirection ? It is here only to save memory
+       because only a few classes need these methods */
+    JSClassExoticMethods *exotic;
+} JSClassDef
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 55
+typedef struct JSClass JSClass
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 366
+typedef struct JSMallocFunctions {
+    void *(*js_malloc)(JSMallocState *s, size_t size);
+    void (*js_free)(JSMallocState *s, void *ptr);
+    void *(*js_realloc)(JSMallocState *s, void *ptr, size_t size);
+    size_t (*js_malloc_usable_size)(const void *ptr);
+} JSMallocFunctions
+
+/// Line number here: 359
+typedef struct JSMallocState {
+    size_t malloc_count;
+    size_t malloc_size;
+    size_t malloc_limit;
+    void *opaque; /* user opaque */
+} JSMallocState
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+/// Line number here: 350
+typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1484
+typedef struct JSClassShortDef {
+    JSAtom class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+} JSClassShortDef
+
+/// Line number here: 1533
+static int init_class_range(JSRuntime *rt, JSClassShortDef const *tab,
+                            int start, int count)
+{
+    JSClassDef cm_s, *cm = &cm_s;
+    int i, class_id;
+
+    for(i = 0; i < count; i++) {
+        class_id = i + start;
+        memset(cm, 0, sizeof(*cm));
+        cm->finalizer = tab[i].finalizer;
+        cm->gc_mark = tab[i].gc_mark;
+        if (JS_NewClass1(rt, class_id, cm, tab[i].class_name) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* create a new object internal class. Return -1 if error, 0 if
+   OK. The finalizer can be NULL if none is needed. */
+/// Line number here: 3336
+static int JS_NewClass1(JSRuntime *rt, JSClassID class_id,
+                        const JSClassDef *class_def, JSAtom name)
+{
+    int new_size, i;
+    JSClass *cl, *new_class_array;
+    struct list_head *el;
+
+    if (class_id >= (1 << 16))
+        return -1;
+    if (class_id < rt->class_count &&
+        rt->class_array[class_id].class_id != 0)
+        return -1;
+
+    if (class_id >= rt->class_count) {
+        new_size = max_int(JS_CLASS_INIT_COUNT,
+                           max_int(class_id + 1, rt->class_count * 3 / 2));
+
+        /* reallocate the context class prototype array, if any */
+        list_for_each(el, &rt->context_list) {
+            JSContext *ctx = list_entry(el, JSContext, link);
+            JSValue *new_tab;
+            new_tab = js_realloc_rt(rt, ctx->class_proto,
+                                    sizeof(ctx->class_proto[0]) * new_size);
+            if (!new_tab)
+                return -1;
+            for(i = rt->class_count; i < new_size; i++)
+                new_tab[i] = JS_NULL;
+            ctx->class_proto = new_tab;
+        }
+        /* reallocate the class array */
+        new_class_array = js_realloc_rt(rt, rt->class_array,
+                                        sizeof(JSClass) * new_size);
+        if (!new_class_array)
+            return -1;
+        memset(new_class_array + rt->class_count, 0,
+               (new_size - rt->class_count) * sizeof(JSClass));
+        rt->class_array = new_class_array;
+        rt->class_count = new_size;
+    }
+    cl = &rt->class_array[class_id];
+    cl->class_id = class_id;
+    cl->class_name = JS_DupAtomRT(rt, name);
+    cl->finalizer = class_def->finalizer;
+    cl->gc_mark = class_def->gc_mark;
+    cl->call = class_def->call;
+    cl->exotic = class_def->exotic;
+    return 0;
+}
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 1576
+JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
+{
+    JSRuntime *rt;
+    JSMallocState ms;
+
+    memset(&ms, 0, sizeof(ms));
+    ms.opaque = opaque;
+    ms.malloc_limit = -1;
+
+    rt = mf->js_malloc(&ms, sizeof(JSRuntime));
+    if (!rt)
+        return NULL;
+    memset(rt, 0, sizeof(*rt));
+    rt->mf = *mf;
+    if (!rt->mf.js_malloc_usable_size) {
+        /* use dummy function if none provided */
+        rt->mf.js_malloc_usable_size = js_malloc_usable_size_unknown;
+    }
+    rt->malloc_state = ms;
+    rt->malloc_gc_threshold = 256 * 1024;
+
+    init_list_head(&rt->context_list);
+    init_list_head(&rt->gc_obj_list);
+    init_list_head(&rt->gc_zero_ref_count_list);
+    rt->gc_phase = JS_GC_PHASE_NONE;
+    init_list_head(&rt->weakref_list);
+
+#ifdef DUMP_LEAKS
+    init_list_head(&rt->string_list);
+#endif
+    init_list_head(&rt->job_list);
+
+    if (JS_InitAtoms(rt))
+        goto fail;
+
+    /* create the object, array and function classes */
+    if (init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT,
+                         countof(js_std_class_def)) < 0)
+        goto fail;
+    rt->class_array[JS_CLASS_ARGUMENTS].exotic = &js_arguments_exotic_methods;
+    rt->class_array[JS_CLASS_STRING].exotic = &js_string_exotic_methods;
+    rt->class_array[JS_CLASS_MODULE_NS].exotic = &js_module_ns_exotic_methods;
+
+    rt->class_array[JS_CLASS_C_FUNCTION].call = js_call_c_function;
+    rt->class_array[JS_CLASS_C_FUNCTION_DATA].call = js_c_function_data_call;
+    rt->class_array[JS_CLASS_BOUND_FUNCTION].call = js_call_bound_function;
+    rt->class_array[JS_CLASS_GENERATOR_FUNCTION].call = js_generator_function_call;
+    if (init_shape_hash(rt))
+        goto fail;
+
+    rt->stack_size = JS_DEFAULT_STACK_SIZE;
+    JS_UpdateStackTop(rt);
+
+    rt->current_exception = JS_UNINITIALIZED;
+
+    return rt;
+ fail:
+    JS_FreeRuntime(rt);
+    return NULL;
+}
+
+/// Line number here: 48093
+void JS_AddIntrinsicProxy(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue obj1;
+
+    if (!JS_IsRegisteredClass(rt, JS_CLASS_PROXY)) {
+        init_class_range(rt, js_proxy_class_def, JS_CLASS_PROXY,
+                         countof(js_proxy_class_def));
+        rt->class_array[JS_CLASS_PROXY].exotic = &js_proxy_exotic_methods;
+        rt->class_array[JS_CLASS_PROXY].call = js_proxy_call;
+    }
+
+    obj1 = JS_NewCFunction2(ctx, js_proxy_constructor, "Proxy", 2,
+                            JS_CFUNC_constructor, 0);
+    JS_SetConstructorBit(ctx, obj1, TRUE);
+    JS_SetPropertyFunctionList(ctx, obj1, js_proxy_funcs,
+                               countof(js_proxy_funcs));
+    JS_DefinePropertyValueStr(ctx, ctx->global_obj, "Proxy",
+                              obj1, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+/// Line number here: 605
+enum JSFunctionKindEnum {
+    JS_FUNC_NORMAL = 0,
+    JS_FUNC_GENERATOR = (1 << 0),
+    JS_FUNC_ASYNC = (1 << 1),
+    JS_FUNC_ASYNC_GENERATOR = (JS_FUNC_GENERATOR | JS_FUNC_ASYNC),
+}
+
+/// Line number here: 50529
+void JS_AddIntrinsicPromise(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue obj1;
+
+    if (!JS_IsRegisteredClass(rt, JS_CLASS_PROMISE)) {
+        init_class_range(rt, js_async_class_def, JS_CLASS_PROMISE,
+                         countof(js_async_class_def));
+        rt->class_array[JS_CLASS_PROMISE_RESOLVE_FUNCTION].call = js_promise_resolve_function_call;
+        rt->class_array[JS_CLASS_PROMISE_REJECT_FUNCTION].call = js_promise_resolve_function_call;
+        rt->class_array[JS_CLASS_ASYNC_FUNCTION].call = js_async_function_call;
+        rt->class_array[JS_CLASS_ASYNC_FUNCTION_RESOLVE].call = js_async_function_resolve_call;
+        rt->class_array[JS_CLASS_ASYNC_FUNCTION_REJECT].call = js_async_function_resolve_call;
+        rt->class_array[JS_CLASS_ASYNC_GENERATOR_FUNCTION].call = js_async_generator_function_call;
+    }
+
+    /* Promise */
+    ctx->class_proto[JS_CLASS_PROMISE] = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_PROMISE],
+                               js_promise_proto_funcs,
+                               countof(js_promise_proto_funcs));
+    obj1 = JS_NewCFunction2(ctx, js_promise_constructor, "Promise", 1,
+                            JS_CFUNC_constructor, 0);
+    ctx->promise_ctor = JS_DupValue(ctx, obj1);
+    JS_SetPropertyFunctionList(ctx, obj1,
+                               js_promise_funcs,
+                               countof(js_promise_funcs));
+    JS_NewGlobalCConstructor2(ctx, obj1, "Promise",
+                              ctx->class_proto[JS_CLASS_PROMISE]);
+
+    /* AsyncFunction */
+    ctx->class_proto[JS_CLASS_ASYNC_FUNCTION] = JS_NewObjectProto(ctx, ctx->function_proto);
+    obj1 = JS_NewCFunction3(ctx, (JSCFunction *)js_function_constructor,
+                            "AsyncFunction", 1,
+                            JS_CFUNC_constructor_or_func_magic, JS_FUNC_ASYNC,
+                            ctx->function_ctor);
+    JS_SetPropertyFunctionList(ctx,
+                               ctx->class_proto[JS_CLASS_ASYNC_FUNCTION],
+                               js_async_function_proto_funcs,
+                               countof(js_async_function_proto_funcs));
+    JS_SetConstructor2(ctx, obj1, ctx->class_proto[JS_CLASS_ASYNC_FUNCTION],
+                       0, JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, obj1);
+
+    /* AsyncIteratorPrototype */
+    ctx->async_iterator_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->async_iterator_proto,
+                               js_async_iterator_proto_funcs,
+                               countof(js_async_iterator_proto_funcs));
+
+    /* AsyncFromSyncIteratorPrototype */
+    ctx->class_proto[JS_CLASS_ASYNC_FROM_SYNC_ITERATOR] =
+        JS_NewObjectProto(ctx, ctx->async_iterator_proto);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_ASYNC_FROM_SYNC_ITERATOR],
+                               js_async_from_sync_iterator_proto_funcs,
+                               countof(js_async_from_sync_iterator_proto_funcs));
+
+    /* AsyncGeneratorPrototype */
+    ctx->class_proto[JS_CLASS_ASYNC_GENERATOR] =
+        JS_NewObjectProto(ctx, ctx->async_iterator_proto);
+    JS_SetPropertyFunctionList(ctx,
+                               ctx->class_proto[JS_CLASS_ASYNC_GENERATOR],
+                               js_async_generator_proto_funcs,
+                               countof(js_async_generator_proto_funcs));
+
+    /* AsyncGeneratorFunction */
+    ctx->class_proto[JS_CLASS_ASYNC_GENERATOR_FUNCTION] =
+        JS_NewObjectProto(ctx, ctx->function_proto);
+    obj1 = JS_NewCFunction3(ctx, (JSCFunction *)js_function_constructor,
+                            "AsyncGeneratorFunction", 1,
+                            JS_CFUNC_constructor_or_func_magic,
+                            JS_FUNC_ASYNC_GENERATOR,
+                            ctx->function_ctor);
+    JS_SetPropertyFunctionList(ctx,
+                               ctx->class_proto[JS_CLASS_ASYNC_GENERATOR_FUNCTION],
+                               js_async_generator_function_proto_funcs,
+                               countof(js_async_generator_function_proto_funcs));
+    JS_SetConstructor2(ctx, ctx->class_proto[JS_CLASS_ASYNC_GENERATOR_FUNCTION],
+                       ctx->class_proto[JS_CLASS_ASYNC_GENERATOR],
+                       JS_PROP_CONFIGURABLE, JS_PROP_CONFIGURABLE);
+    JS_SetConstructor2(ctx, obj1, ctx->class_proto[JS_CLASS_ASYNC_GENERATOR_FUNCTION],
+                       0, JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, obj1);
+}
+
+/// Line number here: 55873
+void JS_AddIntrinsicWeakRef(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+
+    /* WeakRef */
+    if (!JS_IsRegisteredClass(rt, JS_CLASS_WEAK_REF)) {
+        init_class_range(rt, js_weakref_class_def, JS_CLASS_WEAK_REF,
+                         countof(js_weakref_class_def));
+    }
+    ctx->class_proto[JS_CLASS_WEAK_REF] = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_WEAK_REF],
+                               js_weakref_proto_funcs,
+                               countof(js_weakref_proto_funcs));
+    JS_NewGlobalCConstructor(ctx, "WeakRef", js_weakref_constructor, 1, ctx->class_proto[JS_CLASS_WEAK_REF]);
+
+    /* FinalizationRegistry */
+    if (!JS_IsRegisteredClass(rt, JS_CLASS_FINALIZATION_REGISTRY)) {
+        init_class_range(rt, js_finrec_class_def, JS_CLASS_FINALIZATION_REGISTRY,
+                         countof(js_finrec_class_def));
+    }
+    ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY] = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY],
+                               js_finrec_proto_funcs,
+                               countof(js_finrec_proto_funcs));
+    JS_NewGlobalCConstructor(ctx, "FinalizationRegistry", js_finrec_constructor, 1, ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY]);
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)" -> "memset(void *, int, size_t)";
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)" -> "JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "max_int(int, int)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "memset(void *, int, size_t)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "JS_DupAtomRT(JSRuntime *, JSAtom)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "memset(void *, int, size_t)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JSMallocFunctions::js_malloc";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_list_head(struct list_head *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_InitAtoms(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_shape_hash(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_UpdateStackTop(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_FreeRuntime(JSRuntime *)";
+"JS_AddIntrinsicProxy(JSContext *)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "JS_IsRegisteredClass(JSRuntime *, JSClassID)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "JS_SetConstructorBit(JSContext *, JSValue, BOOL)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicProxy(JSContext *)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"JS_AddIntrinsicPromise(JSContext *)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_IsRegisteredClass(JSRuntime *, JSClassID)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_NewObject(JSContext *)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_NewObjectProto(JSContext *, JSValue)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)";
+"JS_AddIntrinsicPromise(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_AddIntrinsicWeakRef(JSContext *)";
+"JS_AddIntrinsicWeakRef(JSContext *)" -> "JS_IsRegisteredClass(JSRuntime *, JSClassID)";
+"JS_AddIntrinsicWeakRef(JSContext *)" -> "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"JS_AddIntrinsicWeakRef(JSContext *)" -> "JS_NewObject(JSContext *)";
+"JS_AddIntrinsicWeakRef(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicWeakRef(JSContext *)" -> "JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)";
+}

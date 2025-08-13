@@ -1,0 +1,271 @@
+Target function: "dbuf_put_sleb128(DynBuf *, int32_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 6771
+static void dbuf_put_sleb128(DynBuf *s, int32_t v1)
+{
+    uint32_t v = v1;
+    dbuf_put_leb128(s, (2 * v) ^ -(v >> 31));
+}
+
+/// Line number here: 6756
+static void dbuf_put_leb128(DynBuf *s, uint32_t v)
+{
+    uint32_t a;
+    for(;;) {
+        a = v & 0x7f;
+        v >>= 7;
+        if (v != 0) {
+            dbuf_putc(s, a | 0x80);
+        } else {
+            dbuf_putc(s, a);
+            break;
+        }
+    }
+}
+
+/// Line number here: 20741
+typedef struct JSFunctionDef {
+    JSContext *ctx;
+    struct JSFunctionDef *parent;
+    int parent_cpool_idx; /* index in the constant pool of the parent
+                             or -1 if none */
+    int parent_scope_level; /* scope level in parent at point of definition */
+    struct list_head child_list; /* list of JSFunctionDef.link */
+    struct list_head link;
+
+    BOOL is_eval; /* TRUE if eval code */
+    int eval_type; /* only valid if is_eval = TRUE */
+    BOOL is_global_var; /* TRUE if variables are not defined locally:
+                           eval global, eval module or non strict eval */
+    BOOL is_func_expr; /* TRUE if function expression */
+    BOOL has_home_object; /* TRUE if the home object is available */
+    BOOL has_prototype; /* true if a prototype field is necessary */
+    BOOL has_simple_parameter_list;
+    BOOL has_parameter_expressions; /* if true, an argument scope is created */
+    BOOL has_use_strict; /* to reject directive in special cases */
+    BOOL has_eval_call; /* true if the function contains a call to eval() */
+    BOOL has_arguments_binding; /* true if the 'arguments' binding is
+                                   available in the function */
+    BOOL has_this_binding; /* true if the 'this' and new.target binding are
+                              available in the function */
+    BOOL new_target_allowed; /* true if the 'new.target' does not
+                                throw a syntax error */
+    BOOL super_call_allowed; /* true if super() is allowed */
+    BOOL super_allowed; /* true if super. or super[] is allowed */
+    BOOL arguments_allowed; /* true if the 'arguments' identifier is allowed */
+    BOOL is_derived_class_constructor;
+    BOOL in_function_body;
+    JSFunctionKindEnum func_kind : 8;
+    JSParseFunctionEnum func_type : 8;
+    uint8_t js_mode; /* bitmap of JS_MODE_x */
+    JSAtom func_name; /* JS_ATOM_NULL if no name */
+
+    JSVarDef *vars;
+    int var_size; /* allocated size for vars[] */
+    int var_count;
+    JSVarDef *args;
+    int arg_size; /* allocated size for args[] */
+    int arg_count; /* number of arguments */
+    int defined_arg_count;
+    int var_object_idx; /* -1 if none */
+    int arg_var_object_idx; /* -1 if none (var object for the argument scope) */
+    int arguments_var_idx; /* -1 if none */
+    int arguments_arg_idx; /* argument variable definition in argument scope,
+                              -1 if none */
+    int func_var_idx; /* variable containing the current function (-1
+                         if none, only used if is_func_expr is true) */
+    int eval_ret_idx; /* variable containing the return value of the eval, -1 if none */
+    int this_var_idx; /* variable containg the 'this' value, -1 if none */
+    int new_target_var_idx; /* variable containg the 'new.target' value, -1 if none */
+    int this_active_func_var_idx; /* variable containg the 'this.active_func' value, -1 if none */
+    int home_object_var_idx;
+    BOOL need_home_object;
+
+    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_first;    /* index into vd->vars of first lexically scoped variable */
+    int scope_size;     /* allocated size of fd->scopes array */
+    int scope_count;    /* number of entries used in the fd->scopes array */
+    JSVarScope *scopes;
+    JSVarScope def_scope_array[4];
+    int body_scope; /* scope of the body of the function or eval */
+
+    int global_var_count;
+    int global_var_size;
+    JSGlobalVar *global_vars;
+
+    DynBuf byte_code;
+    int last_opcode_pos; /* -1 if no last opcode */
+    const uint8_t *last_opcode_source_ptr;
+    BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
+
+    LabelSlot *label_slots;
+    int label_size; /* allocated size for label_slots[] */
+    int label_count;
+    BlockEnv *top_break; /* break/continue label stack */
+
+    /* constant pool (strings, functions, numbers) */
+    JSValue *cpool;
+    int cpool_count;
+    int cpool_size;
+
+    /* list of variables in the closure */
+    int closure_var_count;
+    int closure_var_size;
+    JSClosureVar *closure_var;
+
+    JumpSlot *jump_slots;
+    int jump_size;
+    int jump_count;
+
+    LineNumberSlot *line_number_slots;
+    int line_number_size;
+    int line_number_count;
+    int line_number_last;
+    int line_number_last_pc;
+
+    /* pc2line table */
+    BOOL strip_debug : 1; /* strip all debug info (implies strip_source = TRUE) */
+    BOOL strip_source : 1; /* strip only source code */
+    JSAtom filename;
+    uint32_t source_pos; /* pointer in the eval() source */
+    GetLineColCache *get_line_col_cache; /* XXX: could remove to save memory */
+    DynBuf pc2line;
+
+    char *source;  /* raw source, utf-8 encoded */
+    int source_len;
+
+    JSModuleDef *module; /* != NULL when parsing a module */
+    BOOL has_await; /* TRUE if await is used (used in module eval) */
+} JSFunctionDef
+
+/* XXX: could use a more compact storage */
+/* XXX: get_line_col_cached() is slow. For more predictable
+   performance, line/cols could be stored every N source
+   bytes. Alternatively, get_line_col_cached() could be issued in
+   emit_source_pos() so that the deltas are more likely to be
+   small. */
+/// Line number here: 33187
+static void compute_pc2line_info(JSFunctionDef *s)
+{
+    if (!s->strip_debug) {
+        int last_line_num, last_col_num;
+        uint32_t last_pc = 0;
+        int i, line_num, col_num;
+        const uint8_t *buf_start = s->get_line_col_cache->buf_start;
+        js_dbuf_init(s->ctx, &s->pc2line);
+
+        last_line_num = get_line_col_cached(s->get_line_col_cache,
+                                            &last_col_num,
+                                            buf_start + s->source_pos);
+        dbuf_put_leb128(&s->pc2line, last_line_num); /* line number minus 1 */
+        dbuf_put_leb128(&s->pc2line, last_col_num); /* column number minus 1 */
+
+        for (i = 0; i < s->line_number_count; i++) {
+            uint32_t pc = s->line_number_slots[i].pc;
+            uint32_t source_pos = s->line_number_slots[i].source_pos;
+            int diff_pc, diff_line, diff_col;
+
+            if (source_pos == -1)
+                continue;
+            diff_pc = pc - last_pc;
+            if (diff_pc < 0)
+                continue;
+
+            line_num = get_line_col_cached(s->get_line_col_cache, &col_num,
+                                           buf_start + source_pos);
+            diff_line = line_num - last_line_num;
+            diff_col = col_num - last_col_num;
+            if (diff_line == 0 && diff_col == 0)
+                continue;
+
+            if (diff_line >= PC2LINE_BASE &&
+                diff_line < PC2LINE_BASE + PC2LINE_RANGE &&
+                diff_pc <= PC2LINE_DIFF_PC_MAX) {
+                dbuf_putc(&s->pc2line, (diff_line - PC2LINE_BASE) +
+                          diff_pc * PC2LINE_RANGE + PC2LINE_OP_FIRST);
+            } else {
+                /* longer encoding */
+                dbuf_putc(&s->pc2line, 0);
+                dbuf_put_leb128(&s->pc2line, diff_pc);
+                dbuf_put_sleb128(&s->pc2line, diff_line);
+            }
+            dbuf_put_sleb128(&s->pc2line, diff_col);
+                
+            last_pc = pc;
+            last_line_num = line_num;
+            last_col_num = col_num;
+        }
+    }
+}
+
+/// Line number here: 36071
+typedef struct BCWriterState {
+    JSContext *ctx;
+    DynBuf dbuf;
+    BOOL allow_bytecode : 8;
+    BOOL allow_sab : 8;
+    BOOL allow_reference : 8;
+    uint32_t first_atom;
+    uint32_t *atom_to_idx;
+    int atom_to_idx_size;
+    JSAtom *idx_to_atom;
+    int idx_to_atom_count;
+    int idx_to_atom_size;
+    uint8_t **sab_tab;
+    int sab_tab_len;
+    int sab_tab_size;
+    /* list of referenced objects (used if allow_reference = TRUE) */
+    JSObjectList object_list;
+} BCWriterState
+
+/// Line number here: 36138
+static void bc_put_sleb128(BCWriterState *s, int32_t v)
+{
+    dbuf_put_sleb128(&s->dbuf, v);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"dbuf_put_sleb128(DynBuf *, int32_t)";
+"dbuf_put_sleb128(DynBuf *, int32_t)" -> "dbuf_put_leb128(DynBuf *, uint32_t)";
+"dbuf_put_leb128(DynBuf *, uint32_t)";
+"dbuf_put_leb128(DynBuf *, uint32_t)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"compute_pc2line_info(JSFunctionDef *)";
+"compute_pc2line_info(JSFunctionDef *)" -> "js_dbuf_init(JSContext *, DynBuf *)";
+"compute_pc2line_info(JSFunctionDef *)" -> "get_line_col_cached(GetLineColCache *, int *, const uint8_t *)";
+"compute_pc2line_info(JSFunctionDef *)" -> "dbuf_put_leb128(DynBuf *, uint32_t)";
+"compute_pc2line_info(JSFunctionDef *)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"compute_pc2line_info(JSFunctionDef *)" -> "dbuf_put_sleb128(DynBuf *, int32_t)";
+"bc_put_sleb128(BCWriterState *, int32_t)";
+"bc_put_sleb128(BCWriterState *, int32_t)" -> "dbuf_put_sleb128(DynBuf *, int32_t)";
+}

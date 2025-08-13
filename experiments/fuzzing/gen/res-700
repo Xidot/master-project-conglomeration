@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-max_int(int, int)
+-------------------------
+After analyzing the code, here are the potential logical bugs:
+
+:max_int:79
+
+---
+
+Reasoning:
+1. The `max_int` function is used to determine the maximum file descriptor for `select()` calls in `js_os_poll`. However, if both inputs are negative (invalid file descriptors), it will still return the "larger" negative number, which could lead to invalid behavior in `select()`. The function should probably handle negative values differently or the callers should ensure only valid FDs are passed.
+
+Here's the proposed modification:
+
+```diff
+--- a/cutils.h
++++ b/cutils.h
+@@ -79,6 +79,7 @@
+ static inline int max_int(int a, int b)
+ {
+     if (a > b)
++        if (a < 0 && b < 0) funlogline();
+         return a;
+     else
+         return b;
+```
+
+Note: This is a conservative fix that just detects when both values are negative. A more complete solution might want to handle negative values differently, but that would go beyond the scope of just detecting the logical error.

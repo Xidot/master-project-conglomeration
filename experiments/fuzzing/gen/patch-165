@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54551,6 +54551,8 @@
+     JSValue arr, iter, next_method = JS_UNDEFINED, val;
+     BOOL done;
+     uint32_t k;
++    
++    if (plen == NULL) funlogline();
+ 
+     *plen = 0;
+     arr = JS_NewArray(ctx);
+@@ -54562,6 +54564,7 @@
+     next_method = JS_GetProperty(ctx, iter, JS_ATOM_next);
+     if (JS_IsException(next_method))
+         goto fail;
++    if (!JS_IsFunction(ctx, next_method)) funlogline();
+     k = 0;
+     for(;;) {
+         val = JS_IteratorNext(ctx, iter, next_method, 0, NULL, &done);
+@@ -54568,6 +54571,7 @@
+         if (JS_IsException(val))
+             goto fail;
+         if (done)
+             break;
++        if (k == UINT32_MAX) funlogline();
+         if (JS_CreateDataPropertyUint32(ctx, arr, k, val, JS_PROP_THROW) < 0)
+             goto fail;
+         k++;

@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13129,6 +13129,9 @@
+ static void js_print_string(JSPrintValueState *s, JSValueConst val)
+ {
+     int sep;
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING && JS_VALUE_GET_TAG(val) != JS_TAG_STRING_ROPE) {
++        funlogline();
++    }
+     if (s->options.raw_dump && JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+         JSString *p = JS_VALUE_GET_STRING(val);
+         js_printf(s, "%d", p->header.ref_count);
+@@ -13138,6 +13141,9 @@
+     }
+     js_putc(s, sep);
+     js_print_string_rec(s, val, sep, 0);
+     js_putc(s, sep);
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING && JS_VALUE_GET_TAG(val) != JS_TAG_STRING_ROPE) {
++        funlogline();
++    }
+     if (js_string_get_length(val) > s->options.max_string_length) {
+         uint32_t n = js_string_get_length(val) - s->options.max_string_length;
+         js_printf(s, "... %u more character%s", n, n > 1 ? "s" : "");

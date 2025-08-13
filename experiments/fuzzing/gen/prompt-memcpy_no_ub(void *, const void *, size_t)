@@ -1,0 +1,30 @@
+Target function: "memcpy_no_ub(void *, const void *, size_t)"
+
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/* Prevent UB when n == 0 and (src == NULL or dest == NULL) */
+/// Line number here: 74
+static inline void memcpy_no_ub(void *dest, const void *src, size_t n) {
+    if (n)
+        memcpy(dest, src, n);
+}
+
+---- File: /usr/include/string.h
+
+/// Line number here: 42
+extern void *memcpy (void *__restrict __dest, const void *__restrict __src,
+		     size_t __n) __THROW __nonnull ((1, 2))
+
+
+
+----- Callgraph:
+strict digraph G {
+"memcpy_no_ub(void *, const void *, size_t)";
+"memcpy_no_ub(void *, const void *, size_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+}

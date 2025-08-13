@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mp_add(js_limb_t *, const js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the target function `mp_add`:
+
+:mp_add:10602
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10602,6 +10602,9 @@
+ static js_limb_t mp_add(js_limb_t *res, const js_limb_t *op1, const js_limb_t *op2,
+                      js_limb_t n, js_limb_t carry)
+ {
++    if (n == 0 && carry != 0) {
++        funlogline();
++    }
+     int i;
+     for(i = 0;i < n; i++) {
+         ADDC(res[i], carry, op1[i], op2[i], carry);
+```
+
+The reasoning is that when `n = 0` (empty arrays being added), the function will immediately return the carry value without any validation. This could lead to unexpected behavior if the carry is non-zero when no actual addition was performed. The added check will detect this condition.
+
+Note that this is a subtle edge case - the function might be intentionally designed this way, but without more context about the expected behavior with zero-length inputs, it's worth flagging as a potential logical inconsistency.

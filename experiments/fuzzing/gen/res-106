@@ -1,0 +1,24 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_hi_surrogate(uint32_t)
+-------------------------
+Based on the provided code and context, here's the analysis:
+
+:get_hi_surrogate:315
+
+---
+
+```diff
+--- a/cutils.h
++++ b/cutils.h
+@@ -315,6 +315,7 @@
+ 
+ static inline uint32_t get_hi_surrogate(uint32_t c)
+ {
++    if (c < 0x10000) funlogline(); // Log when input is not a supplementary character
+     return (c >> 10) - (0x10000 >> 10) + 0xD800;
+ }
+```
+
+Reasoning:
+The function is meant to get the high surrogate for a UTF-32 code point, but it doesn't validate that the input is actually a supplementary character (>= 0x10000). While the calculation would still work mathematically for values < 0x10000, it's conceptually incorrect to ask for a surrogate pair for BMP characters. The added check will log when this incorrect usage occurs.

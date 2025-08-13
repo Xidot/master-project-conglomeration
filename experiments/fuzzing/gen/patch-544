@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35910,6 +35910,8 @@
+ /* load the dependencies of the module 'obj'. Useful when JS_ReadObject()
+    returns a module. */
+ int JS_ResolveModule(JSContext *ctx, JSValueConst obj)
+ {
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_MODULE && JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
++        funlogline();
+     if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+         JSModuleDef *m = JS_VALUE_GET_PTR(obj);
+         if (js_resolve_module(ctx, m) < 0) {
+@@ -29107,6 +29109,8 @@
+ static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
+ {
+     int i;
++    if (m->req_module_entries_count < 0)
++        funlogline();
+     JSModuleDef *m1;
+ 
+     if (m->resolved)
+@@ -2186,6 +2190,8 @@
+ static void js_free_modules(JSContext *ctx, JSFreeModuleEnum flag)
+ {
+     struct list_head *el, *el1;
++    if (flag != JS_FREE_MODULE_ALL && flag != JS_FREE_MODULE_NOT_RESOLVED)
++        funlogline();
+     list_for_each_safe(el, el1, &ctx->loaded_modules) {
+         JSModuleDef *m = list_entry(el, JSModuleDef, link);
+         if (flag == JS_FREE_MODULE_ALL ||

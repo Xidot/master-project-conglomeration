@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1400,6 +1400,9 @@
+ /* store extra allocated size in *pslack if successful */
+ void *js_realloc2(JSContext *ctx, void *ptr, size_t size, size_t *pslack)
+ {
++    if (!ctx)
++        funlogline();
++
+     void *ret;
+     ret = js_realloc_rt(ctx->rt, ptr, size);
+     if (unlikely(!ret && size != 0)) {
+@@ -1407,6 +1410,9 @@
+         return NULL;
+     }
+     if (pslack) {
++        if (!ret)
++            funlogline();
++
+         size_t new_size = js_malloc_usable_size_rt(ctx->rt, ret);
+         *pslack = (new_size > size) ? new_size - size : 0;
+     }

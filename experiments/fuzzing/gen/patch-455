@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3401,6 +3401,9 @@
+ {
+     JSString *str;
+ 
++    if (!buf)
++        return JS_EXCEPTION;
++
+     if (len <= 0) {
+         return JS_AtomToString(ctx, JS_ATOM_empty_string);
+     }
+@@ -3408,6 +3411,9 @@
+     if (!str)
+         return JS_EXCEPTION;
++
++    if (len > str->len)
++        funlogline();
++
+     memcpy(str->u.str8, buf, len);
+     str->u.str8[len] = '\0';
+     return JS_MKPTR(JS_TAG_STRING, str);

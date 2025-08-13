@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7526,6 +7526,9 @@
+     realm = js_autoinit_get_realm(pr);
+     id = js_autoinit_get_id(pr);
+     func = js_autoinit_func_table[id];
++    if (id < JS_AUTOINIT_ID_PROTOTYPE || id > JS_AUTOINIT_ID_PROP) {
++        funlogline();
++    }
+     /* 'func' shall not modify the object properties 'pr' */
+     val = func(realm, p, prop, pr->u.init.opaque);
+     js_autoinit_free(ctx->rt, pr);
+@@ -7533,6 +7536,9 @@
+     pr->u.value = JS_UNDEFINED;
+     if (JS_IsException(val))
+         return -1;
++    if (prs->flags & JS_PROP_TMASK) {
++        funlogline();
++    }
+     if (id == JS_AUTOINIT_ID_MODULE_NS &&
+         JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+         /* WARNING: a varref is returned as a string  ! */

@@ -1,0 +1,54 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_promise_constructor(JSContext *, JSValue, int, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_promise_constructor` function:
+
+:js_promise_constructor:49578
+:js_promise_constructor:49608
+:js_promise_constructor:49616
+
+----------
+
+1. Line 49578: No check if `argc` is >= 1 before accessing `argv[0]` as executor. Could lead to undefined behavior if called with argc=0.
+
+2. Line 49608: If `js_create_resolving_functions` fails, it jumps to `fail` label but doesn't free `s` allocated earlier, causing memory leak.
+
+3. Line 49616: If `JS_Call` throws exception, it calls reject function but doesn't check if promise was already resolved/rejected, potentially causing double resolution.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49575,6 +49575,8 @@
+     JSValue args[2], ret;
+     int i;
+ 
++    if (argc < 1)
++        return JS_ThrowTypeError(ctx, "executor argument required");
+     executor = argv[0];
+     if (check_function(ctx, executor))
+         return JS_EXCEPTION;
+@@ -49605,6 +49607,7 @@
+     ret = JS_Call(ctx, executor, JS_UNDEFINED, 2, (JSValueConst *)args);
+     if (JS_IsException(ret)) {
+         JSValue ret2, error;
++        if (s->promise_state != JS_PROMISE_PENDING) funlogline();
+         error = JS_GetException(ctx);
+         ret2 = JS_Call(ctx, args[1], JS_UNDEFINED, 1, (JSValueConst *)&error);
+         JS_FreeValue(ctx, error);
+@@ -49617,6 +49620,7 @@
+     JS_FreeValue(ctx, args[1]);
+     return obj;
+  fail1:
++    js_free(ctx, s);
+     JS_FreeValue(ctx, args[0]);
+     JS_FreeValue(ctx, args[1]);
+  fail:
+```
+
+The fixes:
+1. Add argc check at start
+2. Free allocated promise data if resolving functions fail
+3. Check promise state before calling reject handler

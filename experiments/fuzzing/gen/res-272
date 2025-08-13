@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_dtoa2(JSContext *, double, int, int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_dtoa2` function:
+
+:quickjs.c:js_dtoa2:12854
+:quickjs.c:js_dtoa2:12879
+
+---
+
+1. In `js_dtoa2`, there's no check for negative `n_digits` which could lead to incorrect buffer allocation and string formatting. The function assumes `n_digits` is >= 0 when using it for buffer size calculations.
+
+2. The function doesn't validate the `radix` parameter against the supported range (2-36 is typical for number conversions). While this is checked in callers like `js_number_toString`, it's not validated in `js_dtoa2` itself.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12859,6 +12859,9 @@
+     int len, len_max;
+     JSValue res;
+     JSDTOATempMem dtoa_mem;
++    
++    if (n_digits < 0 || radix < 2 || radix > 36)
++        funlogline();
+     len_max = js_dtoa_max_len(d, radix, n_digits, flags);
+     
+     /* longer buffer may be used if radix != 10 */
+```
+
+The modification adds validation for both `n_digits` and `radix` parameters before proceeding with the conversion. The `funlogline()` will be called when invalid parameters are passed that could lead to incorrect behavior.
+
+Note that while the callers do some validation (like `js_number_toFixed` checks `f < 0 || f > 100`), the `js_dtoa2` function itself should validate its inputs since it's a lower-level function that could be called directly.

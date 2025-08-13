@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2395,6 +2395,9 @@
+                 if (!is_num(c))
+                     return FALSE;
+                 n64 = (uint64_t)n * 10 + (c - '0');
++                if (len == 10 && i == 9 && n64 > UINT32_MAX) {
++                    funlogline();
++                }
+                 if ((n64 >> 32) != 0)
+                     return FALSE;
+                 n = n64;
+@@ -3160,6 +3163,9 @@
+     if (p->len == 0)
+         return JS_UNDEFINED;
+     c = string_get(p, 0);
++    if (c == '-' && p->len == 1) {
++        funlogline();
++    }
+     if (!is_num(c) && c != '-')
+         return JS_UNDEFINED;
+     /* this is ECMA CanonicalNumericIndexString primitive */

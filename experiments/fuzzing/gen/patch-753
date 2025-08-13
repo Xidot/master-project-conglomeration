@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8690,6 +8690,9 @@
+     uint32_t len, idx, cur_len;
+     int i, ret;
+ 
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_FLOAT64 && JS_VALUE_GET_FLOAT64(val) >= UINT32_MAX)
++        funlogline();
++
+     /* Note: this call can reallocate the properties of 'p' */
+     ret = JS_ToArrayLengthFree(ctx, &len, val, FALSE);
+     if (ret)
+@@ -8718,6 +8721,9 @@
+             uint32_t d;
+             JSShape *sh;
+             JSShapeProperty *pr;
++            
++            if (!(p->shape->prop[0].flags & JS_PROP_CONFIGURABLE))
++                funlogline();
+ 
+             d = cur_len - len;
+             sh = p->shape;
+@@ -8742,6 +8748,9 @@
+                 for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count;
+                     i++, pr++) {
+                     if (pr->atom != JS_ATOM_NULL &&
++                        (sh != p->shape || pr != get_shape_prop(p->shape) + i)) {
++                        funlogline();
++                    }
+                         JS_AtomIsArrayIndex(ctx, &idx, pr->atom)) {
+                         if (idx >= cur_len &&
+                             !(pr->flags & JS_PROP_CONFIGURABLE)) {
+                             cur_len = idx + 1;

@@ -1,0 +1,572 @@
+Target function: "perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/* value handling */
+/// Line number here: 556
+static js_force_inline JSValue JS_NewBool(JSContext *ctx, JS_BOOL val)
+{
+    return JS_MKVAL(JS_TAG_BOOL, (val != 0));
+}
+
+/* JS Job support */
+/// Line number here: 968
+typedef JSValue JSJobFunc(JSContext *ctx, int argc, JSValueConst *argv)
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Promise */
+/// Line number here: 49246
+typedef struct JSPromiseData {
+    JSPromiseStateEnum promise_state;
+    /* 0=fulfill, 1=reject, list of JSPromiseReactionData.link */
+    struct list_head promise_reactions[2];
+    BOOL is_handled; /* Note: only useful to debug */
+    JSValue promise_result;
+} JSPromiseData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 49262
+typedef struct JSPromiseReactionData {
+    struct list_head link; /* not used in promise_reaction_job */
+    JSValue resolving_funcs[2];
+    JSValue handler;
+} JSPromiseReactionData
+
+/// Line number here: 50084
+static __exception int perform_promise_then(JSContext *ctx,
+                                            JSValueConst promise,
+                                            JSValueConst *resolve_reject,
+                                            JSValueConst *cap_resolving_funcs)
+{
+    JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    JSPromiseReactionData *rd_array[2], *rd;
+    int i, j;
+
+    rd_array[0] = NULL;
+    rd_array[1] = NULL;
+    for(i = 0; i < 2; i++) {
+        JSValueConst handler;
+        rd = js_mallocz(ctx, sizeof(*rd));
+        if (!rd) {
+            if (i == 1)
+                promise_reaction_data_free(ctx->rt, rd_array[0]);
+            return -1;
+        }
+        for(j = 0; j < 2; j++)
+            rd->resolving_funcs[j] = JS_DupValue(ctx, cap_resolving_funcs[j]);
+        handler = resolve_reject[i];
+        if (!JS_IsFunction(ctx, handler))
+            handler = JS_UNDEFINED;
+        rd->handler = JS_DupValue(ctx, handler);
+        rd_array[i] = rd;
+    }
+
+    if (s->promise_state == JS_PROMISE_PENDING) {
+        for(i = 0; i < 2; i++)
+            list_add_tail(&rd_array[i]->link, &s->promise_reactions[i]);
+    } else {
+        JSValueConst args[5];
+        if (s->promise_state == JS_PROMISE_REJECTED && !s->is_handled) {
+            JSRuntime *rt = ctx->rt;
+            if (rt->host_promise_rejection_tracker) {
+                rt->host_promise_rejection_tracker(ctx, promise, s->promise_result,
+                                                   TRUE, rt->host_promise_rejection_tracker_opaque);
+            }
+        }
+        i = s->promise_state - JS_PROMISE_FULFILLED;
+        rd = rd_array[i];
+        args[0] = rd->resolving_funcs[0];
+        args[1] = rd->resolving_funcs[1];
+        args[2] = rd->handler;
+        args[3] = JS_NewBool(ctx, i);
+        args[4] = s->promise_result;
+        JS_EnqueueJob(ctx, promise_reaction_job, 5, args);
+        for(i = 0; i < 2; i++)
+            promise_reaction_data_free(ctx->rt, rd_array[i]);
+    }
+    s->is_handled = TRUE;
+    return 0;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* return NULL if not an object of class class_id */
+/// Line number here: 10320
+void *JS_GetOpaque(JSValueConst obj, JSClassID class_id)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return NULL;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id != class_id)
+        return NULL;
+    return p->u.opaque;
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1374
+void *js_mallocz(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_mallocz_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 49283
+static void promise_reaction_data_free(JSRuntime *rt,
+                                       JSPromiseReactionData *rd)
+{
+    JS_FreeValueRT(rt, rd->resolving_funcs[0]);
+    JS_FreeValueRT(rt, rd->resolving_funcs[1]);
+    JS_FreeValueRT(rt, rd->handler);
+    js_free_rt(rt, rd);
+}
+
+/// Line number here: 10248
+BOOL JS_IsFunction(JSContext *ctx, JSValueConst val)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(val);
+    switch(p->class_id) {
+    case JS_CLASS_BYTECODE_FUNCTION:
+        return TRUE;
+    case JS_CLASS_PROXY:
+        return p->u.proxy_data->is_func;
+    default:
+        return (ctx->rt->class_array[p->class_id].call != NULL);
+    }
+}
+
+/// Line number here: 864
+typedef struct JSJobEntry {
+    struct list_head link;
+    JSContext *realm;
+    JSJobFunc *job_func;
+    int argc;
+    JSValue argv[0];
+} JSJobEntry
+
+/* return 0 if OK, < 0 if exception */
+/// Line number here: 1775
+int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
+                  int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = ctx->rt;
+    JSJobEntry *e;
+    int i;
+
+    e = js_malloc(ctx, sizeof(*e) + argc * sizeof(JSValue));
+    if (!e)
+        return -1;
+    e->realm = JS_DupContext(ctx);
+    e->job_func = job_func;
+    e->argc = argc;
+    for(i = 0; i < argc; i++) {
+        e->argv[i] = JS_DupValue(ctx, argv[i]);
+    }
+    list_add_tail(&e->link, &rt->job_list);
+    return 0;
+}
+
+/// Line number here: 50139
+static JSValue js_promise_then(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    JSValue ctor, result_promise, resolving_funcs[2];
+    JSPromiseData *s;
+    int i, ret;
+
+    s = JS_GetOpaque2(ctx, this_val, JS_CLASS_PROMISE);
+    if (!s)
+        return JS_EXCEPTION;
+
+    ctor = JS_SpeciesConstructor(ctx, this_val, JS_UNDEFINED);
+    if (JS_IsException(ctor))
+        return ctor;
+    result_promise = js_new_promise_capability(ctx, resolving_funcs, ctor);
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(result_promise))
+        return result_promise;
+    ret = perform_promise_then(ctx, this_val, argv,
+                               (JSValueConst *)resolving_funcs);
+    for(i = 0; i < 2; i++)
+        JS_FreeValue(ctx, resolving_funcs[i]);
+    if (ret) {
+        JS_FreeValue(ctx, result_promise);
+        return JS_EXCEPTION;
+    }
+    return result_promise;
+}
+
+/* AsyncFromSyncIteratorPrototype */
+/// Line number here: 50292
+typedef struct JSAsyncFromSyncIteratorData {
+    JSValue sync_iter;
+    JSValue next_method;
+} JSAsyncFromSyncIteratorData
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 50377
+static JSValue js_async_from_sync_iterator_next(JSContext *ctx, JSValueConst this_val,
+                                                int argc, JSValueConst *argv,
+                                                int magic)
+{
+    JSValue promise, resolving_funcs[2], value, err, method;
+    JSAsyncFromSyncIteratorData *s;
+    int done;
+    int is_reject;
+
+    promise = JS_NewPromiseCapability(ctx, resolving_funcs);
+    if (JS_IsException(promise))
+        return JS_EXCEPTION;
+    s = JS_GetOpaque(this_val, JS_CLASS_ASYNC_FROM_SYNC_ITERATOR);
+    if (!s) {
+        JS_ThrowTypeError(ctx, "not an Async-from-Sync Iterator");
+        goto reject;
+    }
+
+    if (magic == GEN_MAGIC_NEXT) {
+        method = JS_DupValue(ctx, s->next_method);
+    } else {
+        method = JS_GetProperty(ctx, s->sync_iter,
+                                magic == GEN_MAGIC_RETURN ? JS_ATOM_return :
+                                JS_ATOM_throw);
+        if (JS_IsException(method))
+            goto reject;
+        if (JS_IsUndefined(method) || JS_IsNull(method)) {
+            if (magic == GEN_MAGIC_RETURN) {
+                err = js_create_iterator_result(ctx, JS_DupValue(ctx, argv[0]), TRUE);
+                is_reject = 0;
+                goto done_resolve;
+            } else {
+                if (JS_IteratorClose(ctx, s->sync_iter, FALSE))
+                    goto reject;
+                JS_ThrowTypeError(ctx, "throw is not a method");
+                goto reject;
+            }
+        }
+    }
+    value = JS_IteratorNext2(ctx, s->sync_iter, method,
+                             argc >= 1 ? 1 : 0, argv, &done);
+    JS_FreeValue(ctx, method);
+    if (JS_IsException(value))
+        goto reject;
+    if (done == 2) {
+        JSValue obj = value;
+        value = JS_IteratorGetCompleteValue(ctx, obj, &done);
+        JS_FreeValue(ctx, obj);
+        if (JS_IsException(value))
+            goto reject;
+    }
+    
+    if (JS_IsException(value))
+        goto reject;
+    {
+        JSValue value_wrapper_promise, resolve_reject[2];
+        int res;
+
+        value_wrapper_promise = js_promise_resolve(ctx, ctx->promise_ctor,
+                                                   1, (JSValueConst *)&value, 0);
+        if (JS_IsException(value_wrapper_promise)) {
+            JSValue res2;
+            JS_FreeValue(ctx, value);
+            if (magic != GEN_MAGIC_RETURN && !done) {
+                JS_IteratorClose(ctx, s->sync_iter, TRUE);
+            }
+        reject:
+            err = JS_GetException(ctx);
+            is_reject = 1;
+        done_resolve:
+            res2 = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED,
+                           1, (JSValueConst *)&err);
+            JS_FreeValue(ctx, err);
+            JS_FreeValue(ctx, res2);
+            JS_FreeValue(ctx, resolving_funcs[0]);
+            JS_FreeValue(ctx, resolving_funcs[1]);
+            return promise;
+        }
+
+        resolve_reject[0] =
+            js_async_from_sync_iterator_unwrap_func_create(ctx, done);
+        if (JS_IsException(resolve_reject[0])) {
+            JS_FreeValue(ctx, value_wrapper_promise);
+            goto fail;
+        }
+        if (done || magic == GEN_MAGIC_RETURN) {
+            resolve_reject[1] = JS_UNDEFINED;
+        } else {
+            resolve_reject[1] =
+                js_async_from_sync_iterator_close_wrap_func_create(ctx, s->sync_iter);
+            if (JS_IsException(resolve_reject[1])) {
+                JS_FreeValue(ctx, value_wrapper_promise);
+                JS_FreeValue(ctx, resolve_reject[0]);
+                goto fail;
+            }
+        }
+        JS_FreeValue(ctx, value);
+        res = perform_promise_then(ctx, value_wrapper_promise,
+                                   (JSValueConst *)resolve_reject,
+                                   (JSValueConst *)resolving_funcs);
+        JS_FreeValue(ctx, resolve_reject[0]);
+        JS_FreeValue(ctx, resolve_reject[1]);
+        JS_FreeValue(ctx, value_wrapper_promise);
+        JS_FreeValue(ctx, resolving_funcs[0]);
+        JS_FreeValue(ctx, resolving_funcs[1]);
+        if (res) {
+            JS_FreeValue(ctx, promise);
+            return JS_EXCEPTION;
+        }
+    }
+    return promise;
+ fail:
+    JS_FreeValue(ctx, value);
+    JS_FreeValue(ctx, resolving_funcs[0]);
+    JS_FreeValue(ctx, resolving_funcs[1]);
+    JS_FreeValue(ctx, promise);
+    return JS_EXCEPTION;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/* add 'el' at the end of the list 'head' (= before element head) */
+/// Line number here: 63
+static inline void list_add_tail(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head->prev, head);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "js_mallocz(JSContext *, size_t)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_IsFunction(JSContext *, JSValue)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JSRuntime::host_promise_rejection_tracker";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_NewBool(JSContext *, int)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+"js_mallocz(JSContext *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_mallocz(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)" -> "js_free_rt(JSRuntime *, void *)";
+"list_add_tail(struct list_head *, struct list_head *)";
+"list_add_tail(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "JS_DupContext(JSContext *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "JS_GetOpaque2(JSContext *, JSValue, JSClassID)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "JS_SpeciesConstructor(JSContext *, JSValue, JSValue)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "js_new_promise_capability(JSContext *, JSValue *, JSValue)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_promise_then(JSContext *, JSValue, int, JSValue *)" -> "perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewPromiseCapability(JSContext *, JSValue *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsUndefined(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsNull(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_create_iterator_result(JSContext *, JSValue, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorClose(JSContext *, JSValue, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorGetCompleteValue(JSContext *, JSValue, BOOL *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_promise_resolve(JSContext *, JSValue, int, JSValue *, int)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetException(JSContext *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_async_from_sync_iterator_unwrap_func_create(JSContext *, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_async_from_sync_iterator_close_wrap_func_create(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)";
+}

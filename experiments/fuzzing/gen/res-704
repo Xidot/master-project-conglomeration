@@ -1,0 +1,27 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-memcpy_no_ub(void *, const void *, size_t)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:memcpy_no_ub:74
+
+---
+
+Now the diff with the proposed changes:
+
+```diff
+--- a/cutils.h
++++ b/cutils.h
+@@ -73,6 +73,8 @@
+ /* Prevent UB when n == 0 and (src == NULL or dest == NULL) */
+ /// Line number here: 74
+ static inline void memcpy_no_ub(void *dest, const void *src, size_t n) {
++    if (n == 0 && (src == NULL || dest == NULL))
++        funlogline();
+     if (n)
+         memcpy(dest, src, n);
+ }
+```
+
+The logical bug is that while the function claims to prevent undefined behavior when n == 0 and either pointer is NULL, it actually doesn't handle this case correctly. According to the C standard, passing NULL pointers to memcpy() is undefined behavior even when size is 0. The current implementation still calls memcpy() in this case, which could trigger UB. The added condition checks for exactly this case.

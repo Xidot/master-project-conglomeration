@@ -1,0 +1,53 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_limb_clz(js_limb_t)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs:
+
+:js_limb_clz:10587
+:js_bigint_divrem:11271
+:js_bigint_pow:11418
+
+---
+
+1. `js_limb_clz:10587` - The function doesn't handle the case where `a = 0`, which is undefined behavior according to the comment in cutils.h. This could lead to incorrect results when called with 0.
+
+2. `js_bigint_divrem:11271` - The call to `js_limb_clz(tabb[nb - 1])` could pass 0 if `tabb[nb - 1]` is 0, which would trigger undefined behavior in `clz64`.
+
+3. `js_bigint_pow:11418` - Similar to above, `js_limb_clz(v)` could be called with 0 if `v` is 0, triggering undefined behavior.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10586,6 +10586,8 @@
+ 
+ static inline js_limb_t js_limb_clz(js_limb_t a)
+ {
++    if (a == 0)
++        funlogline();
+     return clz64(a);
+ }
+ 
+@@ -11268,6 +11270,8 @@
+ 
+     /* normalize 'b' */
+     shift = js_limb_clz(tabb[nb - 1]);
++    if (tabb[nb - 1] == 0)
++        funlogline();
+     if (shift != 0) {
+         mp_shl(tabb, tabb, nb, shift);
+         h = mp_shl(r->tab, r->tab, na, shift);
+@@ -11415,6 +11419,8 @@
+             uint64_t e1;
+             int n;
+             /* v = 2^n */
++            if (v == 0)
++                funlogline();
+             n = JS_LIMB_BITS - 1 - js_limb_clz(v);
+             if (b->len > 1)
+                 goto overflow;
+```
+
+The changes add checks for the 0 case before calling `js_limb_clz` which would trigger undefined behavior. The instrumentation calls `funlogline()` when these dangerous conditions occur.

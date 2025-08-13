@@ -1,0 +1,502 @@
+Target function: "gc_decref(JSRuntime *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 384
+typedef void JS_MarkFunc(JSRuntime *rt, JSGCObjectHeader *gp)
+
+/// Line number here: 525
+typedef void JSClassGCMark(JSRuntime *rt, JSValueConst val,
+                           JS_MarkFunc *mark_func)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 40
+static inline void init_list_head(struct list_head *head)
+{
+    head->prev = head;
+    head->next = head;
+}
+
+/// Line number here: 68
+static inline void list_del(struct list_head *el)
+{
+    struct list_head *prev, *next;
+    prev = el->prev;
+    next = el->next;
+    prev->next = next;
+    next->prev = prev;
+    el->prev = NULL; /* fail safe */
+    el->next = NULL; /* fail safe */
+}
+
+/* add 'el' at the end of the list 'head' (= before element head) */
+/// Line number here: 63
+static inline void list_add_tail(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head->prev, head);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 6088
+static void gc_decref(JSRuntime *rt)
+{
+    struct list_head *el, *el1;
+    JSGCObjectHeader *p;
+
+    init_list_head(&rt->tmp_obj_list);
+
+    /* decrement the refcount of all the children of all the GC
+       objects and move the GC objects with zero refcount to
+       tmp_obj_list */
+    list_for_each_safe(el, el1, &rt->gc_obj_list) {
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->mark == 0);
+        mark_children(rt, p, gc_decref_child);
+        p->mark = 1;
+        if (p->ref_count == 0) {
+            list_del(&p->link);
+            list_add_tail(&p->link, &rt->tmp_obj_list);
+        }
+    }
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 5963
+static void mark_children(JSRuntime *rt, JSGCObjectHeader *gp,
+                          JS_MarkFunc *mark_func)
+{
+    switch(gp->gc_obj_type) {
+    case JS_GC_OBJ_TYPE_JS_OBJECT:
+        {
+            JSObject *p = (JSObject *)gp;
+            JSShapeProperty *prs;
+            JSShape *sh;
+            int i;
+            sh = p->shape;
+            mark_func(rt, &sh->header);
+            /* mark all the fields */
+            prs = get_shape_prop(sh);
+            for(i = 0; i < sh->prop_count; i++) {
+                JSProperty *pr = &p->prop[i];
+                if (prs->atom != JS_ATOM_NULL) {
+                    if (prs->flags & JS_PROP_TMASK) {
+                        if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+                            if (pr->u.getset.getter)
+                                mark_func(rt, &pr->u.getset.getter->header);
+                            if (pr->u.getset.setter)
+                                mark_func(rt, &pr->u.getset.setter->header);
+                        } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+                            /* Note: the tag does not matter
+                               provided it is a GC object */
+                            mark_func(rt, &pr->u.var_ref->header);
+                        } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
+                            js_autoinit_mark(rt, pr, mark_func);
+                        }
+                    } else {
+                        JS_MarkValue(rt, pr->u.value, mark_func);
+                    }
+                }
+                prs++;
+            }
+
+            if (p->class_id != JS_CLASS_OBJECT) {
+                JSClassGCMark *gc_mark;
+                gc_mark = rt->class_array[p->class_id].gc_mark;
+                if (gc_mark)
+                    gc_mark(rt, JS_MKPTR(JS_TAG_OBJECT, p), mark_func);
+            }
+        }
+        break;
+    case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
+        /* the template objects can be part of a cycle */
+        {
+            JSFunctionBytecode *b = (JSFunctionBytecode *)gp;
+            int i;
+            for(i = 0; i < b->cpool_count; i++) {
+                JS_MarkValue(rt, b->cpool[i], mark_func);
+            }
+            if (b->realm)
+                mark_func(rt, &b->realm->header);
+        }
+        break;
+    case JS_GC_OBJ_TYPE_VAR_REF:
+        {
+            JSVarRef *var_ref = (JSVarRef *)gp;
+            if (var_ref->is_detached) {
+                JS_MarkValue(rt, *var_ref->pvalue, mark_func);
+            } else if (var_ref->async_func) {
+                mark_func(rt, &var_ref->async_func->header);
+            }
+        }
+        break;
+    case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
+        {
+            JSAsyncFunctionState *s = (JSAsyncFunctionState *)gp;
+            JSStackFrame *sf = &s->frame;
+            JSValue *sp;
+
+            if (!s->is_completed) {
+                JS_MarkValue(rt, sf->cur_func, mark_func);
+                JS_MarkValue(rt, s->this_val, mark_func);
+                /* sf->cur_sp = NULL if the function is running */
+                if (sf->cur_sp) {
+                    /* if the function is running, cur_sp is not known so we
+                       cannot mark the stack. Marking the variables is not needed
+                       because a running function cannot be part of a removable
+                       cycle */
+                    for(sp = sf->arg_buf; sp < sf->cur_sp; sp++)
+                        JS_MarkValue(rt, *sp, mark_func);
+                }
+            }
+            JS_MarkValue(rt, s->resolving_funcs[0], mark_func);
+            JS_MarkValue(rt, s->resolving_funcs[1], mark_func);
+        }
+        break;
+    case JS_GC_OBJ_TYPE_SHAPE:
+        {
+            JSShape *sh = (JSShape *)gp;
+            if (sh->proto != NULL) {
+                mark_func(rt, &sh->proto->header);
+            }
+        }
+        break;
+    case JS_GC_OBJ_TYPE_JS_CONTEXT:
+        {
+            JSContext *ctx = (JSContext *)gp;
+            JS_MarkContext(rt, ctx, mark_func);
+        }
+        break;
+    case JS_GC_OBJ_TYPE_MODULE:
+        {
+            JSModuleDef *m = (JSModuleDef *)gp;
+            js_mark_module_def(rt, m, mark_func);
+        }
+        break;
+    default:
+        abort();
+    }
+}
+
+/// Line number here: 6206
+static void JS_RunGCInternal(JSRuntime *rt, BOOL remove_weak_objects)
+{
+    if (remove_weak_objects) {
+        /* free the weakly referenced object or symbol structures, delete
+           the associated Map/Set entries and queue the finalization
+           registry callbacks. */
+        gc_remove_weak_objects(rt);
+    }
+    
+    /* decrement the reference of the children of each object. mark =
+       1 after this pass. */
+    gc_decref(rt);
+
+    /* keep the GC objects with a non zero refcount and their childs */
+    gc_scan(rt);
+
+    /* free the GC objects in a cycle */
+    gc_free_cycles(rt);
+}
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"gc_decref(JSRuntime *)";
+"gc_decref(JSRuntime *)" -> "init_list_head(struct list_head *)";
+"gc_decref(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"gc_decref(JSRuntime *)" -> "mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)";
+"gc_decref(JSRuntime *)" -> "list_del(struct list_head *)";
+"gc_decref(JSRuntime *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "mark_children::mark_func";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "get_shape_prop(JSShape *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "js_autoinit_mark(JSRuntime *, JSProperty *, JS_MarkFunc *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "JS_MarkValue(JSRuntime *, JSValue, JS_MarkFunc *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "mark_children::gc_mark";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "JS_MarkContext(JSRuntime *, JSContext *, JS_MarkFunc *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "js_mark_module_def(JSRuntime *, JSModuleDef *, JS_MarkFunc *)";
+"mark_children(JSRuntime *, JSGCObjectHeader *, JS_MarkFunc *)" -> "abort()";
+"list_add_tail(struct list_head *, struct list_head *)";
+"list_add_tail(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_remove_weak_objects(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_decref(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_scan(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_free_cycles(JSRuntime *)";
+}

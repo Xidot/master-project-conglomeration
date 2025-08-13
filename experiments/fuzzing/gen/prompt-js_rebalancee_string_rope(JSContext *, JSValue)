@@ -1,0 +1,320 @@
+Target function: "js_rebalancee_string_rope(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 632
+static inline JS_BOOL JS_IsNull(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_NULL;
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* Return a new rope which is balanced. Algorithm from "Ropes: an
+   Alternative to Strings", Hans-J. Boehm, Russ Atkinson and Michael
+   Plass. */
+/// Line number here: 4454
+static JSValue js_rebalancee_string_rope(JSContext *ctx, JSValueConst rope)
+{
+    JSValue buckets[ROPE_N_BUCKETS], a, b;
+    int i;
+    
+    for(i = 0; i < ROPE_N_BUCKETS; i++)
+        buckets[i] = JS_NULL;
+    if (js_rebalancee_string_rope_rec(ctx, buckets, rope))
+        goto fail;
+    a = JS_NULL;
+    for(i = 0; i < ROPE_N_BUCKETS; i++) {
+        b = buckets[i];
+        if (!JS_IsNull(b)) {
+            buckets[i] = JS_NULL;
+            if (JS_IsNull(a)) {
+                a = b;
+            } else {
+                a = js_new_string_rope(ctx, b, a);
+                if (JS_IsException(a))
+                    goto fail;
+            }
+        }
+    }
+    /* fail safe */
+    if (JS_IsNull(a))
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    else
+        return a;
+ fail:
+    for(i = 0; i < ROPE_N_BUCKETS; i++) {
+        JS_FreeValue(ctx, buckets[i]);
+    }
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 4398
+static int js_rebalancee_string_rope_rec(JSContext *ctx, JSValue *buckets,
+                                          JSValueConst val)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+        JSString *p = JS_VALUE_GET_STRING(val);
+        uint32_t len, i;
+        JSValue a, b;
+        
+        len = p->len;
+        if (len == 0)
+            return 0; /* nothing to do */
+        /* find the bucket i so that rope_bucket_len[i] <= len <
+           rope_bucket_len[i + 1] and concatenate the ropes in the
+           buckets before */
+        a = JS_NULL;
+        i = 0;
+        while (len >= rope_bucket_len[i + 1]) {
+            b = buckets[i];
+            if (!JS_IsNull(b)) {
+                buckets[i] = JS_NULL;
+                if (JS_IsNull(a)) {
+                    a = b;
+                } else {
+                    a = js_new_string_rope(ctx, b, a);
+                    if (JS_IsException(a))
+                        return -1;
+                }
+            }
+            i++;
+        }
+        if (!JS_IsNull(a)) {
+            a = js_new_string_rope(ctx, a, JS_DupValue(ctx, val));
+            if (JS_IsException(a))
+                return -1;
+        } else {
+            a = JS_DupValue(ctx, val);
+        }
+        while (!JS_IsNull(buckets[i])) {
+            a = js_new_string_rope(ctx, buckets[i], a);
+            buckets[i] = JS_NULL;
+            if (JS_IsException(a))
+                return -1;
+            i++;
+        }
+        buckets[i] = a;
+    } else {
+        JSStringRope *r = JS_VALUE_GET_STRING_ROPE(val);
+        js_rebalancee_string_rope_rec(ctx, buckets, r->left);
+        js_rebalancee_string_rope_rec(ctx, buckets, r->right);
+    }
+    return 0;
+}
+
+/* op1 and op2 must be strings or string ropes */
+/// Line number here: 4317
+static JSValue js_new_string_rope(JSContext *ctx, JSValue op1, JSValue op2)
+{
+    uint32_t len;
+    int is_wide_char, depth;
+    JSStringRope *r;
+    JSValue res;
+    
+    if (JS_VALUE_GET_TAG(op1) == JS_TAG_STRING) {
+        JSString *p1 = JS_VALUE_GET_STRING(op1);
+        len = p1->len;
+        is_wide_char = p1->is_wide_char;
+        depth = 0;
+    } else {
+        JSStringRope *r1 = JS_VALUE_GET_STRING_ROPE(op1);
+        len = r1->len;
+        is_wide_char = r1->is_wide_char;
+        depth = r1->depth;
+    }
+
+    if (JS_VALUE_GET_TAG(op2) == JS_TAG_STRING) {
+        JSString *p2 = JS_VALUE_GET_STRING(op2);
+        len += p2->len;
+        is_wide_char |= p2->is_wide_char;
+    } else {
+        JSStringRope *r2 = JS_VALUE_GET_STRING_ROPE(op2);
+        len += r2->len;
+        is_wide_char |= r2->is_wide_char;
+        depth = max_int(depth, r2->depth);
+    }
+    if (len > JS_STRING_LEN_MAX) {
+        JS_ThrowInternalError(ctx, "string too long");
+        goto fail;
+    }
+    r = js_malloc(ctx, sizeof(*r));
+    if (!r)
+        goto fail;
+    r->header.ref_count = 1;
+    r->len = len;
+    r->is_wide_char = is_wide_char;
+    r->depth = depth + 1;
+    r->left = op1;
+    r->right = op2;
+    res = JS_MKPTR(JS_TAG_STRING_ROPE, r);
+    if (r->depth > JS_STRING_ROPE_MAX_DEPTH) {
+        JSValue res2;
+#ifdef DUMP_ROPE_REBALANCE
+        printf("rebalance: initial depth=%d\n", r->depth);
+#endif
+        res2 = js_rebalancee_string_rope(ctx, res);
+#ifdef DUMP_ROPE_REBALANCE
+        if (JS_VALUE_GET_TAG(res2) == JS_TAG_STRING_ROPE) 
+            printf("rebalance: final depth=%d\n", JS_VALUE_GET_STRING_ROPE(res2)->depth);
+#endif
+        JS_FreeValue(ctx, res);
+        return res2;
+    } else {
+        return res;
+    }
+ fail:
+    JS_FreeValue(ctx, op1);
+    JS_FreeValue(ctx, op2);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 3106
+JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, TRUE);
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_rebalancee_string_rope(JSContext *, JSValue)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "JS_IsNull(JSValue)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "js_new_string_rope(JSContext *, JSValue, JSValue)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_rebalancee_string_rope(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)" -> "JS_IsNull(JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)" -> "js_new_string_rope(JSContext *, JSValue, JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)" -> "JS_IsException(JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)" -> "js_rebalancee_string_rope_rec(JSContext *, JSValue *, JSValue)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)" -> "max_int(int, int)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)" -> "js_malloc(JSContext *, size_t)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)" -> "js_rebalancee_string_rope(JSContext *, JSValue)";
+"js_new_string_rope(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_AtomToString(JSContext *, JSAtom)";
+"JS_AtomToString(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+}

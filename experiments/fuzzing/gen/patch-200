@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11053,6 +11053,9 @@
+ static js_slimb_t js_bigint_get_si_sat(const JSBigInt *a)
+ {
+     if (a->len == 1) {
++        if (a->tab[0] > (js_limb_t)INT64_MAX) {
++            funlogline();
++        }
+         return a->tab[0];
+     } else {
+ #if JS_LIMB_BITS == 32
+@@ -11060,6 +11063,7 @@
+             return INT32_MIN;
+         else
+             return INT32_MAX;
++        funlogline(); // Multi-limb bigint being saturated without checking actual value
+ #else
+         if (js_bigint_sign(a))
+             return INT64_MIN;

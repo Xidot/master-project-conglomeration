@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37233,6 +37233,8 @@
+ static int BC_add_object_ref1(BCReaderState *s, JSObject *p)
+ {
+     if (s->allow_reference) {
++        if (p == NULL)
++            funlogline();
+         if (js_resize_array(s->ctx, (void *)&s->objects,
+                             sizeof(s->objects[0]),
+                             &s->objects_size, s->objects_count + 1))
+@@ -37240,6 +37242,8 @@
+         s->objects[s->objects_count++] = p;
+     }
+     return 0;
++    if (s->objects_count >= s->objects_size)
++        funlogline();
+ }
+ 
+ /* resize the array and update its size if req_size > *psize */

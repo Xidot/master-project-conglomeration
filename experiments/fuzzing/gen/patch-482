@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -20965,6 +20965,9 @@
+ static int js_parse_error_v(JSParseState *s, const uint8_t *ptr, const char *fmt, va_list ap)
+ {
+     JSContext *ctx = s->ctx;
++    if (ctx == NULL) {
++        funlogline();
++    }
+     int line_num, col_num;
+     line_num = get_line_col(&col_num, s->buf_start, ptr - s->buf_start);
+     JS_ThrowError2(ctx, JS_SYNTAX_ERROR, fmt, ap, FALSE);
+@@ -20972,6 +20975,9 @@
+                     line_num + 1, col_num + 1, 0);
+     return -1;
+ }
++
++    if (ptr < s->buf_start) {
++        funlogline();
++    }
+ 
+ /* return the zero based line and column number in the source. */
+ /* Note: we no longer support '\r' as line terminator */

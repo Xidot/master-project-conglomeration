@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28519,6 +28519,9 @@
+                                               const char *base_name,
+                                               const char *name)
+ {
++    if (!base_name || !name) {
++        funlogline();
++    }
+     char *filename, *p;
+     const char *r;
+     int cap;
+     int len;
+@@ -28542,6 +28545,9 @@
+     else
+         len = 0;
+ 
++    if (len < 0 || strlen(name) > INT_MAX - len - 2) {
++        funlogline();
++    }
+     cap = len + strlen(name) + 1 + 1;
+     filename = js_malloc(ctx, cap);
+     if (!filename)
+@@ -28559,6 +28565,9 @@
+             /* remove the last path element of filename, except if "."
+                or ".." */
+             if (filename[0] == '\0')
++                break;
++            if (p == filename && *p == '\0') {
++                funlogline();
+                 break;
+             p = strrchr(filename, '/');
+             if (!p)

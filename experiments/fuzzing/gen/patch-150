@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48090,6 +48090,8 @@
+ void JS_AddIntrinsicProxy(JSContext *ctx)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!rt)
++        funlogline();
+     JSValue obj1;
+ 
+     if (!JS_IsRegisteredClass(rt, JS_CLASS_PROXY)) {
+@@ -48097,6 +48099,8 @@
+                          countof(js_proxy_class_def));
+         rt->class_array[JS_CLASS_PROXY].exotic = &js_proxy_exotic_methods;
+         rt->class_array[JS_CLASS_PROXY].call = js_proxy_call;
++        if (init_class_range(rt, js_proxy_class_def, JS_CLASS_PROXY, countof(js_proxy_class_def)) < 0)
++            funlogline();
+     }
+ 
+     obj1 = JS_NewCFunction2(ctx, js_proxy_constructor, "Proxy", 2,
++    if (JS_IsException(obj1))
++        funlogline();
+     JS_SetConstructorBit(ctx, obj1, TRUE);
+     JS_SetPropertyFunctionList(ctx, obj1, js_proxy_funcs,
+                                countof(js_proxy_funcs));

@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36264,6 +36264,9 @@
+     uint8_t *bc_buf;
+     uint32_t val;
+ 
++    if (bc_len < 0)
++        goto fail;
++
+     bc_buf = js_malloc(s->ctx, bc_len);
+     if (!bc_buf)
+         return -1;
+@@ -36277,6 +36280,8 @@
+         case OP_FMT_atom_u16:
+         case OP_FMT_atom_label_u8:
+         case OP_FMT_atom_label_u16:
++            if (pos + len > bc_len)
++                goto fail;
+             atom = get_u32(bc_buf + pos + 1);
+             if (bc_atom_to_idx(s, &val, atom))
+                 goto fail;
+@@ -36298,6 +36303,8 @@
+     js_free(s->ctx, bc_buf);
+     return 0;
+  fail:
++    if (bc_buf)
++        funlogline();
+     js_free(s->ctx, bc_buf);
+     return -1;
+ }

@@ -1,0 +1,528 @@
+Target function: "JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 739
+static inline JSValue JS_NewString(JSContext *ctx, const char *str)
+{
+    return JS_NewStringLen(ctx, str, strlen(str));
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 197
+typedef enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+} JSErrorEnum
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 7005
+static JSValue JS_ThrowError2(JSContext *ctx, JSErrorEnum error_num,
+                              const char *fmt, va_list ap, BOOL add_backtrace)
+{
+    char buf[256];
+    JSValue obj, ret;
+
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    obj = JS_NewObjectProtoClass(ctx, ctx->native_error_proto[error_num],
+                                 JS_CLASS_ERROR);
+    if (unlikely(JS_IsException(obj))) {
+        /* out of memory: throw JS_NULL to avoid recursing */
+        obj = JS_NULL;
+    } else {
+        JS_DefinePropertyValue(ctx, obj, JS_ATOM_message,
+                               JS_NewString(ctx, buf),
+                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        if (add_backtrace) {
+            build_backtrace(ctx, obj, NULL, 0, 0, 0);
+        }
+    }
+    ret = JS_Throw(ctx, obj);
+    return ret;
+}
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* WARNING: proto must be an object or JS_NULL */
+/// Line number here: 5169
+JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                               JSClassID class_id)
+{
+    JSShape *sh;
+    JSObject *proto;
+
+    proto = get_proto_obj(proto_val);
+    sh = find_hashed_shape_proto(ctx->rt, proto);
+    if (likely(sh)) {
+        sh = js_dup_shape(sh);
+    } else {
+        sh = js_new_shape(ctx, proto);
+        if (!sh)
+            return JS_EXCEPTION;
+    }
+    return JS_NewObjectFromShape(ctx, sh, class_id);
+}
+
+/* shortcut to add or redefine a new property value */
+/// Line number here: 9830
+int JS_DefinePropertyValue(JSContext *ctx, JSValueConst this_obj,
+                           JSAtom prop, JSValue val, int flags)
+{
+    int ret;
+    ret = JS_DefineProperty(ctx, this_obj, prop, val, JS_UNDEFINED, JS_UNDEFINED,
+                            flags | JS_PROP_HAS_VALUE | JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_WRITABLE | JS_PROP_HAS_ENUMERABLE);
+    JS_FreeValue(ctx, val);
+    return ret;
+}
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/* if filename != NULL, an additional level is added with the filename
+   and line number information (used for parse error). */
+/// Line number here: 6905
+static void build_backtrace(JSContext *ctx, JSValueConst error_obj,
+                            const char *filename, int line_num, int col_num,
+                            int backtrace_flags)
+{
+    JSStackFrame *sf;
+    JSValue str;
+    DynBuf dbuf;
+    const char *func_name_str;
+    const char *str1;
+    JSObject *p;
+
+    if (!JS_IsObject(error_obj))
+        return; /* protection in the out of memory case */
+    
+    js_dbuf_init(ctx, &dbuf);
+    if (filename) {
+        dbuf_printf(&dbuf, "    at %s", filename);
+        if (line_num != -1)
+            dbuf_printf(&dbuf, ":%d:%d", line_num, col_num);
+        dbuf_putc(&dbuf, '\n');
+        str = JS_NewString(ctx, filename);
+        if (JS_IsException(str))
+            return;
+        /* Note: SpiderMonkey does that, could update once there is a standard */
+        if (JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_fileName, str,
+                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) < 0 ||
+            JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_lineNumber, JS_NewInt32(ctx, line_num),
+                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) < 0 ||
+            JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_columnNumber, JS_NewInt32(ctx, col_num),
+                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE) < 0) {
+            return;
+        }
+    }
+    for(sf = ctx->rt->current_stack_frame; sf != NULL; sf = sf->prev_frame) {
+        if (sf->js_mode & JS_MODE_BACKTRACE_BARRIER)
+            break;
+        if (backtrace_flags & JS_BACKTRACE_FLAG_SKIP_FIRST_LEVEL) {
+            backtrace_flags &= ~JS_BACKTRACE_FLAG_SKIP_FIRST_LEVEL;
+            continue;
+        }
+        func_name_str = get_func_name(ctx, sf->cur_func);
+        if (!func_name_str || func_name_str[0] == '\0')
+            str1 = "<anonymous>";
+        else
+            str1 = func_name_str;
+        dbuf_printf(&dbuf, "    at %s", str1);
+        JS_FreeCString(ctx, func_name_str);
+
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (js_class_has_bytecode(p->class_id)) {
+            JSFunctionBytecode *b;
+            const char *atom_str;
+            int line_num1, col_num1;
+
+            b = p->u.func.function_bytecode;
+            if (b->has_debug) {
+                line_num1 = find_line_num(ctx, b,
+                                          sf->cur_pc - b->byte_code_buf - 1, &col_num1);
+                atom_str = JS_AtomToCString(ctx, b->debug.filename);
+                dbuf_printf(&dbuf, " (%s",
+                            atom_str ? atom_str : "<null>");
+                JS_FreeCString(ctx, atom_str);
+                if (line_num1 != 0)
+                    dbuf_printf(&dbuf, ":%d:%d", line_num1, col_num1);
+                dbuf_putc(&dbuf, ')');
+            }
+        } else {
+            dbuf_printf(&dbuf, " (native)");
+        }
+        dbuf_putc(&dbuf, '\n');
+    }
+    dbuf_putc(&dbuf, '\0');
+    if (dbuf_error(&dbuf))
+        str = JS_NULL;
+    else
+        str = JS_NewString(ctx, (char *)dbuf.buf);
+    dbuf_free(&dbuf);
+    JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_stack, str,
+                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+/* WARNING: obj is freed */
+/// Line number here: 6732
+JSValue JS_Throw(JSContext *ctx, JSValue obj)
+{
+    JSRuntime *rt = ctx->rt;
+    JS_FreeValue(ctx, rt->current_exception);
+    rt->current_exception = obj;
+    rt->current_exception_is_uncatchable = FALSE;
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 7029
+static JSValue JS_ThrowError(JSContext *ctx, JSErrorEnum error_num,
+                             const char *fmt, va_list ap)
+{
+    JSRuntime *rt = ctx->rt;
+    JSStackFrame *sf;
+    BOOL add_backtrace;
+
+    /* the backtrace is added later if called from a bytecode function */
+    sf = rt->current_stack_frame;
+    add_backtrace = !rt->in_out_of_memory &&
+        (!sf || (JS_GetFunctionBytecode(sf->cur_func) == NULL));
+    return JS_ThrowError2(ctx, error_num, fmt, ap, add_backtrace);
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/* 'ptr' is the position of the error in the source */
+/// Line number here: 20968
+static int js_parse_error_v(JSParseState *s, const uint8_t *ptr, const char *fmt, va_list ap)
+{
+    JSContext *ctx = s->ctx;
+    int line_num, col_num;
+    line_num = get_line_col(&col_num, s->buf_start, ptr - s->buf_start);
+    JS_ThrowError2(ctx, JS_SYNTAX_ERROR, fmt, ap, FALSE);
+    build_backtrace(ctx, ctx->rt->current_exception, s->filename,
+                    line_num + 1, col_num + 1, 0);
+    return -1;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/lib/clang/20/include/__stdarg___gnuc_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list __gnuc_va_list
+
+---- File: /usr/include/stdio.h
+
+/// Line number here: 388
+extern int vsnprintf (char *__restrict __s, size_t __maxlen,
+		      const char *__restrict __format, __gnuc_va_list __arg)
+     __THROWNL __attribute__ ((__format__ (__printf__, 3, 0)))
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "vsnprintf(char *restrict, size_t, const char *restrict, struct __va_list_tag *)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "__builtin_expect(long, long)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "JS_IsException(JSValue)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "JS_NewString(JSContext *, const char *)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "build_backtrace(JSContext *, JSValue, const char *, int, int, int)";
+"JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)" -> "JS_Throw(JSContext *, JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "get_proto_obj(JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "find_hashed_shape_proto(JSRuntime *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "__builtin_expect(long, long)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_dup_shape(JSShape *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_new_shape(JSContext *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)" -> "JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_NewString(JSContext *, const char *)";
+"JS_NewString(JSContext *, const char *)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewString(JSContext *, const char *)" -> "strlen(const char *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_IsObject(JSValue)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "js_dbuf_init(JSContext *, DynBuf *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "dbuf_printf(DynBuf *, const char *, ...)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_NewString(JSContext *, const char *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_IsException(JSValue)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_NewInt32(JSContext *, int32_t)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "get_func_name(JSContext *, JSValue)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_FreeCString(JSContext *, const char *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "js_class_has_bytecode(JSClassID)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "find_line_num(JSContext *, JSFunctionBytecode *, uint32_t, int *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "dbuf_error(DynBuf *)";
+"build_backtrace(JSContext *, JSValue, const char *, int, int, int)" -> "dbuf_free(DynBuf *)";
+"JS_Throw(JSContext *, JSValue)";
+"JS_Throw(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_GetFunctionBytecode(JSValue)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)";
+"js_parse_error_v(JSParseState *, const uint8_t *, const char *, struct __va_list_tag *)";
+"js_parse_error_v(JSParseState *, const uint8_t *, const char *, struct __va_list_tag *)" -> "get_line_col(int *, const uint8_t *, size_t)";
+"js_parse_error_v(JSParseState *, const uint8_t *, const char *, struct __va_list_tag *)" -> "JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)";
+"js_parse_error_v(JSParseState *, const uint8_t *, const char *, struct __va_list_tag *)" -> "build_backtrace(JSContext *, JSValue, const char *, int, int, int)";
+}

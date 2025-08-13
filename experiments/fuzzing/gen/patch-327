@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39710,6 +39710,8 @@
+     if (check_function(ctx, this_val))
+         return JS_EXCEPTION;
+     this_arg = argv[0];
++    if (argc < 2)
++        return JS_Call(ctx, this_val, this_arg, 0, NULL);
+     array_arg = argv[1];
+     if ((JS_VALUE_GET_TAG(array_arg) == JS_TAG_UNDEFINED ||
+          JS_VALUE_GET_TAG(array_arg) == JS_TAG_NULL) && magic != 2) {
+@@ -39720,6 +39722,8 @@
+         return JS_EXCEPTION;
+     if (magic & 1) {
+         ret = JS_CallConstructor2(ctx, this_val, this_arg, len, (JSValueConst *)tab);
+     } else {
++        if (magic > 2)
++            funlogline();
+         ret = JS_Call(ctx, this_val, this_arg, len, (JSValueConst *)tab);
+     }
+     free_arg_list(ctx, tab, len);

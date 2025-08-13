@@ -1,0 +1,470 @@
+Target function: "JS_ToInt32(JSContext *, int32_t *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 12662
+int JS_ToInt32(JSContext *ctx, int32_t *pres, JSValueConst val)
+{
+    return JS_ToInt32Free(ctx, pres, JS_DupValue(ctx, val));
+}
+
+/// Line number here: 485
+typedef union JSFloat64Union {
+    double d;
+    uint64_t u64;
+    uint32_t u32[2];
+} JSFloat64Union
+
+/* return (<0, 0) in case of exception */
+/// Line number here: 12610
+static int JS_ToInt32Free(JSContext *ctx, int32_t *pres, JSValue val)
+{
+    uint32_t tag;
+    int32_t ret;
+
+ redo:
+    tag = JS_VALUE_GET_NORM_TAG(val);
+    switch(tag) {
+    case JS_TAG_INT:
+    case JS_TAG_BOOL:
+    case JS_TAG_NULL:
+    case JS_TAG_UNDEFINED:
+        ret = JS_VALUE_GET_INT(val);
+        break;
+    case JS_TAG_FLOAT64:
+        {
+            JSFloat64Union u;
+            double d;
+            int e;
+            d = JS_VALUE_GET_FLOAT64(val);
+            u.d = d;
+            /* we avoid doing fmod(x, 2^32) */
+            e = (u.u64 >> 52) & 0x7ff;
+            if (likely(e <= (1023 + 30))) {
+                /* fast case */
+                ret = (int32_t)d;
+            } else if (e <= (1023 + 30 + 53)) {
+                uint64_t v;
+                /* remainder modulo 2^32 */
+                v = (u.u64 & (((uint64_t)1 << 52) - 1)) | ((uint64_t)1 << 52);
+                v = v << ((e - 1023) - 52 + 32);
+                ret = v >> 32;
+                /* take the sign into account */
+                if (u.u64 >> 63)
+                    ret = -ret;
+            } else {
+                ret = 0; /* also handles NaN and +inf */
+            }
+        }
+        break;
+    default:
+        val = JS_ToNumberFree(ctx, val);
+        if (JS_IsException(val)) {
+            *pres = 0;
+            return -1;
+        }
+        goto redo;
+    }
+    *pres = ret;
+    return 0;
+}
+
+/// Line number here: 42403
+static JSValue js_parseInt(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    const char *str, *p;
+    int radix, flags;
+    JSValue ret;
+
+    str = JS_ToCString(ctx, argv[0]);
+    if (!str)
+        return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &radix, argv[1])) {
+        JS_FreeCString(ctx, str);
+        return JS_EXCEPTION;
+    }
+    if (radix != 0 && (radix < 2 || radix > 36)) {
+        ret = JS_NAN;
+    } else {
+        p = str;
+        p += skip_spaces(p);
+        flags = ATOD_INT_ONLY | ATOD_ACCEPT_PREFIX_AFTER_SIGN;
+        ret = js_atof(ctx, p, NULL, radix, flags);
+    }
+    JS_FreeCString(ctx, str);
+    return ret;
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 42636
+static JSValue js_string_fromCharCode(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv)
+{
+    int i;
+    StringBuffer b_s, *b = &b_s;
+
+    string_buffer_init(ctx, b, argc);
+
+    for(i = 0; i < argc; i++) {
+        int32_t c;
+        if (JS_ToInt32(ctx, &c, argv[i]) || string_buffer_putc16(b, c & 0xffff)) {
+            string_buffer_free(b);
+            return JS_EXCEPTION;
+        }
+    }
+    return string_buffer_end(b);
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 49799
+static JSValue js_promise_all_resolve_element(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv,
+                                              int magic,
+                                              JSValue *func_data)
+{
+    int resolve_type = magic & 3;
+    int is_reject = magic & 4;
+    BOOL alreadyCalled = JS_ToBool(ctx, func_data[0]);
+    JSValueConst values = func_data[2];
+    JSValueConst resolve = func_data[3];
+    JSValueConst resolve_element_env = func_data[4];
+    JSValue ret, obj;
+    int is_zero, index;
+
+    if (JS_ToInt32(ctx, &index, func_data[1]))
+        return JS_EXCEPTION;
+    if (alreadyCalled)
+        return JS_UNDEFINED;
+    func_data[0] = JS_NewBool(ctx, TRUE);
+
+    if (resolve_type == PROMISE_MAGIC_allSettled) {
+        JSValue str;
+
+        obj = JS_NewObject(ctx);
+        if (JS_IsException(obj))
+            return JS_EXCEPTION;
+        str = js_new_string8(ctx, is_reject ? "rejected" : "fulfilled");
+        if (JS_IsException(str))
+            goto fail1;
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_status,
+                                   str,
+                                   JS_PROP_C_W_E) < 0)
+            goto fail1;
+        if (JS_DefinePropertyValue(ctx, obj,
+                                   is_reject ? JS_ATOM_reason : JS_ATOM_value,
+                                   JS_DupValue(ctx, argv[0]),
+                                   JS_PROP_C_W_E) < 0) {
+        fail1:
+            JS_FreeValue(ctx, obj);
+            return JS_EXCEPTION;
+        }
+    } else {
+        obj = JS_DupValue(ctx, argv[0]);
+    }
+    if (JS_DefinePropertyValueUint32(ctx, values, index,
+                                     obj, JS_PROP_C_W_E) < 0)
+        return JS_EXCEPTION;
+
+    is_zero = remainingElementsCount_add(ctx, resolve_element_env, -1);
+    if (is_zero < 0)
+        return JS_EXCEPTION;
+    if (is_zero) {
+        if (resolve_type == PROMISE_MAGIC_any) {
+            JSValue error;
+            error = js_aggregate_error_constructor(ctx, values);
+            if (JS_IsException(error))
+                return JS_EXCEPTION;
+            ret = JS_Call(ctx, resolve, JS_UNDEFINED, 1, (JSValueConst *)&error);
+            JS_FreeValue(ctx, error);
+        } else {
+            ret = JS_Call(ctx, resolve, JS_UNDEFINED, 1, (JSValueConst *)&values);
+        }
+        if (JS_IsException(ret))
+            return ret;
+        JS_FreeValue(ctx, ret);
+    }
+    return JS_UNDEFINED;
+}
+
+/// Line number here: 55369
+typedef struct JSAtomicsWaiter {
+    struct list_head link;
+    BOOL linked;
+    pthread_cond_t cond;
+    int32_t *ptr;
+} JSAtomicsWaiter
+
+/// Line number here: 55375
+static JSValue js_atomics_wait(JSContext *ctx,
+                               JSValueConst this_obj,
+                               int argc, JSValueConst *argv)
+{
+    int64_t v;
+    int32_t v32;
+    void *ptr;
+    int64_t timeout;
+    struct timespec ts;
+    JSAtomicsWaiter waiter_s, *waiter;
+    int ret, size_log2, res;
+    double d;
+
+    ptr = js_atomics_get_ptr(ctx, NULL, &size_log2, NULL,
+                             argv[0], argv[1], 2);
+    if (!ptr)
+        return JS_EXCEPTION;
+    if (size_log2 == 3) {
+        if (JS_ToBigInt64(ctx, &v, argv[2]))
+            return JS_EXCEPTION;
+    } else {
+        if (JS_ToInt32(ctx, &v32, argv[2]))
+            return JS_EXCEPTION;
+        v = v32;
+    }
+    if (JS_ToFloat64(ctx, &d, argv[3]))
+        return JS_EXCEPTION;
+    /* must use INT64_MAX + 1 because INT64_MAX cannot be exactly represented as a double */
+    if (isnan(d) || d >= 0x1p63)
+        timeout = INT64_MAX;
+    else if (d < 0)
+        timeout = 0;
+    else
+        timeout = (int64_t)d;
+    if (!ctx->rt->can_block)
+        return JS_ThrowTypeError(ctx, "cannot block in this thread");
+
+    /* XXX: inefficient if large number of waiters, should hash on
+       'ptr' value */
+    /* XXX: use Linux futexes when available ? */
+    pthread_mutex_lock(&js_atomics_mutex);
+    if (size_log2 == 3) {
+        res = *(int64_t *)ptr != v;
+    } else {
+        res = *(int32_t *)ptr != v;
+    }
+    if (res) {
+        pthread_mutex_unlock(&js_atomics_mutex);
+        return JS_AtomToString(ctx, JS_ATOM_not_equal);
+    }
+
+    waiter = &waiter_s;
+    waiter->ptr = ptr;
+    pthread_cond_init(&waiter->cond, NULL);
+    waiter->linked = TRUE;
+    list_add_tail(&waiter->link, &js_atomics_waiter_list);
+
+    if (timeout == INT64_MAX) {
+        pthread_cond_wait(&waiter->cond, &js_atomics_mutex);
+        ret = 0;
+    } else {
+        /* XXX: use clock monotonic */
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += timeout / 1000;
+        ts.tv_nsec += (timeout % 1000) * 1000000;
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_nsec -= 1000000000;
+            ts.tv_sec++;
+        }
+        ret = pthread_cond_timedwait(&waiter->cond, &js_atomics_mutex,
+                                     &ts);
+    }
+    if (waiter->linked)
+        list_del(&waiter->link);
+    pthread_mutex_unlock(&js_atomics_mutex);
+    pthread_cond_destroy(&waiter->cond);
+    if (ret == ETIMEDOUT) {
+        return JS_AtomToString(ctx, JS_ATOM_timed_out);
+    } else {
+        return JS_AtomToString(ctx, JS_ATOM_ok);
+    }
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/types/struct_timespec.h
+
+/// Line number here: 10
+struct timespec
+{
+#ifdef __USE_TIME64_REDIRECTS
+  __time64_t tv_sec;		/* Seconds.  */
+#else
+  __time_t tv_sec;		/* Seconds.  */
+#endif
+#if __WORDSIZE == 64 \
+  || (defined __SYSCALL_WORDSIZE && __SYSCALL_WORDSIZE == 64) \
+  || (__TIMESIZE == 32 && !defined __USE_TIME64_REDIRECTS)
+  __syscall_slong_t tv_nsec;	/* Nanoseconds.  */
+#else
+# if __BYTE_ORDER == __BIG_ENDIAN
+  int: 32;           /* Padding.  */
+  long int tv_nsec;  /* Nanoseconds.  */
+# else
+  long int tv_nsec;  /* Nanoseconds.  */
+  int: 32;           /* Padding.  */
+# endif
+#endif
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"JS_ToInt32(JSContext *, int32_t *, JSValue)" -> "JS_ToInt32Free(JSContext *, int32_t *, JSValue)";
+"JS_ToInt32(JSContext *, int32_t *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToInt32Free(JSContext *, int32_t *, JSValue)";
+"JS_ToInt32Free(JSContext *, int32_t *, JSValue)" -> "__builtin_expect(long, long)";
+"JS_ToInt32Free(JSContext *, int32_t *, JSValue)" -> "JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToInt32Free(JSContext *, int32_t *, JSValue)" -> "JS_IsException(JSValue)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "__builtin_nanf(const char *)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "skip_spaces(const char *)";
+"js_parseInt(JSContext *, JSValue, int, JSValue *)" -> "js_atof(JSContext *, const char *, const char **, int, int)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_free(StringBuffer *)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_ToBool(JSContext *, JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_NewBool(JSContext *, int)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_NewObject(JSContext *)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "js_new_string8(JSContext *, const char *)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_DefinePropertyValueUint32(JSContext *, JSValue, uint32_t, JSValue, int)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "remainingElementsCount_add(JSContext *, JSValue, int)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "js_aggregate_error_constructor(JSContext *, JSValue)";
+"js_promise_all_resolve_element(JSContext *, JSValue, int, JSValue *, int, JSValue *)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "js_atomics_get_ptr(JSContext *, JSArrayBuffer **, int *, JSClassID *, JSValue, JSValue, int)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "JS_ToBigInt64(JSContext *, int64_t *, JSValue)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "__builtin_isnan()";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_mutex_lock(pthread_mutex_t *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_mutex_unlock(pthread_mutex_t *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_cond_init(pthread_cond_t *restrict, const pthread_condattr_t *restrict)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_cond_wait(pthread_cond_t *restrict, pthread_mutex_t *restrict)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "clock_gettime(clockid_t, struct timespec *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_cond_timedwait(pthread_cond_t *restrict, pthread_mutex_t *restrict, const struct timespec *restrict)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "list_del(struct list_head *)";
+"js_atomics_wait(JSContext *, JSValue, int, JSValue *)" -> "pthread_cond_destroy(pthread_cond_t *)";
+}

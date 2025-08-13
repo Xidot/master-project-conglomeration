@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36512,6 +36512,9 @@
+     int ret;
+     BOOL is_template;
+ 
++    if (p->class_id != JS_CLASS_ARRAY)
++        funlogline();
++
+     if (s->allow_bytecode && !p->extensible) {
+         /* not extensible array: we consider it is a
+            template when we are saving bytecode */
+@@ -36527,6 +36530,9 @@
+         val = JS_GetPropertyUint32(s->ctx, obj, i);
+         if (JS_IsException(val))
+             goto fail1;
+         ret = JS_WriteObjectRec(s, val);
++        if (JS_IsUndefined(val) || JS_IsNull(val)) {
++            funlogline();
++        }
+         JS_FreeValue(s->ctx, val);
+         if (ret)
+             goto fail1;

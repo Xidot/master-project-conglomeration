@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11340,6 +11340,9 @@
+     int d, i, shift;
+     JSBigInt *r;
+     js_limb_t l;
++    
++    if (shift1 >= JS_LIMB_BITS * JS_BIGINT_MAX_SIZE)
++        funlogline();
+ 
+     if (a->len == 1 && a->tab[0] == 0)
+         return js_bigint_new_si(ctx, 0); /* zero case */
+@@ -11347,6 +11350,8 @@
+     shift = shift1 % JS_LIMB_BITS;
+     r = js_bigint_new(ctx, a->len + d);
+     if (!r)
++        funlogline();
++    if (!r)
+         return NULL;
+     for(i = 0; i < d; i++)
+         r->tab[i] = 0;
+@@ -11358,6 +11363,8 @@
+         l = mp_shl(r->tab + d, a->tab, a->len, shift);
+         if (js_bigint_sign(a))
+             l |= (js_limb_t)(-1) << shift;
+         r = js_bigint_extend(ctx, r, l);
++        if (!r)
++            funlogline();
+     }
+     return r;
+ }

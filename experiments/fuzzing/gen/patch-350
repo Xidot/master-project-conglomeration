@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7747,6 +7747,8 @@
+     JSAtom prop;
+ 
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
++        if (unlikely(!ctx)) 
++            funlogline();
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+     /* safety check */
+     if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL))
+@@ -7754,12 +7756,18 @@
+     prop = js_symbol_to_atom(ctx, (JSValue)name);
+     p = JS_VALUE_GET_OBJ(obj);
+     prs = find_own_property(&pr, p, prop);
++    if (unlikely(!prs))
++        funlogline();
+     if (!prs) {
+         JS_ThrowTypeErrorPrivateNotFound(ctx, prop);
+         return JS_EXCEPTION;
+     }
++    if (unlikely(!pr))
++        funlogline();
+     return JS_DupValue(ctx, pr->u.value);
+ }

@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_same_value(JSContext *, JSValue, JSValue)
+-------------------------
+Based on the analysis of the code and call graph, here are the potential logical bugs in the `js_same_value` function:
+
+:quickjs.c:js_same_value:15137
+
+The issue is that `js_same_value` calls `JS_DupValue` on both operands before passing them to `js_strict_eq2`, but there's no check if the duplication fails (returns an exception). This could lead to memory leaks or incorrect comparisons if the duplication fails.
+
+Here's the proposed fix:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15137,6 +15137,12 @@
+ static BOOL js_same_value(JSContext *ctx, JSValueConst op1, JSValueConst op2)
+ {
+     return js_strict_eq2(ctx,
+                          JS_DupValue(ctx, op1), JS_DupValue(ctx, op2),
+                          JS_EQ_SAME_VALUE);
++    JSValue dup1 = JS_DupValue(ctx, op1);
++    JSValue dup2 = JS_DupValue(ctx, op2);
++    if (JS_IsException(dup1) || JS_IsException(dup2)) {
++        funlogline();
++    }
++    return js_strict_eq2(ctx, dup1, dup2, JS_EQ_SAME_VALUE);
+ }
+```
+
+The fix:
+1. Stores the duplicated values in variables first
+2. Checks if either duplication failed (returned an exception)
+3. Calls `funlogline()` if there was an error
+4. Proceeds with the comparison only if both duplications succeeded
+
+This ensures we properly handle cases where value duplication fails while maintaining the original functionality when everything works correctly.
+
+The bug could manifest when:
+1. The JS engine is low on memory
+2. The values being compared are invalid or corrupted
+3. There's an internal error in the duplication logic
+
+The fix prevents potential memory leaks and ensures proper error handling in these edge cases.

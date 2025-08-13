@@ -1,0 +1,128 @@
+Target function: "js_malloc_usable_size(JSContext *, const void *)"
+
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1418
+size_t js_malloc_usable_size(JSContext *ctx, const void *ptr)
+{
+    return js_malloc_usable_size_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 1347
+size_t js_malloc_usable_size_rt(JSRuntime *rt, const void *ptr)
+{
+    return rt->mf.js_malloc_usable_size(ptr);
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 4120
+static BOOL JS_ConcatStringInPlace(JSContext *ctx, JSString *p1, JSValueConst op2) {
+    if (JS_VALUE_GET_TAG(op2) == JS_TAG_STRING) {
+        JSString *p2 = JS_VALUE_GET_STRING(op2);
+        size_t size1;
+
+        if (p2->len == 0)
+            return TRUE;
+        if (p1->header.ref_count != 1)
+            return FALSE;
+        size1 = js_malloc_usable_size(ctx, p1);
+        if (p1->is_wide_char) {
+            if (size1 >= sizeof(*p1) + ((p1->len + p2->len) << 1)) {
+                if (p2->is_wide_char) {
+                    memcpy(p1->u.str16 + p1->len, p2->u.str16, p2->len << 1);
+                    p1->len += p2->len;
+                    return TRUE;
+                } else {
+                    size_t i;
+                    for (i = 0; i < p2->len; i++) {
+                        p1->u.str16[p1->len++] = p2->u.str8[i];
+                    }
+                    return TRUE;
+                }
+            }
+        } else if (!p2->is_wide_char) {
+            if (size1 >= sizeof(*p1) + p1->len + p2->len + 1) {
+                memcpy(p1->u.str8 + p1->len, p2->u.str8, p2->len);
+                p1->len += p2->len;
+                p1->u.str8[p1->len] = '\0';
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_malloc_usable_size(JSContext *, const void *)";
+"js_malloc_usable_size(JSContext *, const void *)" -> "js_malloc_usable_size_rt(JSRuntime *, const void *)";
+"js_malloc_usable_size_rt(JSRuntime *, const void *)";
+"js_malloc_usable_size_rt(JSRuntime *, const void *)" -> "JSMallocFunctions::js_malloc_usable_size";
+"JS_ConcatStringInPlace(JSContext *, JSString *, JSValue)";
+"JS_ConcatStringInPlace(JSContext *, JSString *, JSValue)" -> "js_malloc_usable_size(JSContext *, const void *)";
+"JS_ConcatStringInPlace(JSContext *, JSString *, JSValue)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+}

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37765,6 +37765,8 @@
+ static JSValue JS_ReadObjectValue(BCReaderState *s)
+ {
+     JSContext *ctx = s->ctx;
++    if (ctx == NULL)
++        return JS_EXCEPTION;
+     JSValue val, obj = JS_UNDEFINED;
+ 
+     val = JS_ReadObjectRec(s);
+@@ -37772,6 +37772,8 @@
+         goto fail;
+     obj = JS_ToObject(ctx, val);
+     if (JS_IsException(obj))
++        goto fail;
++    if (JS_VALUE_GET_TAG(obj) <= JS_TAG_UNINITIALIZED)
+         goto fail;
+     if (BC_add_object_ref(s, obj))
+         goto fail;

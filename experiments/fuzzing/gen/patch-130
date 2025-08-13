@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1530,6 +1530,9 @@
+                             int start, int count)
+ {
+     JSClassDef cm_s, *cm = &cm_s;
++    if (tab == NULL || start < 0 || count < 0) {
++        funlogline();
++    }
+     int i, class_id;
+ 
+     for(i = 0; i < count; i++) {
+@@ -1537,6 +1540,9 @@
+         memset(cm, 0, sizeof(*cm));
+         cm->finalizer = tab[i].finalizer;
+         cm->gc_mark = tab[i].gc_mark;
++        if (i >= count) {
++            funlogline();
++        }
+         if (JS_NewClass1(rt, class_id, cm, tab[i].class_name) < 0)
+             return -1;
+     }

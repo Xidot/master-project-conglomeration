@@ -1,0 +1,35 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7852,6 +7852,10 @@
+     if (!js_class_has_bytecode(p1->class_id))
+         goto not_obj;
+     home_obj = p1->u.func.home_object;
++    if (unlikely(!home_obj)) {
++        JS_ThrowTypeError(ctx, "invalid home object");
++        return -1;
++    }
+     if (!home_obj)
+         goto not_obj;
+     prs = find_own_property(&pr, home_obj, JS_ATOM_Private_brand);
+@@ -7860,6 +7864,10 @@
+         return -1;
+     }
+     brand = pr->u.value;
++    if (unlikely(JS_VALUE_GET_TAG(brand) != JS_TAG_SYMBOL)) {
++        JS_ThrowTypeError(ctx, "brand is not a symbol");
++        return -1;
++    }
+     /* safety check */
+     if (unlikely(JS_VALUE_GET_TAG(brand) != JS_TAG_SYMBOL))
+         goto not_obj;
+@@ -7867,6 +7875,10 @@
+     /* get the brand array of 'obj' */
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)) {
+     not_obj:
++        if (unlikely(!p)) {
++            JS_ThrowTypeError(ctx, "invalid object");
++            return -1;
++        }
+         JS_ThrowTypeErrorNotAnObject(ctx);
+         return -1;
+     }

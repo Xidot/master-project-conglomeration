@@ -1,0 +1,185 @@
+Target function: "JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/* debug value output */
+/// Line number here: 1152
+typedef struct {
+    JS_BOOL show_hidden : 8; /* only show enumerable properties */
+    JS_BOOL raw_dump : 8; /* avoid doing autoinit and avoid any malloc() call (for internal use) */
+    uint32_t max_depth; /* recurse up to this depth, 0 = no limit */
+    uint32_t max_string_length; /* print no more than this length for
+                                   strings, 0 = no limit */
+    uint32_t max_item_count; /*  print no more than this count for
+                                 arrays or objects, 0 = no limit */
+} JSPrintValueOptions
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 1154
+typedef void JSPrintValueWrite(void *opaque, const char *buf, size_t len)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 13640
+void JS_PrintValueSetDefaultOptions(JSPrintValueOptions *options)
+{
+    memset(options, 0, sizeof(*options));
+    options->max_depth = 2;
+    options->max_string_length = 1000;
+    options->max_item_count = 100;
+}
+
+/// Line number here: 13046
+typedef struct {
+    JSRuntime *rt;
+    JSContext *ctx; /* may be NULL */
+    JSPrintValueOptions options;
+    JSPrintValueWrite *write_func;
+    void *write_opaque;
+    int level;
+    JSObject *print_stack[JS_PRINT_MAX_DEPTH]; /* level values */
+} JSPrintValueState
+
+/// Line number here: 13648
+static void JS_PrintValueInternal(JSRuntime *rt, JSContext *ctx, 
+                                  JSPrintValueWrite *write_func, void *write_opaque,
+                                  JSValueConst val, const JSPrintValueOptions *options)
+{
+    JSPrintValueState ss, *s = &ss;
+    if (options)
+        s->options = *options;
+    else
+        JS_PrintValueSetDefaultOptions(&s->options);
+    if (s->options.max_depth <= 0)
+        s->options.max_depth = JS_PRINT_MAX_DEPTH;
+    else
+        s->options.max_depth = min_int(s->options.max_depth, JS_PRINT_MAX_DEPTH);
+    if (s->options.max_string_length == 0)
+        s->options.max_string_length = UINT32_MAX;
+    if (s->options.max_item_count == 0)
+        s->options.max_item_count = UINT32_MAX;
+    s->rt = rt;
+    s->ctx = ctx;
+    s->write_func = write_func;
+    s->write_opaque = write_opaque;
+    s->level = 0;
+    js_print_value(s, val);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/* for debug only: dump an object without side effect */
+/// Line number here: 13723
+static __maybe_unused void JS_DumpObject(JSRuntime *rt, JSObject *p)
+{
+    JSShape *sh;
+    JSPrintValueOptions options;
+    
+    /* XXX: should encode atoms with special characters */
+    sh = p->shape; /* the shape can be NULL while freeing an object */
+    printf("%14p %4d ",
+           (void *)p,
+           p->header.ref_count);
+    if (sh) {
+        printf("%3d%c %14p ",
+               sh->header.ref_count,
+               " *"[sh->is_hashed],
+               (void *)sh->proto);
+    } else {
+        printf("%3s  %14s ", "-", "-");
+    }
+
+    JS_PrintValueSetDefaultOptions(&options);
+    options.max_depth = 1;
+    options.show_hidden = TRUE;
+    options.raw_dump = TRUE;
+    JS_PrintValueRT(rt, js_dump_value_write, stdout, JS_MKPTR(JS_TAG_OBJECT, p), &options);
+
+    printf("\n");
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)";
+"JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)" -> "memset(void *, int, size_t)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "min_int(int, int)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "js_print_value(JSPrintValueState *, JSValue)";
+"JS_DumpObject(JSRuntime *, JSObject *)";
+"JS_DumpObject(JSRuntime *, JSObject *)" -> "printf(const char *restrict, ...)";
+"JS_DumpObject(JSRuntime *, JSObject *)" -> "JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)";
+"JS_DumpObject(JSRuntime *, JSObject *)" -> "JS_PrintValueRT(JSRuntime *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+}

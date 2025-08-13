@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35999,6 +35999,9 @@
+     JSObjectListEntry *e;
+     uint32_t h, p;
+ 
++    if ((s->hash_size & (s->hash_size - 1)) != 0)
++        funlogline(); // hash_size not power of two
++
+     /* must test empty size because there is no hash table */
+     if (s->object_count == 0)
+         return -1;
+@@ -36007,6 +36010,7 @@
+     while (p != -1) {
+         e = &s->object_tab[p];
+         if (e->obj == obj)
++            funlogline(); // potential object equality vs identity issue
+             return p;
+         p = e->hash_next;
+     }

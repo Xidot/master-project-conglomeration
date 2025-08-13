@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9837,6 +9837,9 @@
+ int JS_DefinePropertyValueValue(JSContext *ctx, JSValueConst this_obj,
+                                 JSValue prop, JSValue val, int flags)
+ {
++    if (unlikely(!JS_IsObject(this_obj))) {
++        return JS_ThrowTypeErrorNotAnObject(ctx);
++    }
+     JSAtom atom;
+     int ret;
+     atom = JS_ValueToAtom(ctx, prop);
+@@ -9844,6 +9847,7 @@
+     if (unlikely(atom == JS_ATOM_NULL)) {
+         JS_FreeValue(ctx, val);
++        funlogline();
+         return -1;
+     }
+     ret = JS_DefinePropertyValue(ctx, this_obj, atom, val, flags);

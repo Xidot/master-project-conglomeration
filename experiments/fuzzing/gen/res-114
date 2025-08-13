@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_shape_from_alloc(void *, size_t)
+-------------------------
+Based on the code and call graph provided, I'll analyze the `get_shape_from_alloc` function for potential logical bugs.
+
+:quickjs.c:get_shape_from_alloc:4576
+
+\pagebreak
+
+The logical bug in `get_shape_from_alloc` is that it performs pointer arithmetic by adding `hash_size` to a `uint32_t*` pointer, but then casts the result to a `JSShape*`. This assumes that `hash_size` is in units of `uint32_t` (4 bytes), but the function takes `hash_size` as a `size_t` parameter which could be in bytes. This could lead to incorrect pointer calculations if callers pass `hash_size` in bytes rather than in `uint32_t` units.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4575,6 +4575,9 @@
+ 
+ static inline JSShape *get_shape_from_alloc(void *sh_alloc, size_t hash_size)
+ {
++    if (hash_size % sizeof(uint32_t) != 0) {
++        funlogline();
++    }
+     return (JSShape *)(void *)((uint32_t *)sh_alloc + hash_size);
+ }
+```
+
+This check will trigger `funlogline()` if `hash_size` is not a multiple of `sizeof(uint32_t)`, which would indicate the caller is passing a byte count rather than a count of `uint32_t` units.
+
+The bug is subtle because it depends on how callers interpret the `hash_size` parameter. The function assumes it's in `uint32_t` units (due to the pointer arithmetic), but there's no guarantee callers pass it that way. The instrumentation will help detect when this assumption is violated.

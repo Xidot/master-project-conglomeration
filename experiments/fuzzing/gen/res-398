@@ -1,0 +1,93 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_malloc(JSContext *, size_t)
+-------------------------
+Based on the code and callgraph, I'll analyze potential logical bugs in the `js_malloc` function and related memory allocation paths.
+
+Here are the identified potential logical bug locations:
+
+:js_malloc:1362
+:js_malloc_rt:1332
+:js_bigint_new:10880
+:js_array_buffer_constructor3:52541
+:js_typed_array_sort:54306
+:typed_array_init:54522
+
+----- Page Break -----
+
+Reasons for the identified bugs:
+
+1. In `js_malloc` and `js_malloc_rt`, there's no check for size=0 allocations which could lead to implementation-defined behavior.
+
+2. In `js_bigint_new`, the length check against JS_BIGINT_MAX_SIZE happens after the allocation attempt, which could lead to attempting invalid allocations before checking.
+
+3. In `js_array_buffer_constructor3`, there's no validation that the provided buffer pointer matches the length when alloc_flag is false.
+
+4. In `js_typed_array_sort`, there's no check for array detachment before sorting operations.
+
+5. In `typed_array_init`, the offset and length calculations could overflow when combined with the size_log2 shift.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1359,6 +1359,9 @@
+ void *js_malloc(JSContext *ctx, size_t size)
+ {
+     void *ptr;
++    if (size == 0) {
++        funlogline();
++    }
+     ptr = js_malloc_rt(ctx->rt, size);
+     if (unlikely(!ptr)) {
+         JS_ThrowOutOfMemory(ctx);
+@@ -10877,6 +10880,9 @@
+ {
+     JSBigInt *r;
+     if (len > JS_BIGINT_MAX_SIZE) {
++        if (len <= 0) {
++            funlogline();
++        }
+         JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+         return NULL;
+     }
+@@ -52540,6 +52546,9 @@
+     JSArrayBuffer *abuf = NULL;
+ 
+     obj = js_create_from_ctor(ctx, new_target, class_id);
++    if (size == 0 && !alloc_flag) {
++        funlogline();
++    }
+     if (JS_IsException(obj))
+         return obj;
+     /* XXX: we are currently limited to 2 GB */
+@@ -54305,6 +54314,9 @@
+     JSObject *p;
+ 
+     buffer = argv[0];
++    if (p->u.array.u.ptr == NULL) {
++        funlogline();
++    }
+     abuf = js_get_array_buffer(ctx, buffer);
+     if (!abuf)
+         return JS_EXCEPTION;
+@@ -54521,6 +54533,9 @@
+ {
+     JSTypedArray *ta;
+     JSObject *p, *pbuffer;
++    if (offset + (len << size_log2) < offset) {
++        funlogline();
++    }
+     JSArrayBuffer *abuf;
+     int size_log2;
+```
+
+The fixes add checks for:
+1. Zero-size allocations
+2. Invalid bigint lengths
+3. Detached array buffers during sort
+4. Buffer size validation
+5. Integer overflow in typed array init
+
+Each condition will call `funlogline()` when the bug condition is triggered, helping identify these edge cases during testing.

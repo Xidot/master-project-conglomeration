@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -30117,6 +30117,8 @@
+             m->dfs_ancestor_index = min_int(m->dfs_ancestor_index,
+                                             m1->dfs_ancestor_index);
+         } else {
+             m1 = m1->cycle_root;
++            if (m1 == NULL)
++                funlogline();
+             assert(m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+                    m1->status == JS_MODULE_STATUS_EVALUATED);
+             if (m1->eval_has_exception) {
+@@ -30125,6 +30127,8 @@
+             }
+         }
+         if (m1->async_evaluation) {
++            if (m1 == NULL)
++                funlogline();
+             m->pending_async_dependencies++;
+             if (js_resize_array(ctx, (void **)&m1->async_parent_modules, sizeof(m1->async_parent_modules[0]), &m1->async_parent_modules_size, m1->async_parent_modules_count + 1)) {
+                 *pvalue = JS_GetException(ctx);
+@@ -30138,6 +30142,8 @@
+     if (m->pending_async_dependencies > 0) {
+         assert(!m->async_evaluation);
+         m->async_evaluation = TRUE;
++        if (m->dfs_ancestor_index > m->dfs_index)
++            funlogline();
+         m->async_evaluation_timestamp =
+             ctx->rt->module_async_evaluation_next_timestamp++;
+     } else if (m->has_tla) {

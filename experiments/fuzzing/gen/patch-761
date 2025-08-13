@@ -1,0 +1,34 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3717,6 +3717,7 @@
+     JSString *p;
+     JSValue v1;
+     int res;
+ 
++    if (s == NULL) funlogline();
+     if (s->error_status) {
+         /* prevent exception overload */
+         return -1;
+@@ -3724,6 +3725,7 @@
+     if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
+         if (JS_VALUE_GET_TAG(v) == JS_TAG_STRING_ROPE) {
+             JSStringRope *r = JS_VALUE_GET_STRING_ROPE(v);
++            if (r == NULL) funlogline();
+             /* recursion is acceptable because the rope depth is bounded */
+             if (string_buffer_concat_value(s, r->left))
+                 return -1;
+@@ -3731,6 +3733,7 @@
+         } else {
+             v1 = JS_ToString(s->ctx, v);
+             if (JS_IsException(v1))
++                if (s->error_status == 0) funlogline();
+                 return string_buffer_set_error(s);
+             p = JS_VALUE_GET_STRING(v1);
+             res = string_buffer_concat(s, p, 0, p->len);
+@@ -3739,6 +3742,7 @@
+         }
+     }
+     p = JS_VALUE_GET_STRING(v);
++    if (p == NULL) funlogline();
+     return string_buffer_concat(s, p, 0, p->len);
+ }

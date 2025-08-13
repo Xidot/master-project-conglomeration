@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__JS_NewFloat64(JSContext *, double)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:__JS_NewFloat64:254
+
+---
+
+Reasoning:
+1. The function `__JS_NewFloat64` creates a JSValue with tag JS_TAG_FLOAT64 and stores the double value directly. However, there's no check for NaN values which could lead to inconsistent behavior since NaN values have special representations in floating-point arithmetic. The function should either handle NaN cases explicitly or document that it's the caller's responsibility to handle them.
+
+Here's the proposed modification:
+
+```diff
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -256,6 +256,9 @@
+ static inline JSValue __JS_NewFloat64(JSContext *ctx, double d)
+ {
+     JSValue v;
++    if (d != d) { // NaN check
++        funlogline();
++    }
+     v.tag = JS_TAG_FLOAT64;
+     v.u.float64 = d;
+     return v;
+```
+
+The modification adds a check for NaN values (d != d is true only for NaN) and calls funlogline() when encountered. This helps track when NaN values are being passed to the function, which could potentially cause issues in the JavaScript engine's behavior.

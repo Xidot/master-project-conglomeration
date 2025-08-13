@@ -1,0 +1,27 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_SetMemoryLimit(JSRuntime *, size_t)
+-------------------------
+Based on the provided code and context, here's my analysis:
+
+:quickjs.c:JS_SetMemoryLimit:1732
+
+---
+
+The logical bug in this function is that it doesn't check if the provided limit is smaller than the currently allocated memory. Setting a memory limit lower than what's already allocated could cause issues since the runtime wouldn't be able to enforce the new limit properly.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1732,6 +1732,9 @@
+ 
+ void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
+ {
++    if (limit < rt->malloc_state.malloc_size) {
++        funlogline();
++    }
+     rt->malloc_state.malloc_limit = limit;
+ }
+```

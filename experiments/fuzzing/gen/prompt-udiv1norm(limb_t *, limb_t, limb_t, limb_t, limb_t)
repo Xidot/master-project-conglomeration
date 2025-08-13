@@ -1,0 +1,61 @@
+Target function: "udiv1norm(limb_t *, limb_t, limb_t, limb_t, limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 57
+typedef uint64_t dlimb_t
+
+/// Line number here: 55
+typedef int32_t slimb_t
+
+/* return the quotient and the remainder in '*pr'of 'a1*2^LIMB_BITS+a0
+   / d' with 0 <= a1 < d. */
+/// Line number here: 116
+static inline limb_t udiv1norm(limb_t *pr, limb_t a1, limb_t a0,
+                                limb_t d, limb_t d_inv)
+{
+    limb_t n1m, n_adj, q, r, ah;
+    dlimb_t a;
+    n1m = ((slimb_t)a0 >> (LIMB_BITS - 1));
+    n_adj = a0 + (n1m & d);
+    a = (dlimb_t)d_inv * (a1 - n1m) + n_adj;
+    q = (a >> LIMB_BITS) + a1;
+    /* compute a - q * r and update q so that the remainder is between
+       0 and d - 1 */
+    a = ((dlimb_t)a1 << LIMB_BITS) | a0;
+    a = a - (dlimb_t)q * d - d;
+    ah = a >> LIMB_BITS;
+    q += 1 + ah;
+    r = (limb_t)a + (ah & d);
+    *pr = r;
+    return q;
+}
+
+/// Line number here: 185
+static no_inline limb_t mp_div1norm(limb_t *tabr, const limb_t *taba, limb_t n,
+                                    limb_t b, limb_t r, limb_t b_inv, int shift)
+{
+    slimb_t i;
+
+    if (shift != 0) {
+        r = (r << shift) | mp_shl(tabr, taba, n, shift, 0);
+    }
+    for(i = n - 1; i >= 0; i--) {
+        tabr[i] = udiv1norm(&r, r, taba[i], b, b_inv);
+    }
+    r >>= shift;
+    return r;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)" -> "mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)" -> "udiv1norm(limb_t *, limb_t, limb_t, limb_t, limb_t)";
+}

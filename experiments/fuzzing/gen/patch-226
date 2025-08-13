@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19517,6 +19517,9 @@
+ JSValue JS_CallConstructor2(JSContext *ctx, JSValueConst func_obj,
+                             JSValueConst new_target,
+                             int argc, JSValueConst *argv)
+ {
++    if (argc == 0 && argv == NULL) {
++        funlogline();
++    }
+     return JS_CallConstructorInternal(ctx, func_obj, new_target,
+                                       argc, (JSValue *)argv,
+                                       JS_CALL_FLAG_COPY_ARGV);
+@@ -19489,6 +19492,9 @@
+         if (!call_func) {
+         not_a_function:
+             return JS_ThrowTypeError(ctx, "not a function");
++        }
++        if (!JS_IsConstructor(ctx, new_target)) {
++            funlogline();
+         }
+         return call_func(ctx, func_obj, new_target, argc,
+                          (JSValueConst *)argv, flags);

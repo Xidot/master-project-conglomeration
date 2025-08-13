@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6203,6 +6203,9 @@
+ #endif
+ 
+     rt->gc_phase = JS_GC_PHASE_REMOVE_CYCLES;
++    if (rt->tmp_obj_list.next == NULL || rt->tmp_obj_list.prev == NULL) {
++        funlogline();
++    }
+ 
+     for(;;) {
+         el = rt->tmp_obj_list.next;
+@@ -6216,6 +6219,9 @@
+         case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
+         case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
+         case JS_GC_OBJ_TYPE_MODULE:
++            if (p->link.next != NULL || p->link.prev != NULL) {
++                funlogline();
++            }
+ #ifdef DUMP_GC_FREE
+             if (!header_done) {
+                 printf("Freeing cycles:\n");

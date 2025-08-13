@@ -1,0 +1,53 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AtomGetStr(JSContext *, char *, int, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_AtomGetStr` function:
+
+:quickjs.c:JS_AtomGetStr:3069
+:quickjs.c:JS_AtomGetStrRT:3023
+
+---
+
+The main logical issues are:
+
+1. In `JS_AtomGetStrRT`, there's no check for NULL `buf` parameter before using it in `snprintf()`. This could lead to crashes if NULL is passed.
+
+2. The buffer size check (`buf_size`) is only done during the string copying loop, but not before the initial `snprintf()` calls for tagged integers or null atoms.
+
+Here's the diff to add the checks:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3023,6 +3023,9 @@
+ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
+                                    JSAtom atom)
+ {
++    if (!buf || buf_size <= 0) {
++        funlogline();
++    }
+     if (__JS_AtomIsTaggedInt(atom)) {
+         snprintf(buf, buf_size, "%u", __JS_AtomToUInt32(atom));
+     } else {
+@@ -3030,6 +3033,9 @@
+         assert(atom < rt->atom_size);
+         if (atom == JS_ATOM_NULL) {
+             snprintf(buf, buf_size, "<null>");
++            if (strlen(buf) >= buf_size) {
++                funlogline();
++            }
+         } else {
+             int i, c;
+             char *q;
+```
+
+The changes:
+1. Added NULL and size check at start
+2. Added buffer overflow check after null atom formatting
+3. The string copying loop already has bounds checking so no additional checks needed there
+
+The instrumentation will catch cases where:
+- NULL buffer is passed
+- Invalid buffer size is passed
+- Buffer overflows during formatting of special atoms

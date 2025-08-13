@@ -1,0 +1,73 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36106,6 +36106,7 @@
+ 
+ static void bc_put_u8(BCWriterState *s, uint8_t v)
+ {
++    if (s == NULL || s->dbuf.error) funlogline();
+     dbuf_putc(&s->dbuf, v);
+ }
+ 
+@@ -36321,6 +36322,7 @@
+     JSBigInt *p;
+     uint32_t len, i;
+     js_limb_t v, b;
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_BIG_INT && JS_VALUE_GET_TAG(obj) != JS_TAG_SHORT_BIG_INT) funlogline();
+     int shift;
+     
+     bc_put_u8(s, BC_TAG_BIG_INT);
+@@ -36514,6 +36516,7 @@
+     uint32_t i, len;
+     JSValue val;
+     int ret;
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT) funlogline();
+     BOOL is_template;
+ 
+     if (s->allow_bytecode && !p->extensible) {
+@@ -36557,6 +36560,7 @@
+     uint32_t i, prop_count;
+     JSShape *sh;
+     JSShapeProperty *pr;
++    if (p == NULL || p->shape == NULL) funlogline();
+     int pass;
+     JSAtom atom;
+ 
+@@ -36596,6 +36600,7 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSTypedArray *ta = p->u.typed_array;
++    if (ta == NULL || ta->buffer == NULL) funlogline();
+ 
+     bc_put_u8(s, BC_TAG_TYPED_ARRAY);
+     bc_put_u8(s, p->class_id - JS_CLASS_UINT8C_ARRAY);
+@@ -36610,6 +36615,7 @@
+ static int JS_WriteArrayBuffer(BCWriterState *s, JSValueConst obj)
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
++    if (p == NULL || p->u.array_buffer == NULL) funlogline();
+     JSArrayBuffer *abuf = p->u.array_buffer;
+     if (abuf->detached) {
+         JS_ThrowTypeErrorDetachedArrayBuffer(s->ctx);
+@@ -36624,6 +36630,7 @@
+ static int JS_WriteSharedArrayBuffer(BCWriterState *s, JSValueConst obj)
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
++    if (p == NULL || p->u.array_buffer == NULL) funlogline();
+     JSArrayBuffer *abuf = p->u.array_buffer;
+     assert(!abuf->detached); /* SharedArrayBuffer are never detached */
+     bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
+@@ -36640,6 +36647,7 @@
+ static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
+ {
+     uint32_t tag;
++    if (s == NULL) funlogline();
+ 
+     if (js_check_stack_overflow(s->ctx->rt, 0)) {
+         JS_ThrowStackOverflow(s->ctx);
+@@ -36781,6 +36789,7 @@
+ static int JS_WriteObjectAtoms(BCWriterState *s)
+ {
+     JSRuntime *rt = s->ctx->rt;
++    if (rt == NULL || rt->atom_array == NULL) funlogline();
+     DynBuf dbuf1;
+     int i, atoms_size;

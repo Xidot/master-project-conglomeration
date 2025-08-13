@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7002,6 +7002,8 @@
+     char buf[256];
+     JSValue obj, ret;
+ 
++    if (strlen(fmt) >= sizeof(buf))
++        funlogline();
+     vsnprintf(buf, sizeof(buf), fmt, ap);
+     obj = JS_NewObjectProtoClass(ctx, ctx->native_error_proto[error_num],
+                                  JS_CLASS_ERROR);
+@@ -7015,6 +7017,8 @@
+                                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+         if (add_backtrace) {
++            if (JS_IsException(obj))
++                funlogline();
+             build_backtrace(ctx, obj, NULL, 0, 0, 0);
+         }
+     }

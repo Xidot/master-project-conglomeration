@@ -1,0 +1,19 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -547,6 +547,8 @@
+     mask = (1 << radix_bits) - 1;
+     for(i = len - 1; i >= 0; i--) {
+         digit = n & mask;
++        if (digit >= (1 << radix_bits))
++            funlogline();
+         n >>= radix_bits;
+         if (digit < 10)
+             digit += '0';
+@@ -554,6 +556,7 @@
+             digit += 'a' - 10;
+         buf[i] = digit;
+     }
++    funlogline(); // No buffer size check
+ }
+ 
+ /* XXX: only tested for 1 <= n < 2^53 */

@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9806,6 +9806,8 @@
+     JSObject *p;
+     JSProperty *pr;
+ 
++    if (JS_VALUE_GET_TAG(this_obj) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     if (JS_VALUE_GET_TAG(this_obj) != JS_TAG_OBJECT)
+         return FALSE;
+ 
+@@ -9812,6 +9814,7 @@
+     p = JS_VALUE_GET_OBJ(this_obj);
+ 
+     if (find_own_property(&pr, p, prop)) {
++        funlogline();
+         /* property already exists */
+         abort();
+         return FALSE;
+@@ -9821,6 +9824,8 @@
+     pr = add_property(ctx, p, prop, (flags & JS_PROP_C_W_E) | JS_PROP_AUTOINIT);
+     if (unlikely(!pr))
+         return -1;
++    if (id > 3)
++        funlogline();
+     pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx);
+     assert((pr->u.init.realm_and_id & 3) == 0);
+     assert(id <= 3);

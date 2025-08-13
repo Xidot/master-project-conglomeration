@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5824,6 +5824,9 @@
+     }
+ #endif
+ 
++    if (tag < JS_TAG_FIRST || tag > JS_TAG_FLOAT64) {
++        funlogline();
++    }
+     switch(tag) {
+     case JS_TAG_STRING:
+         {
+@@ -5852,6 +5855,9 @@
+     case JS_TAG_STRING_ROPE:
+         /* Note: recursion is acceptable because the rope depth is bounded */
+         {
++            if (p->left.tag == JS_TAG_NULL || p->right.tag == JS_TAG_NULL) {
++                funlogline();
++            }
+             JSStringRope *p = JS_VALUE_GET_STRING_ROPE(v);
+             JS_FreeValueRT(rt, p->left);
+             JS_FreeValueRT(rt, p->right);
+@@ -5868,6 +5874,9 @@
+             JSGCObjectHeader *p = JS_VALUE_GET_PTR(v);
+             if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
++                if (p->link.prev == NULL || p->link.next == NULL) {
++                    funlogline();
++                }
+                 list_del(&p->link);
+                 list_add(&p->link, &rt->gc_zero_ref_count_list);
+                 p->mark = 1; /* indicate that the object is about to be freed */

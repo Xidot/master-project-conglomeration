@@ -1,0 +1,33 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_shape_size(size_t, size_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `get_shape_size` function:
+
+:quickjs.c:get_shape_size:4570
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4570,6 +4570,9 @@
+ static inline size_t get_shape_size(size_t hash_size, size_t prop_size)
+ {
++    if (hash_size == 0 || prop_size == 0) {
++        funlogline();
++    }
+     return hash_size * sizeof(uint32_t) + sizeof(JSShape) +
+         prop_size * sizeof(JSShapeProperty);
+ }
+```
+
+The reasoning is:
+
+1. The function calculates memory size for JSShape structures based on hash_size and prop_size parameters
+2. If either parameter is 0, the calculation would still return a non-zero size due to sizeof(JSShape)
+3. This could lead to allocating memory that's too small for actual usage since hash_size=0 or prop_size=0 would indicate no properties/hashes needed
+4. The function is used in critical memory allocation paths (js_new_shape2, js_clone_shape, resize_properties, compact_properties)
+5. While the callers do validate the allocations, having invalid size calculations could cause subtle issues
+
+The added check will log when either size parameter is 0, which shouldn't normally happen for valid shapes.

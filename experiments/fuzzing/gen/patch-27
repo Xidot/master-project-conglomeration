@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36976,6 +36976,9 @@
+     if (unlikely(s->buf_end - s->ptr < 8)) {
+         *pval = 0; /* avoid warning */
+         return bc_read_error_end(s);
+     }
++    if (s->ptr + 8 > s->buf_end) {
++        funlogline();
++    }
+     v = get_u64(s->ptr);
+     if (is_be())
+         v = bswap64(v);

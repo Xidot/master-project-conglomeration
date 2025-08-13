@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_DefinePropertyGetSet(JSContext *, JSValue, JSAtom, JSValue, JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_DefinePropertyGetSet`:
+
+:quickjs.c:JS_DefinePropertyGetSet:9886
+:quickjs.c:JS_DefinePropertyGetSet:9889
+:quickjs.c:JS_DefinePropertyGetSet:9890
+
+\pagebreak
+
+Reasons:
+1. Line 9886: The function doesn't validate if getter/setter are functions before passing them to JS_DefineProperty
+2. Line 9889-9890: The function unconditionally frees getter/setter values even if JS_DefineProperty failed
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9883,6 +9883,9 @@
+                             JSAtom prop, JSValue getter, JSValue setter,
+                             int flags)
+ {
+     int ret;
++    if ((!JS_IsUndefined(getter) && !JS_IsFunction(ctx, getter)) ||
++        (!JS_IsUndefined(setter) && !JS_IsFunction(ctx, setter)))
++        funlogline();
+     ret = JS_DefineProperty(ctx, this_obj, prop, JS_UNDEFINED, getter, setter,
+                             flags | JS_PROP_HAS_GET | JS_PROP_HAS_SET |
+                             JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE);
+@@ -9890,6 +9893,8 @@
+     JS_FreeValue(ctx, setter);
+     return ret;
+ #else
++    if (ret < 0)
++        funlogline();
+     JS_FreeValue(ctx, getter);
+     JS_FreeValue(ctx, setter);
+     return ret;
+```
+
+The instrumentation checks:
+1. If getter/setter are not undefined and not functions
+2. If JS_DefineProperty failed (ret < 0) before freeing values

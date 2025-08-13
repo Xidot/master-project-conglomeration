@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-resize_shape_hash(JSRuntime *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `resize_shape_hash` function:
+
+:resize_shape_hash:4635
+:resize_shape_hash:4641
+
+---
+
+1. Line 4635: The loop condition `i < rt->shape_hash_size` could lead to accessing out-of-bounds if `shape_hash_size` is larger than the allocated `shape_hash` array size. However, this would be an out-of-bounds access which is excluded from our analysis.
+
+2. Line 4641: After rehashing, the function updates `rt->shape_hash` with the new hash table before updating `rt->shape_hash_size`. This creates a brief window where the hash table size doesn't match the actual allocated size, which could cause issues if another thread accesses it during this window.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4638,6 +4638,8 @@
+             new_shape_hash[h] = sh;
+         }
+     }
++    if (rt->shape_hash_size != new_shape_hash_size)
++        funlogline();
+     js_free_rt(rt, rt->shape_hash);
+     rt->shape_hash_bits = new_shape_hash_bits;
+     rt->shape_hash_size = new_shape_hash_size;
+```
+
+The instrumentation checks for the condition where the size mismatch could cause issues, though in practice this would be very hard to trigger since the function appears to be called from a single-threaded context. The more serious issue is the potential race condition if this code were ever used in a multi-threaded environment.

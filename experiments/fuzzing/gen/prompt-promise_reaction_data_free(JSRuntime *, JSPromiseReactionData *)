@@ -1,0 +1,358 @@
+Target function: "promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 49262
+typedef struct JSPromiseReactionData {
+    struct list_head link; /* not used in promise_reaction_job */
+    JSValue resolving_funcs[2];
+    JSValue handler;
+} JSPromiseReactionData
+
+/// Line number here: 49283
+static void promise_reaction_data_free(JSRuntime *rt,
+                                       JSPromiseReactionData *rd)
+{
+    JS_FreeValueRT(rt, rd->resolving_funcs[0]);
+    JS_FreeValueRT(rt, rd->resolving_funcs[1]);
+    JS_FreeValueRT(rt, rd->handler);
+    js_free_rt(rt, rd);
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+/* Promise */
+/// Line number here: 49246
+typedef struct JSPromiseData {
+    JSPromiseStateEnum promise_state;
+    /* 0=fulfill, 1=reject, list of JSPromiseReactionData.link */
+    struct list_head promise_reactions[2];
+    BOOL is_handled; /* Note: only useful to debug */
+    JSValue promise_result;
+} JSPromiseData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 49342
+static void fulfill_or_reject_promise(JSContext *ctx, JSValueConst promise,
+                                      JSValueConst value, BOOL is_reject)
+{
+    JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    struct list_head *el, *el1;
+    JSPromiseReactionData *rd;
+    JSValueConst args[5];
+
+    if (!s || s->promise_state != JS_PROMISE_PENDING)
+        return; /* should never happen */
+    set_value(ctx, &s->promise_result, JS_DupValue(ctx, value));
+    s->promise_state = JS_PROMISE_FULFILLED + is_reject;
+#ifdef DUMP_PROMISE
+    printf("fulfill_or_reject_promise: is_reject=%d\n", is_reject);
+#endif
+    if (s->promise_state == JS_PROMISE_REJECTED && !s->is_handled) {
+        JSRuntime *rt = ctx->rt;
+        if (rt->host_promise_rejection_tracker) {
+            rt->host_promise_rejection_tracker(ctx, promise, value, FALSE,
+                                               rt->host_promise_rejection_tracker_opaque);
+        }
+    }
+
+    list_for_each_safe(el, el1, &s->promise_reactions[is_reject]) {
+        rd = list_entry(el, JSPromiseReactionData, link);
+        args[0] = rd->resolving_funcs[0];
+        args[1] = rd->resolving_funcs[1];
+        args[2] = rd->handler;
+        args[3] = JS_NewBool(ctx, is_reject);
+        args[4] = value;
+        JS_EnqueueJob(ctx, promise_reaction_job, 5, args);
+        list_del(&rd->link);
+        promise_reaction_data_free(ctx->rt, rd);
+    }
+
+    list_for_each_safe(el, el1, &s->promise_reactions[1 - is_reject]) {
+        rd = list_entry(el, JSPromiseReactionData, link);
+        list_del(&rd->link);
+        promise_reaction_data_free(ctx->rt, rd);
+    }
+}
+
+/// Line number here: 49538
+static void js_promise_finalizer(JSRuntime *rt, JSValue val)
+{
+    JSPromiseData *s = JS_GetOpaque(val, JS_CLASS_PROMISE);
+    struct list_head *el, *el1;
+    int i;
+
+    if (!s)
+        return;
+    for(i = 0; i < 2; i++) {
+        list_for_each_safe(el, el1, &s->promise_reactions[i]) {
+            JSPromiseReactionData *rd =
+                list_entry(el, JSPromiseReactionData, link);
+            promise_reaction_data_free(rt, rd);
+        }
+    }
+    JS_FreeValueRT(rt, s->promise_result);
+    js_free_rt(rt, s);
+}
+
+/// Line number here: 50084
+static __exception int perform_promise_then(JSContext *ctx,
+                                            JSValueConst promise,
+                                            JSValueConst *resolve_reject,
+                                            JSValueConst *cap_resolving_funcs)
+{
+    JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    JSPromiseReactionData *rd_array[2], *rd;
+    int i, j;
+
+    rd_array[0] = NULL;
+    rd_array[1] = NULL;
+    for(i = 0; i < 2; i++) {
+        JSValueConst handler;
+        rd = js_mallocz(ctx, sizeof(*rd));
+        if (!rd) {
+            if (i == 1)
+                promise_reaction_data_free(ctx->rt, rd_array[0]);
+            return -1;
+        }
+        for(j = 0; j < 2; j++)
+            rd->resolving_funcs[j] = JS_DupValue(ctx, cap_resolving_funcs[j]);
+        handler = resolve_reject[i];
+        if (!JS_IsFunction(ctx, handler))
+            handler = JS_UNDEFINED;
+        rd->handler = JS_DupValue(ctx, handler);
+        rd_array[i] = rd;
+    }
+
+    if (s->promise_state == JS_PROMISE_PENDING) {
+        for(i = 0; i < 2; i++)
+            list_add_tail(&rd_array[i]->link, &s->promise_reactions[i]);
+    } else {
+        JSValueConst args[5];
+        if (s->promise_state == JS_PROMISE_REJECTED && !s->is_handled) {
+            JSRuntime *rt = ctx->rt;
+            if (rt->host_promise_rejection_tracker) {
+                rt->host_promise_rejection_tracker(ctx, promise, s->promise_result,
+                                                   TRUE, rt->host_promise_rejection_tracker_opaque);
+            }
+        }
+        i = s->promise_state - JS_PROMISE_FULFILLED;
+        rd = rd_array[i];
+        args[0] = rd->resolving_funcs[0];
+        args[1] = rd->resolving_funcs[1];
+        args[2] = rd->handler;
+        args[3] = JS_NewBool(ctx, i);
+        args[4] = s->promise_result;
+        JS_EnqueueJob(ctx, promise_reaction_job, 5, args);
+        for(i = 0; i < 2; i++)
+            promise_reaction_data_free(ctx->rt, rd_array[i]);
+    }
+    s->is_handled = TRUE;
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "JS_DupValue(JSContext *, JSValue)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "JSRuntime::host_promise_rejection_tracker";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "JS_NewBool(JSContext *, int)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "list_del(struct list_head *)";
+"fulfill_or_reject_promise(JSContext *, JSValue, JSValue, BOOL)" -> "promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"js_promise_finalizer(JSRuntime *, JSValue)";
+"js_promise_finalizer(JSRuntime *, JSValue)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"js_promise_finalizer(JSRuntime *, JSValue)" -> "promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"js_promise_finalizer(JSRuntime *, JSValue)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_promise_finalizer(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "js_mallocz(JSContext *, size_t)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "promise_reaction_data_free(JSRuntime *, JSPromiseReactionData *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_IsFunction(JSContext *, JSValue)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JSRuntime::host_promise_rejection_tracker";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_NewBool(JSContext *, int)";
+"perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)" -> "JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+}

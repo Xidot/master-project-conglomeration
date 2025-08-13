@@ -1,0 +1,25 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicDate(JSContext *)
+-------------------------
+Based on the provided code and call graph, I'll analyze the `JS_AddIntrinsicDate` function for potential logical bugs.
+
+:JS_AddIntrinsicDate(JSContext *):52037
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52037,6 +52037,8 @@
+ void JS_AddIntrinsicDate(JSContext *ctx)
+ {
+     JSValueConst obj;
++    if (ctx->class_proto[JS_CLASS_DATE] != 0)
++        funlogline();
+ 
+     /* Date */
+     ctx->class_proto[JS_CLASS_DATE] = JS_NewObject(ctx);
+```
+
+Reason: The function doesn't check if `class_proto[JS_CLASS_DATE]` is already initialized before overwriting it. This could lead to memory leaks if the proto was already set.
+
+Note: The code appears to be part of a JavaScript engine implementation where Date functionality is being initialized. The main logical concern is the potential overwrite of an existing prototype without cleanup.

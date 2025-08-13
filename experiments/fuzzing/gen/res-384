@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_IsObject(JSValue)
+-------------------------
+Based on the provided code, here are the potential logical bugs:
+
+:JS_IsObject:663
+
+---
+
+The logical bug in `JS_IsObject` is that it only checks for `JS_TAG_OBJECT` but doesn't consider other object-like types that might need to be treated as objects in some contexts, such as `JS_TAG_MODULE` or `JS_TAG_FUNCTION_BYTECODE`. These are also negative tags and represent internal object types.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -663,6 +663,9 @@
+ 
+ static inline JS_BOOL JS_IsObject(JSValueConst v)
+ {
++    if (JS_VALUE_GET_TAG(v) < JS_TAG_FIRST || JS_VALUE_GET_TAG(v) > JS_TAG_OBJECT) {
++        funlogline();
++    }
+     return JS_VALUE_GET_TAG(v) == JS_TAG_OBJECT;
+ }
+```
+
+The condition checks for any negative tag that's not `JS_TAG_OBJECT` but still represents an object-like type in the system. This would help catch cases where the function might be returning false for values that should conceptually be treated as objects.

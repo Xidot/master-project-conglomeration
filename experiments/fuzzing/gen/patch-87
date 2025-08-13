@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -34829,6 +34829,8 @@
+ 
+ static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
+ {
++    if (!b)
++        funlogline();
+     int i;
+ 
+ #if 0
+@@ -34853,6 +34855,8 @@
+         JS_FreeAtomRT(rt, cv->var_name);
+     }
+     if (b->realm)
++        if (!b->closure_var && b->closure_var_count > 0)
++            funlogline();
+         JS_FreeContext(b->realm);
+ 
+     JS_FreeAtomRT(rt, b->func_name);
+@@ -34863,6 +34867,8 @@
+     }
+ 
+     remove_gc_object(&b->header);
++    if (b->realm && b->realm->header.ref_count <= 0)
++        funlogline();
+     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && b->header.ref_count != 0) {
+         list_add_tail(&b->header.link, &rt->gc_zero_ref_count_list);
+     } else {

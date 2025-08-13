@@ -1,0 +1,500 @@
+Target function: "JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+/// Line number here: 1036
+typedef union JSCFunctionType {
+    JSCFunction *generic;
+    JSValue (*generic_magic)(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
+    JSCFunction *constructor;
+    JSValue (*constructor_magic)(JSContext *ctx, JSValueConst new_target, int argc, JSValueConst *argv, int magic);
+    JSCFunction *constructor_or_func;
+    double (*f_f)(double);
+    double (*f_f_f)(double, double);
+    JSValue (*getter)(JSContext *ctx, JSValueConst this_val);
+    JSValue (*setter)(JSContext *ctx, JSValueConst this_val, JSValueConst val);
+    JSValue (*getter_magic)(JSContext *ctx, JSValueConst this_val, int magic);
+    JSValue (*setter_magic)(JSContext *ctx, JSValueConst this_val, JSValueConst val, int magic);
+    JSValue (*iterator_next)(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv, int *pdone, int magic);
+} JSCFunctionType
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 663
+static inline JS_BOOL JS_IsObject(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_OBJECT;
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* return *pdone = 2 if the iterator object is not parsed */
+/// Line number here: 15807
+static JSValue JS_IteratorNext2(JSContext *ctx, JSValueConst enum_obj,
+                                JSValueConst method,
+                                int argc, JSValueConst *argv, int *pdone)
+{
+    JSValue obj;
+
+    /* fast path for the built-in iterators (avoid creating the
+       intermediate result object) */
+    if (JS_IsObject(method)) {
+        JSObject *p = JS_VALUE_GET_OBJ(method);
+        if (p->class_id == JS_CLASS_C_FUNCTION &&
+            p->u.cfunc.cproto == JS_CFUNC_iterator_next) {
+            JSCFunctionType func;
+            JSValueConst args[1];
+
+            /* in case the function expects one argument */
+            if (argc == 0) {
+                args[0] = JS_UNDEFINED;
+                argv = args;
+            }
+            func = p->u.cfunc.c_function;
+            return func.iterator_next(ctx, enum_obj, argc, argv,
+                                      pdone, p->u.cfunc.magic);
+        }
+    }
+    obj = JS_Call(ctx, method, enum_obj, argc, argv);
+    if (JS_IsException(obj))
+        goto fail;
+    if (!JS_IsObject(obj)) {
+        JS_FreeValue(ctx, obj);
+        JS_ThrowTypeError(ctx, "iterator must return an object");
+        goto fail;
+    }
+    *pdone = 2;
+    return obj;
+ fail:
+    *pdone = FALSE;
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 19378
+JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                int argc, JSValueConst *argv)
+{
+    return JS_CallInternal(ctx, func_obj, this_obj, JS_UNDEFINED,
+                           argc, (JSValue *)argv, JS_CALL_FLAG_COPY_ARGV);
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* Note: always return JS_UNDEFINED when *pdone = TRUE. */
+/// Line number here: 15848
+static JSValue JS_IteratorNext(JSContext *ctx, JSValueConst enum_obj,
+                               JSValueConst method,
+                               int argc, JSValueConst *argv, BOOL *pdone)
+{
+    JSValue obj, value, done_val;
+    int done;
+
+    obj = JS_IteratorNext2(ctx, enum_obj, method, argc, argv, &done);
+    if (JS_IsException(obj))
+        goto fail;
+    if (likely(done == 0)) {
+        *pdone = FALSE;
+        return obj;
+    } else if (done != 2) {
+        JS_FreeValue(ctx, obj);
+        *pdone = TRUE;
+        return JS_UNDEFINED;
+    } else {
+        done_val = JS_GetProperty(ctx, obj, JS_ATOM_done);
+        if (JS_IsException(done_val))
+            goto fail;
+        *pdone = JS_ToBoolFree(ctx, done_val);
+        value = JS_UNDEFINED;
+        if (!*pdone) {
+            value = JS_GetProperty(ctx, obj, JS_ATOM_value);
+        }
+        JS_FreeValue(ctx, obj);
+        return value;
+    }
+ fail:
+    JS_FreeValue(ctx, obj);
+    *pdone = FALSE;
+    return JS_EXCEPTION;
+}
+
+/* AsyncFromSyncIteratorPrototype */
+/// Line number here: 50292
+typedef struct JSAsyncFromSyncIteratorData {
+    JSValue sync_iter;
+    JSValue next_method;
+} JSAsyncFromSyncIteratorData
+
+/// Line number here: 50377
+static JSValue js_async_from_sync_iterator_next(JSContext *ctx, JSValueConst this_val,
+                                                int argc, JSValueConst *argv,
+                                                int magic)
+{
+    JSValue promise, resolving_funcs[2], value, err, method;
+    JSAsyncFromSyncIteratorData *s;
+    int done;
+    int is_reject;
+
+    promise = JS_NewPromiseCapability(ctx, resolving_funcs);
+    if (JS_IsException(promise))
+        return JS_EXCEPTION;
+    s = JS_GetOpaque(this_val, JS_CLASS_ASYNC_FROM_SYNC_ITERATOR);
+    if (!s) {
+        JS_ThrowTypeError(ctx, "not an Async-from-Sync Iterator");
+        goto reject;
+    }
+
+    if (magic == GEN_MAGIC_NEXT) {
+        method = JS_DupValue(ctx, s->next_method);
+    } else {
+        method = JS_GetProperty(ctx, s->sync_iter,
+                                magic == GEN_MAGIC_RETURN ? JS_ATOM_return :
+                                JS_ATOM_throw);
+        if (JS_IsException(method))
+            goto reject;
+        if (JS_IsUndefined(method) || JS_IsNull(method)) {
+            if (magic == GEN_MAGIC_RETURN) {
+                err = js_create_iterator_result(ctx, JS_DupValue(ctx, argv[0]), TRUE);
+                is_reject = 0;
+                goto done_resolve;
+            } else {
+                if (JS_IteratorClose(ctx, s->sync_iter, FALSE))
+                    goto reject;
+                JS_ThrowTypeError(ctx, "throw is not a method");
+                goto reject;
+            }
+        }
+    }
+    value = JS_IteratorNext2(ctx, s->sync_iter, method,
+                             argc >= 1 ? 1 : 0, argv, &done);
+    JS_FreeValue(ctx, method);
+    if (JS_IsException(value))
+        goto reject;
+    if (done == 2) {
+        JSValue obj = value;
+        value = JS_IteratorGetCompleteValue(ctx, obj, &done);
+        JS_FreeValue(ctx, obj);
+        if (JS_IsException(value))
+            goto reject;
+    }
+    
+    if (JS_IsException(value))
+        goto reject;
+    {
+        JSValue value_wrapper_promise, resolve_reject[2];
+        int res;
+
+        value_wrapper_promise = js_promise_resolve(ctx, ctx->promise_ctor,
+                                                   1, (JSValueConst *)&value, 0);
+        if (JS_IsException(value_wrapper_promise)) {
+            JSValue res2;
+            JS_FreeValue(ctx, value);
+            if (magic != GEN_MAGIC_RETURN && !done) {
+                JS_IteratorClose(ctx, s->sync_iter, TRUE);
+            }
+        reject:
+            err = JS_GetException(ctx);
+            is_reject = 1;
+        done_resolve:
+            res2 = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED,
+                           1, (JSValueConst *)&err);
+            JS_FreeValue(ctx, err);
+            JS_FreeValue(ctx, res2);
+            JS_FreeValue(ctx, resolving_funcs[0]);
+            JS_FreeValue(ctx, resolving_funcs[1]);
+            return promise;
+        }
+
+        resolve_reject[0] =
+            js_async_from_sync_iterator_unwrap_func_create(ctx, done);
+        if (JS_IsException(resolve_reject[0])) {
+            JS_FreeValue(ctx, value_wrapper_promise);
+            goto fail;
+        }
+        if (done || magic == GEN_MAGIC_RETURN) {
+            resolve_reject[1] = JS_UNDEFINED;
+        } else {
+            resolve_reject[1] =
+                js_async_from_sync_iterator_close_wrap_func_create(ctx, s->sync_iter);
+            if (JS_IsException(resolve_reject[1])) {
+                JS_FreeValue(ctx, value_wrapper_promise);
+                JS_FreeValue(ctx, resolve_reject[0]);
+                goto fail;
+            }
+        }
+        JS_FreeValue(ctx, value);
+        res = perform_promise_then(ctx, value_wrapper_promise,
+                                   (JSValueConst *)resolve_reject,
+                                   (JSValueConst *)resolving_funcs);
+        JS_FreeValue(ctx, resolve_reject[0]);
+        JS_FreeValue(ctx, resolve_reject[1]);
+        JS_FreeValue(ctx, value_wrapper_promise);
+        JS_FreeValue(ctx, resolving_funcs[0]);
+        JS_FreeValue(ctx, resolving_funcs[1]);
+        if (res) {
+            JS_FreeValue(ctx, promise);
+            return JS_EXCEPTION;
+        }
+    }
+    return promise;
+ fail:
+    JS_FreeValue(ctx, value);
+    JS_FreeValue(ctx, resolving_funcs[0]);
+    JS_FreeValue(ctx, resolving_funcs[1]);
+    JS_FreeValue(ctx, promise);
+    return JS_EXCEPTION;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JS_IsObject(JSValue)";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JSCFunctionType::iterator_next";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JS_IsException(JSValue)";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_CallInternal(JSContext *, JSValue, JSValue, JSValue, int, JSValue *, int)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "JS_IsException(JSValue)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "__builtin_expect(long, long)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewPromiseCapability(JSContext *, JSValue *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsUndefined(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsNull(JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_create_iterator_result(JSContext *, JSValue, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorClose(JSContext *, JSValue, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorNext2(JSContext *, JSValue, JSValue, int, JSValue *, int *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IteratorGetCompleteValue(JSContext *, JSValue, BOOL *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_promise_resolve(JSContext *, JSValue, int, JSValue *, int)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetException(JSContext *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_async_from_sync_iterator_unwrap_func_create(JSContext *, BOOL)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "js_async_from_sync_iterator_close_wrap_func_create(JSContext *, JSValue)";
+"js_async_from_sync_iterator_next(JSContext *, JSValue, int, JSValue *, int)" -> "perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)";
+}

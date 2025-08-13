@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10586,6 +10586,8 @@
+ 
+ static inline js_limb_t js_limb_clz(js_limb_t a)
+ {
++    if (a == 0)
++        funlogline();
+     return clz64(a);
+ }
+ 
+@@ -11268,6 +11270,8 @@
+ 
+     /* normalize 'b' */
+     shift = js_limb_clz(tabb[nb - 1]);
++    if (tabb[nb - 1] == 0)
++        funlogline();
+     if (shift != 0) {
+         mp_shl(tabb, tabb, nb, shift);
+         h = mp_shl(r->tab, r->tab, na, shift);
+@@ -11415,6 +11419,8 @@
+             uint64_t e1;
+             int n;
+             /* v = 2^n */
++            if (v == 0)
++                funlogline();
+             n = JS_LIMB_BITS - 1 - js_limb_clz(v);
+             if (b->len > 1)
+                 goto overflow;

@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5344,6 +5344,9 @@
+     JSValue func_obj;
+     JSObject *p;
+     JSAtom name_atom;
++    
++    if (!func)
++        return JS_EXCEPTION;
+ 
+     func_obj = JS_NewObjectProtoClass(ctx, proto_val, JS_CLASS_C_FUNCTION);
+     if (JS_IsException(func_obj))
+@@ -5357,6 +5360,8 @@
+     p->u.cfunc.cproto = cproto;
+     p->u.cfunc.magic = magic;
+     p->is_constructor = (cproto == JS_CFUNC_constructor ||
++                         (cproto >= JS_CFUNC_constructor &&
++                          cproto <= JS_CFUNC_constructor_or_func_magic) ||
+                          cproto == JS_CFUNC_constructor_magic ||
+                          cproto == JS_CFUNC_constructor_or_func ||
+                          cproto == JS_CFUNC_constructor_or_func_magic);
+@@ -5365,6 +5370,8 @@
+     name_atom = JS_NewAtom(ctx, name);
+     if (name_atom == JS_ATOM_NULL) {
+         JS_FreeValue(ctx, func_obj);
++        if (p->u.cfunc.realm)
++            JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p->u.cfunc.realm);
+         return JS_EXCEPTION;
+     }
+     js_function_set_properties(ctx, func_obj, name_atom, length);

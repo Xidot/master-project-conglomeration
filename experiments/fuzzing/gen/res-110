@@ -1,0 +1,45 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_line_col(int *, const uint8_t *, size_t)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs in the `get_line_col` function:
+
+:quickjs.c:get_line_col:20912
+:quickjs.c:get_line_col:20920
+
+---
+
+The main logical issues in `get_line_col` are:
+
+1. Line 20912: The function doesn't handle the case where `buf` is NULL, which could lead to undefined behavior when calling `buf[i]`.
+
+2. Line 20920: The condition `c < 0x80 || c >= 0xc0` for counting columns may incorrectly count some UTF-8 continuation bytes as columns when they shouldn't be. The condition should be `c < 0x80 || c >= 0xc0` to properly handle UTF-8 sequences.
+
+Here's the diff to add the checks:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -20912,6 +20912,9 @@
+ static int get_line_col(int *pcol_num, const uint8_t *buf, size_t len)
+ {
+     int line_num, col_num, c;
+     size_t i;
++
++    if (!buf)
++        funlogline();
+     
+     line_num = 0;
+     col_num = 0;
+@@ -20917,6 +20920,8 @@
+     col_num = 0;
+     for(i = 0; i < len; i++) {
+         c = buf[i];
++        if (c >= 0x80 && c < 0xc0)
++            funlogline();
+         if (c == '\n') {
+             line_num++;
+             col_num = 0;
+```
+
+The first check catches NULL buffer cases, while the second check logs when UTF-8 continuation bytes (0x80-0xBF) are encountered, which shouldn't increment the column count.

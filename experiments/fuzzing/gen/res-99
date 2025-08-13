@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-gc_remove_weak_objects(JSRuntime *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `gc_remove_weak_objects` function:
+
+:gc_remove_weak_objects:5915
+:gc_remove_weak_objects:5930
+
+---
+
+1. Line 5915: The function sets `rt->gc_phase = JS_GC_PHASE_DECREF` but doesn't check if the GC phase is already set to something else. This could lead to incorrect phase tracking if called during another GC phase.
+
+2. Line 5930: The function sets `rt->gc_phase = JS_GC_PHASE_NONE` after processing weak objects but before calling `free_zero_refcount()`. This means `free_zero_refcount()` will run with `gc_phase = JS_GC_PHASE_NONE` when it expects `JS_GC_PHASE_DECREF`.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5912,6 +5912,9 @@
+ 
+     /* add the freed objects to rt->gc_zero_ref_count_list so that
+        rt->weakref_list is not modified while we traverse it */
++    if (rt->gc_phase != JS_GC_PHASE_NONE) {
++        funlogline();
++    }
+     rt->gc_phase = JS_GC_PHASE_DECREF; 
+         
+     list_for_each(el, &rt->weakref_list) {
+@@ -5927,6 +5930,9 @@
+         }
+     }
+ 
++    if (rt->gc_phase != JS_GC_PHASE_DECREF) {
++        funlogline();
++    }
+     rt->gc_phase = JS_GC_PHASE_NONE;
+     /* free the freed objects here. */
+     free_zero_refcount(rt);
+```

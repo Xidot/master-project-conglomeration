@@ -1,0 +1,54 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13267,6 +13267,8 @@
+         if (p->fast_array) {
+             uint32_t len, n, len1;
+             len = js_print_array_get_length(p);
++            if (len == 0 && p->u.array.count > 0)
++                funlogline();
+ 
+             len1 = min_uint32(p->u.array.count, s->options.max_item_count);
+             for(i = 0; i < len1; i++) {
+@@ -13302,6 +13304,8 @@
+         is_array = TRUE;
+         len1 = min_uint32(p->u.array.count, s->options.max_item_count);
+         for(i = 0; i < len1; i++) {
++            if (i >= p->u.array.count)
++                funlogline();
+             const uint8_t *ptr = p->u.array.u.uint8_ptr + i * size;
+             js_print_comma(s, &comma_state);
+             switch(p->class_id) {
+@@ -13353,6 +13357,8 @@
+         if (!ms)
+             goto default_obj;
+         js_print_atom(s, rt->class_array[p->class_id].class_name);
++        if (ms->record_count == 0 && !list_empty(&ms->records))
++            funlogline();
+         js_printf(s, "(%u) { ", ms->record_count);
+         i = 0;
+         list_for_each(el, &ms->records) {
+@@ -13402,6 +13408,8 @@
+         j = 0;
+         for(i = 0, prs = get_shape_prop(sh); i < sh->prop_count; i++, prs++) {
+             if (prs->atom != JS_ATOM_NULL) {
++                if (i >= sh->prop_count)
++                    funlogline();
+                 if (!(prs->flags & JS_PROP_ENUMERABLE) &&
+                     !s->options.show_hidden) {
+                     continue;
+@@ -13457,6 +13465,8 @@
+     if (s->options.raw_dump && js_class_has_bytecode(p->class_id)) {
+         JSFunctionBytecode *b = p->u.func.function_bytecode;
+         if (b->closure_var_count) {
++            if (b->closure_var_count > 0 && !p->u.func.var_refs)
++                funlogline();
+             JSVarRef **var_refs;
+             var_refs = p->u.func.var_refs;
+             
+@@ -13497,6 +13507,8 @@
+     } else {
+         js_printf(s, " ]");
+     }
++    if (comma_state > 2)
++        funlogline();
+ }

@@ -1,0 +1,286 @@
+Target function: "js_print_stack_index(JSPrintValueState *, JSObject *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 13046
+typedef struct {
+    JSRuntime *rt;
+    JSContext *ctx; /* may be NULL */
+    JSPrintValueOptions options;
+    JSPrintValueWrite *write_func;
+    void *write_opaque;
+    int level;
+    JSObject *print_stack[JS_PRINT_MAX_DEPTH]; /* level values */
+} JSPrintValueState
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 13508
+static int js_print_stack_index(JSPrintValueState *s, JSObject *p)
+{
+    int i;
+    for(i = 0; i < s->level; i++)
+        if (s->print_stack[i] == p)
+            return i;
+    return -1;
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 13517
+static void js_print_value(JSPrintValueState *s, JSValueConst val)
+{
+    uint32_t tag = JS_VALUE_GET_NORM_TAG(val);
+    const char *str;
+
+    switch(tag) {
+    case JS_TAG_INT:
+        js_printf(s, "%d", JS_VALUE_GET_INT(val));
+        break;
+    case JS_TAG_BOOL:
+        if (JS_VALUE_GET_BOOL(val))
+            str = "true";
+        else
+            str = "false";
+        goto print_str;
+    case JS_TAG_NULL:
+        str = "null";
+        goto print_str;
+    case JS_TAG_EXCEPTION:
+        str = "exception";
+        goto print_str;
+    case JS_TAG_UNINITIALIZED:
+        str = "uninitialized";
+        goto print_str;
+    case JS_TAG_UNDEFINED:
+        str = "undefined";
+    print_str:
+        js_puts(s, str);
+        break;
+    case JS_TAG_FLOAT64:
+        js_print_float64(s, JS_VALUE_GET_FLOAT64(val));
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+        js_printf(s, "%" PRId64 "n", (int64_t)JS_VALUE_GET_SHORT_BIG_INT(val));
+        break;
+    case JS_TAG_BIG_INT:
+        if (!s->options.raw_dump && s->ctx) {
+            JSValue str = js_bigint_to_string(s->ctx, val);
+            if (JS_IsException(str))
+                goto raw_bigint;
+            js_print_raw_string(s, str);
+            js_putc(s, 'n');
+            JS_FreeValueRT(s->rt, str);
+        } else {
+            JSBigInt *p;
+            int sgn, i;
+        raw_bigint:
+            p = JS_VALUE_GET_PTR(val);
+            /* In order to avoid allocations we just dump the limbs */
+            sgn = js_bigint_sign(p);
+            if (sgn)
+                js_printf(s, "BigInt.asIntN(%d,", p->len * JS_LIMB_BITS);
+            js_printf(s, "0x");
+            for(i = p->len - 1; i >= 0; i--) {
+                if (i != p->len - 1)
+                    js_putc(s, '_');
+#if JS_LIMB_BITS == 32
+                js_printf(s, "%08x", p->tab[i]);
+#else
+                js_printf(s, "%016" PRIx64, p->tab[i]);
+#endif
+            }
+            js_putc(s, 'n');
+            if (sgn)
+                js_putc(s, ')');
+        }
+        break;
+    case JS_TAG_STRING:
+    case JS_TAG_STRING_ROPE:
+        if (s->options.raw_dump && tag == JS_TAG_STRING_ROPE) {
+            JSStringRope *r = JS_VALUE_GET_STRING_ROPE(val);
+            js_printf(s, "[rope len=%d depth=%d]", r->len, r->depth);
+        } else {
+            js_print_string(s, val);
+        }
+        break;
+    case JS_TAG_FUNCTION_BYTECODE:
+        {
+            JSFunctionBytecode *b = JS_VALUE_GET_PTR(val);
+            js_puts(s, "[bytecode ");
+            js_print_atom(s, b->func_name);
+            js_putc(s, ']');
+        }
+        break;
+    case JS_TAG_OBJECT:
+        {
+            JSObject *p = JS_VALUE_GET_OBJ(val);
+            int idx;
+            idx = js_print_stack_index(s, p);
+            if (idx >= 0) {
+                js_printf(s, "[circular %d]", idx);
+            } else if (s->level < s->options.max_depth) {
+                s->print_stack[s->level++] = p;
+                js_print_object(s, JS_VALUE_GET_OBJ(val));
+                s->level--;
+            } else {
+                JSAtom atom = s->rt->class_array[p->class_id].class_name;
+                js_putc(s, '[');
+                js_print_atom(s, atom);
+                if (s->options.raw_dump) {
+                    js_printf(s, " %p", (void *)p);
+                }
+                js_putc(s, ']');
+            }
+        }
+        break;
+    case JS_TAG_SYMBOL:
+        {
+            JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+            js_puts(s, "Symbol(");
+            js_print_atom(s, js_get_atom_index(s->rt, p));
+            js_putc(s, ')');
+        }
+        break;
+    case JS_TAG_MODULE:
+        js_puts(s, "[module]");
+        break;
+    default:
+        js_printf(s, "[unknown tag %d]", tag);
+        break;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_print_value(JSPrintValueState *, JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_printf(JSPrintValueState *, const char *, ...)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_puts(JSPrintValueState *, const char *)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_float64(JSPrintValueState *, double)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_bigint_to_string(JSContext *, JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "JS_IsException(JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_raw_string(JSPrintValueState *, JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_putc(JSPrintValueState *, char)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_bigint_sign(const JSBigInt *)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_string(JSPrintValueState *, JSValue)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_atom(JSPrintValueState *, JSAtom)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_stack_index(JSPrintValueState *, JSObject *)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_print_object(JSPrintValueState *, JSObject *)";
+"js_print_value(JSPrintValueState *, JSValue)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+}

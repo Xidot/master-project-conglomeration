@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28268,6 +28268,9 @@
+ static void js_mark_module_def(JSRuntime *rt, JSModuleDef *m,
+                                JS_MarkFunc *mark_func)
+ {
++    if (m == NULL) {
++        funlogline();
++    }
+     int i;
+ 
+     for(i = 0; i < m->req_module_entries_count; i++) {
+@@ -28291,6 +28294,12 @@
+     JS_MarkValue(rt, m->module_ns, mark_func);
+     JS_MarkValue(rt, m->func_obj, mark_func);
+     JS_MarkValue(rt, m->eval_exception, mark_func);
++    if (JS_VALUE_GET_TAG(m->module_ns) < JS_TAG_FIRST || JS_VALUE_GET_TAG(m->module_ns) > JS_TAG_FLOAT64) {
++        funlogline();
++    }
++    if (JS_VALUE_GET_TAG(m->func_obj) < JS_TAG_FIRST || JS_VALUE_GET_TAG(m->func_obj) > JS_TAG_FLOAT64) {
++        funlogline();
++    }
+     JS_MarkValue(rt, m->meta_obj, mark_func);
+     JS_MarkValue(rt, m->promise, mark_func);
+     JS_MarkValue(rt, m->resolving_funcs[0], mark_func);

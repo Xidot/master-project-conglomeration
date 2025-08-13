@@ -1,0 +1,174 @@
+Target function: "JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* the indirection is needed to make 'eval' optional */
+/// Line number here: 35850
+static JSValue JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
+                               const char *input, size_t input_len,
+                               const char *filename, int flags, int scope_idx)
+{
+    BOOL backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+    int saved_js_mode = 0;
+    JSValue ret;
+    
+    if (unlikely(!ctx->eval_internal)) {
+        return JS_ThrowTypeError(ctx, "eval is not supported");
+    }
+    if (backtrace_barrier && ctx->rt->current_stack_frame) {
+        saved_js_mode = ctx->rt->current_stack_frame->js_mode;
+        ctx->rt->current_stack_frame->js_mode |= JS_MODE_BACKTRACE_BARRIER;
+    }
+    ret = ctx->eval_internal(ctx, this_obj, input, input_len, filename,
+                             flags, scope_idx);
+    if (backtrace_barrier && ctx->rt->current_stack_frame)
+        ctx->rt->current_stack_frame->js_mode = saved_js_mode;
+    return ret;
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 35872
+static JSValue JS_EvalObject(JSContext *ctx, JSValueConst this_obj,
+                             JSValueConst val, int flags, int scope_idx)
+{
+    JSValue ret;
+    const char *str;
+    size_t len;
+
+    if (!JS_IsString(val))
+        return JS_DupValue(ctx, val);
+    str = JS_ToCStringLen(ctx, &len, val);
+    if (!str)
+        return JS_EXCEPTION;
+    ret = JS_EvalInternal(ctx, this_obj, str, len, "<input>", flags, scope_idx);
+    JS_FreeCString(ctx, str);
+    return ret;
+
+}
+
+/* same as JS_Eval() but with an explicit 'this_obj' parameter */
+/// Line number here: 35890
+JSValue JS_EvalThis(JSContext *ctx, JSValueConst this_obj,
+                    const char *input, size_t input_len,
+                    const char *filename, int eval_flags)
+{
+    int eval_type = eval_flags & JS_EVAL_TYPE_MASK;
+    JSValue ret;
+
+    assert(eval_type == JS_EVAL_TYPE_GLOBAL ||
+           eval_type == JS_EVAL_TYPE_MODULE);
+    ret = JS_EvalInternal(ctx, this_obj, input, input_len, filename,
+                          eval_flags, -1);
+    return ret;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "__builtin_expect(long, long)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JSContext::eval_internal";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)" -> "JS_IsString(JSValue)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)" -> "JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+"JS_EvalObject(JSContext *, JSValue, JSValue, int, int)" -> "JS_FreeCString(JSContext *, const char *)";
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)";
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)" -> "JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+}

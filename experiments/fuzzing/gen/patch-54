@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4079,6 +4079,8 @@
+ static void copy_str16(uint16_t *dst, const JSString *p, int offset, int len)
+ {
+     if (p->is_wide_char) {
++        if (offset < 0 || offset > p->len)
++            funlogline();
+         memcpy(dst, p->u.str16 + offset, len * 2);
+     } else {
+         const uint8_t *src1 = p->u.str8 + offset;
+@@ -4086,6 +4088,8 @@
+ 
+         for(i = 0; i < len; i++)
+             dst[i] = src1[i];
++        if (offset < 0 || offset > p->len)
++            funlogline();
+     }
+ }

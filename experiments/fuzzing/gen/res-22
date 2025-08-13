@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-bc_get_leb128(BCReaderState *, uint32_t *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `bc_get_leb128` function:
+
+:bc_get_leb128:36986
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36988,6 +36988,9 @@
+ {
+     int ret;
+     ret = get_leb128(pval, s->ptr, s->buf_end);
++    if (unlikely(s->ptr >= s->buf_end)) {
++        funlogline();
++    }
+     if (unlikely(ret < 0))
+         return bc_read_error_end(s);
+     s->ptr += ret;
+```
+
+The logical bug is that `bc_get_leb128` doesn't check if `s->ptr` is already at or beyond `s->buf_end` before calling `get_leb128`. This could lead to reading past the buffer end in `get_leb128` before it gets a chance to check the bounds itself.
+
+The fix adds a bounds check before calling `get_leb128` and logs via `funlogline()` if we're already at/past the buffer end. This condition would only be true when the bug is triggered (attempting to read past buffer end).
+
+Note that while `get_leb128` does have its own bounds checking, it's better to fail fast in the parent function rather than rely on the callee's error handling. This makes the error detection more immediate and explicit.

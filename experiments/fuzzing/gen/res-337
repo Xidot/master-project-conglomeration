@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_GetGlobalVar(JSContext *, JSAtom, BOOL)
+-------------------------
+Based on the code and call graph, I'll analyze the target function `JS_GetGlobalVar` for potential logical bugs.
+
+Potential logical bug locations:
+
+1. :quickjs.c:JS_GetGlobalVar:10066 - Missing check for NULL global_var_obj
+2. :quickjs.c:JS_GetGlobalVar:10070 - Missing check for prs->flags before accessing pr->u.value
+3. :quickjs.c:JS_GetGlobalVar:10073 - Missing check for JS_IsException after JS_DupValue
+
+---
+
+Here are the proposed changes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10066,6 +10066,9 @@
+     JSShapeProperty *prs;
+     JSProperty *pr;
+ 
++    if (unlikely(!ctx->global_var_obj))
++        funlogline();
++
+     /* no exotic behavior is possible in global_var_obj */
+     p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+     prs = find_own_property(&pr, p, prop);
+@@ -10070,6 +10073,9 @@
+     p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+     prs = find_own_property(&pr, p, prop);
+     if (prs) {
++        if (unlikely(prs->flags & JS_PROP_TMASK))
++            funlogline();
++
+         /* XXX: should handle JS_PROP_TMASK properties */
+         if (unlikely(JS_IsUninitialized(pr->u.value)))
+             return JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
+@@ -10077,6 +10083,9 @@
+     }
+     return JS_GetPropertyInternal(ctx, ctx->global_obj, prop,
+                                  ctx->global_obj, throw_ref_error);
++    if (unlikely(JS_IsException(ret)))
++        funlogline();
++    return ret;
+ }
+```
+
+Reasons for the changes:
+
+1. Added check for NULL global_var_obj - This could lead to a crash if global_var_obj is not initialized
+2. Added check for JS_PROP_TMASK flags - The comment indicates these should be handled but currently aren't
+3. Added check for JS_IsException - The return value from JS_GetPropertyInternal could be an exception that should be handled
+
+The changes add instrumentation to detect when these edge cases occur by calling funlogline() when the problematic conditions are met.

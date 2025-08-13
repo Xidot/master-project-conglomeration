@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5514,6 +5514,9 @@
+     intptr_t h;
+     sh = p->shape;
+     h = (uintptr_t)atom & sh->prop_hash_mask;
++    if (sh->prop_hash_mask == 0) {
++        funlogline();
++    }
+     h = prop_hash_end(sh)[-h - 1];
+     prop = get_shape_prop(sh);
+     while (h) {
+@@ -5521,6 +5524,9 @@
+         if (likely(pr->atom == atom)) {
+             return pr;
+         }
++        if (h >= sh->prop_count) {
++            funlogline();
++        }
+         h = pr->hash_next;
+     }
+     return NULL;

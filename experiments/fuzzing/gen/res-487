@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_PreventExtensions(JSContext *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_PreventExtensions` function:
+
+:quickjs.c:JS_PreventExtensions:8263
+:quickjs.c:JS_PreventExtensions:8270
+
+---
+
+The main logical issues are:
+
+1. At line 8263: The function doesn't properly handle the case where the object is already non-extensible. It proceeds to set extensible to FALSE again without checking current state.
+
+2. At line 8270: After calling exotic->prevent_extensions, the function unconditionally sets p->extensible to FALSE without checking if the exotic method succeeded or not. This could lead to inconsistent state if the exotic method failed.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8260,6 +8260,8 @@
+ {
+     JSObject *p;
+ 
++    if (unlikely(!p->extensible))
++        funlogline();
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(obj);
+@@ -8267,6 +8269,8 @@
+         const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+         if (em && em->prevent_extensions) {
+             return em->prevent_extensions(ctx, obj);
++            if (unlikely(ret < 0))
++                funlogline();
+         }
+     }
+     p->extensible = FALSE;
+```
+
+The changes:
+1. Added check for already non-extensible objects
+2. Added check for exotic method failure case
+3. Both conditions call funlogline() when the bug conditions are met

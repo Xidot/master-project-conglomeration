@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_shr` function:
+
+:js_bigint_shr:11369
+:js_bigint_shr:11378
+
+---
+
+1. Line 11369: The function doesn't handle the case where `shift1` is 0, which could lead to unnecessary computation. While not strictly a bug, it's an optimization opportunity.
+
+2. Line 11378: The condition `if (d >= a->len)` checks if the shift amount in limbs is greater than or equal to the length of the input bigint. However, the function then returns `-a_sign` which might not be correct for all cases, especially when dealing with negative numbers and large shifts. The sign handling here could be problematic.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11375,6 +11375,8 @@
+     a_sign = js_bigint_sign(a);
+     if (d >= a->len)
+         return js_bigint_new_si(ctx, -a_sign);
++    if (shift1 == 0)
++        funlogline();
+     n1 = a->len - d;
+     r = js_bigint_new(ctx, n1);
+     if (!r)
+@@ -11386,6 +11386,7 @@
+         /* no normalization is needed */
+     } else {
+         mp_shr(r->tab, a->tab + d, n1, shift, -a_sign);
++        if (a_sign && shift != 0 && n1 > 0 && r->tab[n1-1] == 0)
++            funlogline();
+         r = js_bigint_normalize(ctx, r);
+     }
+     return r;
+```
+
+The first instrumentation checks for the zero-shift case, while the second checks for potential sign issues during the shift operation of negative numbers. The conditions are designed to trigger only when the problematic cases occur.

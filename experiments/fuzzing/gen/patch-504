@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49575,6 +49575,8 @@
+     JSValue args[2], ret;
+     int i;
+ 
++    if (argc < 1)
++        return JS_ThrowTypeError(ctx, "executor argument required");
+     executor = argv[0];
+     if (check_function(ctx, executor))
+         return JS_EXCEPTION;
+@@ -49605,6 +49607,7 @@
+     ret = JS_Call(ctx, executor, JS_UNDEFINED, 2, (JSValueConst *)args);
+     if (JS_IsException(ret)) {
+         JSValue ret2, error;
++        if (s->promise_state != JS_PROMISE_PENDING) funlogline();
+         error = JS_GetException(ctx);
+         ret2 = JS_Call(ctx, args[1], JS_UNDEFINED, 1, (JSValueConst *)&error);
+         JS_FreeValue(ctx, error);
+@@ -49617,6 +49620,7 @@
+     JS_FreeValue(ctx, args[1]);
+     return obj;
+  fail1:
++    js_free(ctx, s);
+     JS_FreeValue(ctx, args[0]);
+     JS_FreeValue(ctx, args[1]);
+  fail:

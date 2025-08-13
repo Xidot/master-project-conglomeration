@@ -1,0 +1,431 @@
+Target function: "JS_ThrowTypeErrorRevokedProxy(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+/// Line number here: 481
+typedef struct JSPropertyDescriptor {
+    int flags;
+    JSValue value;
+    JSValue getter;
+    JSValue setter;
+} JSPropertyDescriptor
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 47159
+static JSValue JS_ThrowTypeErrorRevokedProxy(JSContext *ctx)
+{
+    return JS_ThrowTypeError(ctx, "revoked proxy");
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 684
+typedef struct JSProxyData {
+    JSValue target;
+    JSValue handler;
+    uint8_t is_func;
+    uint8_t is_revoked;
+} JSProxyData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 47164
+static JSProxyData *get_proxy_method(JSContext *ctx, JSValue *pmethod,
+                                     JSValueConst obj, JSAtom name)
+{
+    JSProxyData *s = JS_GetOpaque(obj, JS_CLASS_PROXY);
+    JSValue method;
+
+    /* safer to test recursion in all proxy methods */
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        return NULL;
+    }
+
+    /* 's' should never be NULL */
+    if (s->is_revoked) {
+        JS_ThrowTypeErrorRevokedProxy(ctx);
+        return NULL;
+    }
+    method = JS_GetProperty(ctx, s->handler, name);
+    if (JS_IsException(method))
+        return NULL;
+    if (JS_IsNull(method))
+        method = JS_UNDEFINED;
+    *pmethod = method;
+    return s;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 47778
+static int js_proxy_get_own_property_names(JSContext *ctx,
+                                           JSPropertyEnum **ptab,
+                                           uint32_t *plen,
+                                           JSValueConst obj)
+{
+    JSProxyData *s;
+    JSValue method, prop_array, val;
+    uint32_t len, i, len2;
+    JSPropertyEnum *tab, *tab2;
+    JSAtom atom;
+    JSPropertyDescriptor desc;
+    int res, is_extensible, idx;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_ownKeys);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method)) {
+        return JS_GetOwnPropertyNamesInternal(ctx, ptab, plen,
+                                      JS_VALUE_GET_OBJ(s->target),
+                                      JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK);
+    }
+    prop_array = JS_CallFree(ctx, method, s->handler, 1, (JSValueConst *)&s->target);
+    if (JS_IsException(prop_array))
+        return -1;
+    tab = NULL;
+    len = 0;
+    tab2 = NULL;
+    len2 = 0;
+    if (js_get_length32(ctx, &len, prop_array))
+        goto fail;
+    if (len > 0) {
+        tab = js_mallocz(ctx, sizeof(tab[0]) * len);
+        if (!tab)
+            goto fail;
+    }
+    for(i = 0; i < len; i++) {
+        val = JS_GetPropertyUint32(ctx, prop_array, i);
+        if (JS_IsException(val))
+            goto fail;
+        if (!JS_IsString(val) && !JS_IsSymbol(val)) {
+            JS_FreeValue(ctx, val);
+            JS_ThrowTypeError(ctx, "proxy: properties must be strings or symbols");
+            goto fail;
+        }
+        atom = JS_ValueToAtom(ctx, val);
+        JS_FreeValue(ctx, val);
+        if (atom == JS_ATOM_NULL)
+            goto fail;
+        tab[i].atom = atom;
+        tab[i].is_enumerable = FALSE; /* XXX: redundant? */
+    }
+
+    /* check duplicate properties (XXX: inefficient, could store the
+     * properties an a temporary object to use the hash) */
+    for(i = 1; i < len; i++) {
+        if (find_prop_key(tab, i, tab[i].atom) >= 0) {
+            JS_ThrowTypeError(ctx, "proxy: duplicate property");
+            goto fail;
+        }
+    }
+
+    is_extensible = JS_IsExtensible(ctx, s->target);
+    if (is_extensible < 0)
+        goto fail;
+
+    /* check if there are non configurable properties */
+    if (s->is_revoked) {
+        JS_ThrowTypeErrorRevokedProxy(ctx);
+        goto fail;
+    }
+    if (JS_GetOwnPropertyNamesInternal(ctx, &tab2, &len2, JS_VALUE_GET_OBJ(s->target),
+                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK))
+        goto fail;
+    for(i = 0; i < len2; i++) {
+        if (s->is_revoked) {
+            JS_ThrowTypeErrorRevokedProxy(ctx);
+            goto fail;
+        }
+        res = JS_GetOwnPropertyInternal(ctx, &desc, JS_VALUE_GET_OBJ(s->target),
+                                tab2[i].atom);
+        if (res < 0)
+            goto fail;
+        if (res) {  /* safety, property should be found */
+            js_free_desc(ctx, &desc);
+            if (!(desc.flags & JS_PROP_CONFIGURABLE) || !is_extensible) {
+                idx = find_prop_key(tab, len, tab2[i].atom);
+                if (idx < 0) {
+                    JS_ThrowTypeError(ctx, "proxy: target property must be present in proxy ownKeys");
+                    goto fail;
+                }
+                /* mark the property as found */
+                if (!is_extensible)
+                    tab[idx].is_enumerable = TRUE;
+            }
+        }
+    }
+    if (!is_extensible) {
+        /* check that all property in 'tab' were checked */
+        for(i = 0; i < len; i++) {
+            if (!tab[i].is_enumerable) {
+                JS_ThrowTypeError(ctx, "proxy: property not present in target were returned by non extensible proxy");
+                goto fail;
+            }
+        }
+    }
+
+    JS_FreePropertyEnum(ctx, tab2, len2);
+    JS_FreeValue(ctx, prop_array);
+    *ptab = tab;
+    *plen = len;
+    return 0;
+ fail:
+    JS_FreePropertyEnum(ctx, tab2, len2);
+    JS_FreePropertyEnum(ctx, tab, len);
+    JS_FreeValue(ctx, prop_array);
+    return -1;
+}
+
+/* `js_resolve_proxy`: resolve the proxy chain
+   `*pval` is updated with to ultimate proxy target
+   `throw_exception` controls whether exceptions are thown or not
+   - return -1 in case of error
+   - otherwise return 0
+ */
+/// Line number here: 47971
+static int js_resolve_proxy(JSContext *ctx, JSValueConst *pval, BOOL throw_exception) {
+    int depth = 0;
+    JSObject *p;
+    JSProxyData *s;
+
+    while (JS_VALUE_GET_TAG(*pval) == JS_TAG_OBJECT) {
+        p = JS_VALUE_GET_OBJ(*pval);
+        if (p->class_id != JS_CLASS_PROXY)
+            break;
+        if (depth++ > 1000) {
+            if (throw_exception)
+                JS_ThrowStackOverflow(ctx);
+            return -1;
+        }
+        s = p->u.opaque;
+        if (s->is_revoked) {
+            if (throw_exception)
+                JS_ThrowTypeErrorRevokedProxy(ctx);
+            return -1;
+        }
+        *pval = s->target;
+    }
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThrowTypeErrorRevokedProxy(JSContext *)";
+"JS_ThrowTypeErrorRevokedProxy(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_ThrowStackOverflow(JSContext *)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_ThrowTypeErrorRevokedProxy(JSContext *)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_IsException(JSValue)";
+"get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)" -> "JS_IsNull(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_get_length32(JSContext *, uint32_t *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_mallocz(JSContext *, size_t)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetPropertyUint32(JSContext *, JSValue, uint32_t)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsString(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsSymbol(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ValueToAtom(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "find_prop_key(const JSPropertyEnum *, int, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ThrowTypeErrorRevokedProxy(JSContext *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"js_resolve_proxy(JSContext *, JSValue *, BOOL)";
+"js_resolve_proxy(JSContext *, JSValue *, BOOL)" -> "JS_ThrowStackOverflow(JSContext *)";
+"js_resolve_proxy(JSContext *, JSValue *, BOOL)" -> "JS_ThrowTypeErrorRevokedProxy(JSContext *)";
+}

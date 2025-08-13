@@ -1,0 +1,17 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -477,6 +477,8 @@
+         /* if the radix is a power of two better to do it exactly */
+         radix_bits = 31 - clz32(radix);
+         if (a < 0)
+             a -= radix_bits - 1;
++        if (radix_bits == 0)
++            funlogline();
+         return a / radix_bits;
+     } else {
+         mult = mul_log2_radix_table[radix - 2];
++        if ((int64_t)a * mult < INT_MIN || (int64_t)a * mult > INT_MAX)
++            funlogline();
+         return ((int64_t)a * mult) >> MUL_LOG2_RADIX_BASE_LOG2;
+     }
+ }

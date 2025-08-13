@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5816,6 +5816,9 @@
+     for(;;) {
+         el = rt->gc_zero_ref_count_list.next;
+         if (el == &rt->gc_zero_ref_count_list)
++            if (rt->gc_phase != JS_GC_PHASE_DECREF) {
++                funlogline();
++            }
+             break;
+         p = list_entry(el, JSGCObjectHeader, link);
+         assert(p->ref_count == 0);

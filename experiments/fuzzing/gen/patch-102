@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -51000,6 +51000,8 @@
+         if (!force)
+             return FALSE; /* NaN */
+         d = 0;        /* initialize all fields to 0 */
++    } else if (dval < -8.64e15 || dval > 8.64e15) {
++        funlogline();
+     } else {
+         d = dval;     /* assuming -8.64e15 <= dval <= -8.64e15 */
+         if (is_local) {
+@@ -51010,6 +51012,8 @@
+ 
+     /* result is >= 0, we can use % */
+     h = math_mod(d, 86400000);
++    if (h < 0 || h >= 86400000)
++        funlogline();
+     days = (d - h) / 86400000;
+     ms = h % 1000;
+     h = (h - ms) / 1000;
+@@ -51025,6 +51029,8 @@
+     for(i = 0; i < 11; i++) {
+         md = month_days[i];
+         if (i == 1)
++            if (days_in_year(y) < 365)
++                funlogline();
+             md += days_in_year(y) - 365;
+         if (days < md)
+             break;

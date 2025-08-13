@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14049,6 +14049,8 @@
+                 case OP_neg:
+                     if (v64 == 0) {
+                         sp[-1] = __JS_NewFloat64(ctx, -0.0);
++                    } else if (v64 == INT64_MIN) {
++                        sp[-1] = __JS_NewFloat64(ctx, -(double)v64);
+                     } else {
+                         v64 = -v64;
+                     }
+@@ -14069,6 +14071,8 @@
+                 case OP_inc:
+                     if (v == JS_SHORT_BIG_INT_MAX)
+                         goto bigint_slow_case;
++                    if (v == JS_SHORT_BIG_INT_MAX - 1)
++                        funlogline();
+                     sp[-1] = __JS_NewShortBigInt(ctx, v + 1);
+                     break;
+                 case OP_dec:
+@@ -14086,6 +14090,8 @@
+                 bigint_slow_case:
+                     p1 = js_bigint_set_short(&buf1, op1);
+                     goto bigint_slow_case1;
++                } else if (v == JS_SHORT_BIG_INT_MIN + 1) {
++                    funlogline();
+                 }
+                 sp[-1] = __JS_NewShortBigInt(ctx, -v);
+                 break;

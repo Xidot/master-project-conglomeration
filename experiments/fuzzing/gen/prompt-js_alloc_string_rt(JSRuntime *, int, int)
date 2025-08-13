@@ -1,0 +1,94 @@
+Target function: "js_alloc_string_rt(JSRuntime *, int, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* Note: the string contents are uninitialized */
+/// Line number here: 1857
+static JSString *js_alloc_string_rt(JSRuntime *rt, int max_len, int is_wide_char)
+{
+    JSString *str;
+    str = js_malloc_rt(rt, sizeof(JSString) + (max_len << is_wide_char) + 1 - is_wide_char);
+    if (unlikely(!str))
+        return NULL;
+    str->header.ref_count = 1;
+    str->is_wide_char = is_wide_char;
+    str->len = max_len;
+    str->atom_type = 0;
+    str->hash = 0;          /* optional but costless */
+    str->hash_next = 0;     /* optional */
+#ifdef DUMP_LEAKS
+    list_add_tail(&str->link, &rt->string_list);
+#endif
+    return str;
+}
+
+/// Line number here: 1332
+void *js_malloc_rt(JSRuntime *rt, size_t size)
+{
+    return rt->mf.js_malloc(&rt->malloc_state, size);
+}
+
+/// Line number here: 1875
+static JSString *js_alloc_string(JSContext *ctx, int max_len, int is_wide_char)
+{
+    JSString *p;
+    p = js_alloc_string_rt(ctx->rt, max_len, is_wide_char);
+    if (unlikely(!p)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return p;
+}
+
+/* only works with zero terminated 8 bit strings */
+/// Line number here: 2814
+static JSAtom __JS_NewAtomInit(JSRuntime *rt, const char *str, int len,
+                               int atom_type)
+{
+    JSString *p;
+    p = js_alloc_string_rt(rt, len, 0);
+    if (!p)
+        return JS_ATOM_NULL;
+    memcpy(p->u.str8, str, len);
+    p->u.str8[len] = '\0';
+    return __JS_NewAtom(rt, p, atom_type);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_alloc_string_rt(JSRuntime *, int, int)";
+"js_alloc_string_rt(JSRuntime *, int, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"js_alloc_string_rt(JSRuntime *, int, int)" -> "__builtin_expect(long, long)";
+"js_malloc_rt(JSRuntime *, size_t)";
+"js_malloc_rt(JSRuntime *, size_t)" -> "JSMallocFunctions::js_malloc";
+"js_alloc_string(JSContext *, int, int)";
+"js_alloc_string(JSContext *, int, int)" -> "js_alloc_string_rt(JSRuntime *, int, int)";
+"js_alloc_string(JSContext *, int, int)" -> "__builtin_expect(long, long)";
+"js_alloc_string(JSContext *, int, int)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"__JS_NewAtomInit(JSRuntime *, const char *, int, int)";
+"__JS_NewAtomInit(JSRuntime *, const char *, int, int)" -> "js_alloc_string_rt(JSRuntime *, int, int)";
+"__JS_NewAtomInit(JSRuntime *, const char *, int, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"__JS_NewAtomInit(JSRuntime *, const char *, int, int)" -> "__JS_NewAtom(JSRuntime *, JSString *, int)";
+}

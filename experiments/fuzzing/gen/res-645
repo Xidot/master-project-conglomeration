@@ -1,0 +1,49 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ToObject(JSContext *, JSValue)
+-------------------------
+Based on the code and callgraph, I'll analyze the `JS_ToObject` function for logical bugs. Here are the potential issues:
+
+:quickjs.c:JS_ToObject:38297
+:quickjs.c:JS_ToObject:38347
+
+--- Analysis ---
+
+1. In the `JS_ToObject` function, when handling string values (JS_TAG_STRING/JS_TAG_STRING_ROPE), it creates a new string object but doesn't properly handle the case where JS_ToString() fails (returns an exception). While there is a check for JS_IsException(str), the function continues to create the object before checking this condition.
+
+2. In the `JS_ToObjectFree` wrapper function, it unconditionally frees the input value after calling JS_ToObject, which could be problematic if JS_ToObject returns the same value (like for JS_TAG_OBJECT case).
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38313,6 +38313,8 @@
+         /* XXX: should call the string constructor */
+         {
+             JSValue str;
+             str = JS_ToString(ctx, val); /* ensure that we never store a rope */
++            if (JS_IsException(str))
++                return JS_EXCEPTION;
+             obj = JS_NewObjectClass(ctx, JS_CLASS_STRING);
+             if (!JS_IsException(obj)) {
+                 JS_DefinePropertyValue(ctx, obj, JS_ATOM_length,
+@@ -38347,7 +38349,8 @@
+ static JSValue JS_ToObjectFree(JSContext *ctx, JSValue val)
+ {
+     JSValue obj = JS_ToObject(ctx, val);
+-    JS_FreeValue(ctx, val);
++    if (obj != val)
++        JS_FreeValue(ctx, val);
+     return obj;
+ }
+```
+
+The changes:
+1. Add early exception check after JS_ToString() call
+2. Only free the input value if it's different from the returned object
+
+These changes prevent:
+1. Creating objects when string conversion fails
+2. Double-free cases when the input is already an object
+3. Potential memory leaks in error cases

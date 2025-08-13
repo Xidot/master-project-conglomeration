@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mp_shr(limb_t *, const limb_t *, mp_size_t, int, limb_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `mp_shr`:
+
+:dtoa.c:mp_shr:151
+
+---
+
+```diff
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -151,6 +151,9 @@
+ static limb_t mp_shr(limb_t *tab_r, const limb_t *tab, mp_size_t n, 
+                      int shift, limb_t high)
+ {
++    if (n <= 0) {
++        funlogline();
++    }
+     mp_size_t i;
+     limb_t l, a;
+ 
+```
+
+The reasoning is:
+
+1. The function assumes `n` (number of limbs) is positive but doesn't validate it. While the assert checks shift bounds, it doesn't check `n`. If `n` is 0 or negative, the loop would underflow or access invalid memory.
+
+2. The instrumentation adds a check for non-positive `n` which would indicate a logical error since the function is meant to operate on positive-length arrays.
+
+Note that while the assert checks shift bounds, it doesn't validate the input size `n`, which could lead to logical errors if called incorrectly from `mpb_shr_round`. The instrumentation catches this case.

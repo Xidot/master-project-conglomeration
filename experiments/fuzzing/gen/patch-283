@@ -1,0 +1,16 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1781,6 +1781,12 @@
+     if (!e)
+         return -1;
+     e->realm = JS_DupContext(ctx);
++    if (!e->realm) {
++        js_free(ctx, e);
++        return -1;
++    }
++    if (!job_func || argc < 0) {
++        funlogline();
++    }
+     e->job_func = job_func;
+     e->argc = argc;
+     for(i = 0; i < argc; i++) {

@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ThrowReferenceError(JSContext *, const char *, ...)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the target function `JS_ThrowReferenceError(JSContext *, const char *, ...)` for potential logical bugs.
+
+Potential logical bug locations:
+
+1. :quickjs.c:7112 - The function doesn't check if `ctx` is NULL before using it
+2. :quickjs.c:7112 - The function doesn't validate the format string `fmt` before passing to `JS_ThrowError`
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7111,6 +7111,9 @@
+ JSValue __attribute__((format(printf, 2, 3))) JS_ThrowReferenceError(JSContext *ctx, const char *fmt, ...)
+ {
+     JSValue val;
++    if (!ctx) {
++        funlogline();
++    }
+     va_list ap;
+ 
+     va_start(ap, fmt);
+```
+
+The modifications:
+
+1. Added a NULL check for `ctx` parameter since it's dereferenced in called functions
+2. The format string validation is handled by the `format(printf, 2, 3)` attribute so no additional check is needed
+
+The bug would trigger when:
+- The context pointer `ctx` is NULL, which would lead to crashes in called functions
+
+Rationale:
+- The function assumes `ctx` is valid but doesn't validate it
+- This could lead to crashes if called with NULL context
+- The format string is validated by compiler attributes so no runtime check needed
+- Other parameters are validated by called functions (`JS_ThrowError`)
+
+Note that this is a defensive programming check rather than a pure logic bug, but it's important for robustness since the function is part of the error reporting infrastructure itself.

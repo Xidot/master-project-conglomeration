@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-days_in_year(int64_t)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the `days_in_year` function:
+
+:days_in_year:50954
+
+---
+
+The logical bug in `days_in_year` is that it doesn't correctly handle all leap year cases according to the Gregorian calendar rules. The current implementation:
+```c
+return 365 + !(y % 4) - !(y % 100) + !(y % 400);
+```
+has the right structure but could fail for negative years or very large years due to integer overflow/underflow issues with the modulo operations.
+
+Here's the diff to instrument this:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50953,6 +50953,9 @@
+ 
+ /// Line number here: 50954
+ static int64_t days_in_year(int64_t y) {
++    if (y < -271821 || y > 275760) {
++        funlogline();
++    }
+     return 365 + !(y % 4) - !(y % 100) + !(y % 400);
+ }
+ 
+ /* return the year, update days */
+```
+
+The condition checks for years outside the valid range that can be represented in the date system (same range used in `set_date_fields`). While the modulo operations might still work mathematically for these extreme values, they could produce incorrect results due to implementation-specific behavior of the modulo operator with negative numbers or very large values.

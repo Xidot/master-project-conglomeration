@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8260,6 +8260,8 @@
+ {
+     JSObject *p;
+ 
++    if (unlikely(!p->extensible))
++        funlogline();
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(obj);
+@@ -8267,6 +8269,8 @@
+         const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+         if (em && em->prevent_extensions) {
+             return em->prevent_extensions(ctx, obj);
++            if (unlikely(ret < 0))
++                funlogline();
+         }
+     }
+     p->extensible = FALSE;

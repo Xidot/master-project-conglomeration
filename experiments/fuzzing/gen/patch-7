@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19646,6 +19646,9 @@
+ 
+ static void __async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+ {
++    if (s == NULL) {
++        funlogline();
++    }
+     /* cannot close the closure variables here because it would
+        potentially modify the object graph */
+     if (!s->is_completed) {
+@@ -19656,6 +19656,9 @@
+     JS_FreeValueRT(rt, s->resolving_funcs[1]);
+ 
+     remove_gc_object(&s->header);
++    if (rt == NULL) {
++        funlogline();
++    }
+     if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && s->header.ref_count != 0) {
+         list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
+     } else {

@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11073,6 +11073,8 @@
+ static JSBigInt *js_bigint_extend(JSContext *ctx, JSBigInt *r,
+                                   js_limb_t op1)
+ {
+     int n2 = r->len;
++    if (op1 != 0 && op1 != (js_limb_t)-1)
++        funlogline();
+     if ((op1 != 0 && op1 != -1) ||
+         (op1 & 1) != r->tab[n2 - 1] >> (JS_LIMB_BITS - 1)) {
+         JSBigInt *r1;
+@@ -11083,6 +11085,8 @@
+             return NULL;
+         }
+         r = r1;
++        if (n2 >= r->len)
++            funlogline();
+         r->len = n2 + 1;
+         r->tab[n2] = op1;
+     } else {

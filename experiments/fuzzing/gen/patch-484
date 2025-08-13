@@ -1,0 +1,10 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7227,6 +7227,7 @@
+ static inline __exception int js_poll_interrupts(JSContext *ctx)
+ {
+     if (unlikely(--ctx->interrupt_counter <= 0)) {
++        if (ctx->interrupt_counter < -1) funlogline(); // Detect if counter underflows
+         return __js_poll_interrupts(ctx);
+     } else {
+         return 0;

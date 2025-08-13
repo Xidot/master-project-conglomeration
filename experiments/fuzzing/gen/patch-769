@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3555,6 +3555,9 @@
+     if (!s->is_wide_char && c >= 0x100) {
+         return string_buffer_widen(s, new_size);
+     }
++    if (new_size > (INT_MAX >> s->is_wide_char)) {
++        funlogline();
++    }
+     new_size_bytes = sizeof(JSString) + (new_size << s->is_wide_char) + 1 - s->is_wide_char;
+     new_str = js_realloc2(s->ctx, s->str, new_size_bytes, &slack);
+     if (!new_str)
+@@ -3562,6 +3565,9 @@
+     new_size = min_int(new_size + (slack >> s->is_wide_char), JS_STRING_LEN_MAX);
+     s->size = new_size;
+     s->str = new_str;
++    if (new_size > JS_STRING_LEN_MAX) {
++        funlogline();
++    }
+     return 0;
+ }

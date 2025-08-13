@@ -1,0 +1,71 @@
+Target function: "tofp16(double)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 377
+static inline uint16_t tofp16(double d)
+{
+    uint64_t a, addend;
+    uint32_t v, sgn;
+    int shift;
+    
+    a = float64_as_uint64(d);
+    sgn = a >> 63;
+    a = a & 0x7fffffffffffffff;
+    if (unlikely(a > 0x7ff0000000000000)) {
+        /* nan */
+        v = 0x7c01;
+    } else if (a < 0x3f10000000000000) { /* 0x1p-14 */
+        /* subnormal f16 number or zero */
+        if (a <= 0x3e60000000000000) { /* 0x1p-25 */
+            v = 0x0000; /* zero */
+        } else {
+            shift = 1051 - (a >> 52);
+            a = ((uint64_t)1 << 52) | (a & (((uint64_t)1 << 52) - 1));
+            addend = ((a >> shift) & 1) + (((uint64_t)1 << (shift - 1)) - 1);
+            v = (a + addend) >> shift;
+        }
+    } else {
+        /* normal number or infinity */
+        a -= 0x3f00000000000000; /* adjust the exponent */
+        /* round */
+        addend = ((a >> (52 - 10)) & 1) + (((uint64_t)1 << (52 - 11)) - 1);
+        v = (a + addend) >> (52 - 10);
+        /* overflow ? */
+        if (unlikely(v > 0x7c00))
+            v = 0x7c00;
+    }
+    return v | (sgn << 15);
+}
+
+/// Line number here: 346
+static inline uint64_t float64_as_uint64(double d)
+{
+    union {
+        double d;
+        uint64_t u64;
+    } u;
+    u.d = d;
+    return u.u64;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"tofp16(double)";
+"tofp16(double)" -> "float64_as_uint64(double)";
+"tofp16(double)" -> "__builtin_expect(long, long)";
+}

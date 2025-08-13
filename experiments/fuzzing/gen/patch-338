@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10084,6 +10084,9 @@
+     JSShapeProperty *prs;
+     JSProperty *pr;
+ 
++    if (unlikely(!ctx->global_var_obj))
++        return -1;
++
+     /* no exotic behavior is possible in global_var_obj */
+     p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+     prs = find_own_property(&pr, p, prop);
+@@ -10091,6 +10094,8 @@
+         /* XXX: should handle JS_PROP_AUTOINIT properties? */
+         /* XXX: conformance: do these tests in
+            OP_put_var_ref/OP_get_var_ref ? */
++        if (unlikely(!pr))
++            return -1;
+         if (unlikely(JS_IsUninitialized(pr->u.value))) {
+             JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
+             return -1;

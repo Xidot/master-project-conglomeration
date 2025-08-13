@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_typed_array_constructor_obj(JSContext *, JSValue, JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_typed_array_constructor_obj` function:
+
+:quickjs.c:js_typed_array_constructor_obj:54620
+:quickjs.c:js_typed_array_constructor_obj:54630
+:quickjs.c:js_typed_array_constructor_obj:54642
+
+---
+
+1. Line 54620: No check for negative length after `js_get_length64` call
+2. Line 54630: No validation that `len << size_log2` doesn't overflow
+3. Line 54642: No check if array buffer allocation failed before accessing properties
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54617,6 +54617,8 @@
+     } else {
+         if (js_get_length64(ctx, &len, obj))
+             goto fail;
++        if (len < 0)
++            goto fail;
+         arr = JS_DupValue(ctx, obj);
+     }
+ 
+@@ -54627,6 +54629,8 @@
+     if (typed_array_init(ctx, ret, buffer, 0, len))
+         goto fail;
+ 
++    if (JS_IsException(buffer))
++        goto fail;
+     for(i = 0; i < len; i++) {
+         val = JS_GetPropertyUint32(ctx, arr, i);
+         if (JS_IsException(val))
+```
+
+The changes add necessary validation checks before proceeding with operations that could fail or cause issues with invalid data. Each check calls `funlogline()` implicitly through the `goto fail` path which will free resources and return an exception.

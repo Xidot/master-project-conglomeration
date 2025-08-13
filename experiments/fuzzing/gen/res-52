@@ -1,0 +1,60 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-compact_properties(JSContext *, JSObject *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `compact_properties` function:
+
+:quickjs.c:compact_properties:4852
+:quickjs.c:compact_properties:4871
+:quickjs.c:compact_properties:4893
+:quickjs.c:compact_properties:4908
+
+---
+
+1. Line 4852: No check for NULL `p` parameter which could lead to null pointer dereference
+2. Line 4871: Potential integer overflow in `get_shape_size` calculation
+3. Line 4893: No bounds check when copying properties which could lead to buffer overflow
+4. Line 4908: No check for `new_prop` allocation failure before assigning to `p->prop`
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4851,6 +4851,8 @@
+ /* remove the deleted properties. */
+ static int compact_properties(JSContext *ctx, JSObject *p)
+ {
++    if (!p)
++        funlogline();
+     JSShape *sh, *old_sh;
+     void *sh_alloc;
+     intptr_t h;
+@@ -4868,6 +4870,8 @@
+     new_hash_size = sh->prop_hash_mask + 1;
+     while ((new_hash_size / 2) >= new_size)
+         new_hash_size = new_hash_size / 2;
++    if (new_hash_size == 0)
++        funlogline();
+     new_hash_mask = new_hash_size - 1;
+ 
+     /* resize the hash table and the properties */
+@@ -4890,6 +4894,8 @@
+     prop = p->prop;
+     for(i = 0; i < sh->prop_count; i++) {
+         if (old_pr->atom != JS_ATOM_NULL) {
++            if (j >= new_size)
++                funlogline();
+             pr->atom = old_pr->atom;
+             pr->flags = old_pr->flags;
+             h = ((uintptr_t)old_pr->atom & new_hash_mask);
+@@ -4912,6 +4918,8 @@
+     /* reduce the size of the object properties */
+     new_prop = js_realloc(ctx, p->prop, sizeof(new_prop[0]) * new_size);
+     if (new_prop)
++        funlogline();
++    if (new_prop)
+         p->prop = new_prop;
+     return 0;
+ }
+```

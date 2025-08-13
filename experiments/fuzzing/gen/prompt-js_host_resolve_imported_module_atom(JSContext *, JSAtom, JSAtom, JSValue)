@@ -1,0 +1,237 @@
+Target function: "js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 463
+static inline const char *JS_AtomToCString(JSContext *ctx, JSAtom atom)
+{
+    return JS_AtomToCStringLen(ctx, NULL, atom);
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 28648
+static JSModuleDef *js_host_resolve_imported_module_atom(JSContext *ctx,
+                                                         JSAtom base_module_name,
+                                                         JSAtom module_name1,
+                                                         JSValueConst attributes)
+{
+    const char *base_cname, *cname;
+    JSModuleDef *m;
+
+    base_cname = JS_AtomToCString(ctx, base_module_name);
+    if (!base_cname)
+        return NULL;
+    cname = JS_AtomToCString(ctx, module_name1);
+    if (!cname) {
+        JS_FreeCString(ctx, base_cname);
+        return NULL;
+    }
+    m = js_host_resolve_imported_module(ctx, base_cname, cname, attributes);
+    JS_FreeCString(ctx, base_cname);
+    JS_FreeCString(ctx, cname);
+    return m;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 4013
+void JS_FreeCString(JSContext *ctx, const char *ptr)
+{
+    JSString *p;
+    if (!ptr)
+        return;
+    /* purposely removing constness */
+    p = container_of(ptr, JSString, u);
+    JS_FreeValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+}
+
+/* return NULL in case of exception (e.g. module could not be loaded) */
+/// Line number here: 28596
+static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
+                                                    const char *base_cname,
+                                                    const char *cname1,
+                                                    JSValueConst attributes)
+{
+    JSRuntime *rt = ctx->rt;
+    JSModuleDef *m;
+    char *cname;
+    JSAtom module_name;
+
+    if (!rt->module_normalize_func) {
+        cname = js_default_module_normalize_name(ctx, base_cname, cname1);
+    } else {
+        cname = rt->module_normalize_func(ctx, base_cname, cname1,
+                                          rt->module_loader_opaque);
+    }
+    if (!cname)
+        return NULL;
+
+    module_name = JS_NewAtom(ctx, cname);
+    if (module_name == JS_ATOM_NULL) {
+        js_free(ctx, cname);
+        return NULL;
+    }
+
+    /* first look at the loaded modules */
+    m = js_find_loaded_module(ctx, module_name);
+    if (m) {
+        js_free(ctx, cname);
+        JS_FreeAtom(ctx, module_name);
+        return m;
+    }
+
+    JS_FreeAtom(ctx, module_name);
+
+    /* load the module */
+    if (!rt->u.module_loader_func) {
+        /* XXX: use a syntax error ? */
+        JS_ThrowReferenceError(ctx, "could not load module '%s'",
+                               cname);
+        js_free(ctx, cname);
+        return NULL;
+    }
+    if (rt->module_loader_has_attr) {
+        m = rt->u.module_loader_func2(ctx, cname, rt->module_loader_opaque, attributes);
+    } else {
+        m = rt->u.module_loader_func(ctx, cname, rt->module_loader_opaque);
+    }
+    js_free(ctx, cname);
+    return m;
+}
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/* Load all the required modules for module 'm' */
+/// Line number here: 29108
+static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
+{
+    int i;
+    JSModuleDef *m1;
+
+    if (m->resolved)
+        return 0;
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        printf("resolving module '%s':\n", JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+    }
+#endif
+    m->resolved = TRUE;
+    /* resolve each requested module */
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        m1 = js_host_resolve_imported_module_atom(ctx, m->module_name,
+                                                  rme->module_name,
+                                                  rme->attributes);
+        if (!m1)
+            return -1;
+        rme->module = m1;
+        /* already done in js_host_resolve_imported_module() except if
+           the module was loaded with JS_EvalBinary() */
+        if (js_resolve_module(ctx, m1) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"JS_AtomToCString(JSContext *, JSAtom)";
+"JS_AtomToCString(JSContext *, JSAtom)" -> "JS_AtomToCStringLen(JSContext *, size_t *, JSAtom)";
+"JS_FreeCString(JSContext *, const char *)";
+"JS_FreeCString(JSContext *, const char *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::module_normalize_func";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_free(JSContext *, void *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_find_loaded_module(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func2";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func";
+"js_resolve_module(JSContext *, JSModuleDef *)";
+"js_resolve_module(JSContext *, JSModuleDef *)" -> "js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)";
+"js_resolve_module(JSContext *, JSModuleDef *)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+}

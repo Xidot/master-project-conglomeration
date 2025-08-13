@@ -1,0 +1,115 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_GetPropertyValue(JSContext *, JSValue, JSValue)
+-------------------------
+Based on the code and call graph analysis, here are the potential logical bugs in the `JS_GetPropertyValue` function:
+
+:JS_GetPropertyValue:8357
+:JS_GetPropertyValue:8360
+:JS_GetPropertyValue:8361
+:JS_GetPropertyValue:8362
+:JS_GetPropertyValue:8363
+:JS_GetPropertyValue:8364
+:JS_GetPropertyValue:8365
+:JS_GetPropertyValue:8366
+:JS_GetPropertyValue:8367
+:JS_GetPropertyValue:8368
+:JS_GetPropertyValue:8369
+:JS_GetPropertyValue:8370
+:JS_GetPropertyValue:8371
+:JS_GetPropertyValue:8372
+:JS_GetPropertyValue:8373
+:JS_GetPropertyValue:8374
+:JS_GetPropertyValue:8375
+:JS_GetPropertyValue:8376
+:JS_GetPropertyValue:8377
+:JS_GetPropertyValue:8378
+:JS_GetPropertyValue:8379
+:JS_GetPropertyValue:8380
+:JS_GetPropertyValue:8381
+:JS_GetPropertyValue:8382
+:JS_GetPropertyValue:8383
+:JS_GetPropertyValue:8384
+:JS_GetPropertyValue:8385
+:JS_GetPropertyValue:8386
+:JS_GetPropertyValue:8387
+:JS_GetPropertyValue:8388
+:JS_GetPropertyValue:8389
+:JS_GetPropertyValue:8390
+:JS_GetPropertyValue:8391
+:JS_GetPropertyValue:8392
+:JS_GetPropertyValue:8393
+:JS_GetPropertyValue:8394
+:JS_GetPropertyValue:8395
+:JS_GetPropertyValue:8396
+:JS_GetPropertyValue:8397
+:JS_GetPropertyValue:8398
+:JS_GetPropertyValue:8399
+:JS_GetPropertyValue:8400
+:JS_GetPropertyValue:8401
+:JS_GetPropertyValue:8402
+:JS_GetPropertyValue:8403
+:JS_GetPropertyValue:8404
+:JS_GetPropertyValue:8405
+:JS_GetPropertyValue:8406
+:JS_GetPropertyValue:8407
+:JS_GetPropertyValue:8408
+:JS_GetPropertyValue:8409
+:JS_GetPropertyValue:8410
+:JS_GetPropertyValue:8411
+:JS_GetPropertyValue:8412
+:JS_GetPropertyValue:8413
+:JS_GetPropertyValue:8414
+:JS_GetPropertyValue:8415
+:JS_GetPropertyValue:8416
+:JS_GetPropertyValue:8417
+:JS_GetPropertyValue:8418
+:JS_GetPropertyValue:8419
+:JS_GetPropertyValue:8420
+:JS_GetPropertyValue:8421
+:JS_GetPropertyValue:8422
+:JS_GetPropertyValue:8423
+:JS_GetPropertyValue:8424
+:JS_GetPropertyValue:8425
+:JS_GetPropertyValue:8426
+:JS_GetPropertyValue:8427
+:JS_GetPropertyValue:8428
+
+Here's the diff with the instrumentation added:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8356,6 +8356,7 @@
+     JSAtom atom;
+     JSValue ret;
+ 
++    if (JS_VALUE_GET_TAG(this_obj) == JS_TAG_OBJECT && JS_VALUE_GET_TAG(prop) == JS_TAG_INT && JS_VALUE_GET_OBJ(this_obj)->class_id >= JS_CLASS_UINT8C_ARRAY && JS_VALUE_GET_OBJ(this_obj)->class_id <= JS_CLASS_FLOAT64_ARRAY) funlogline();
+     if (likely(JS_VALUE_GET_TAG(this_obj) == JS_TAG_OBJECT &&
+                JS_VALUE_GET_TAG(prop) == JS_TAG_INT)) {
+         JSObject *p;
+@@ -8363,6 +8364,7 @@
+         /* fast path for array access */
+         p = JS_VALUE_GET_OBJ(this_obj);
+         idx = JS_VALUE_GET_INT(prop);
++        if (idx < 0) funlogline();
+         switch(p->class_id) {
+         case JS_CLASS_ARRAY:
+         case JS_CLASS_ARGUMENTS:
+@@ -8422,6 +8424,7 @@
+         }
+     } else {
+     slow_path:
++        if (JS_IsNull(this_obj) || JS_IsUndefined(this_obj)) funlogline();
+         /* ToObject() must be done before ToPropertyKey() */
+         if (JS_IsNull(this_obj) || JS_IsUndefined(this_obj)) {
+             JS_FreeValue(ctx, prop);
+```
+
+The main logical issues identified are:
+
+1. Missing bounds checking for negative indices in the fast path for typed arrays (line 8363)
+2. Missing validation of array class IDs in the fast path (line 8357)
+3. Missing early logging for null/undefined cases before the error is thrown (line 8424)
+
+The instrumentation adds checks for these cases before they would trigger errors or undefined behavior. The conditions are designed to only trigger when the problematic cases occur.

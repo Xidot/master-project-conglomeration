@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewStringLen(JSContext *, const char *, size_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewStringLen` function:
+
+:quickjs.c:JS_NewStringLen:3824
+:quickjs.c:JS_NewStringLen:3831
+:quickjs.c:JS_NewStringLen:3848
+
+---
+
+1. Line 3824: The check for `len1 > JS_STRING_LEN_MAX` happens after `count_ascii()` but before validating the full string length. This could allow strings longer than the maximum if they contain non-ASCII characters.
+
+2. Line 3831: The string buffer initialization uses `buf_len` which could be larger than `JS_STRING_LEN_MAX` if the string contains non-ASCII characters.
+
+3. Line 3848: When handling invalid UTF-8 sequences, the code skips continuation bytes but doesn't properly validate the next byte after an invalid sequence.
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3821,6 +3821,8 @@
+     p_start = (const uint8_t *)buf;
+     p_end = p_start + buf_len;
+     len1 = count_ascii(p_start, buf_len);
++    if (buf_len > JS_STRING_LEN_MAX)
++        funlogline();
+     p = p_start + len1;
+     if (len1 > JS_STRING_LEN_MAX)
+         return JS_ThrowInternalError(ctx, "string too long");
+     if (p == p_end) {
+@@ -3828,6 +3830,8 @@
+         return js_new_string8_len(ctx, buf, buf_len);
+     } else {
+         if (string_buffer_init(ctx, b, buf_len))
++            if (buf_len > JS_STRING_LEN_MAX)
++                funlogline();
+             goto fail;
+         string_buffer_write8(b, p_start, len1);
+         while (p < p_end) {
+@@ -3845,6 +3849,8 @@
+                 } else {
+                     /* invalid char */
+                     c = 0xfffd;
++                    if (p_next == p)
++                        funlogline();
+                     /* skip the invalid chars */
+                     /* XXX: seems incorrect. Why not just use c = *p++; ? */
+                     while (p < p_end && (*p >= 0x80 && *p < 0xc0))
+```

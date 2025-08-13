@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_waker_close(JSWaker *)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs in the `js_waker_close` function:
+
+:js_waker_close(JSWaker *):2336
+
+---
+
+```diff
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -2336,6 +2336,9 @@
+ 
+ static void js_waker_close(JSWaker *w)
+ {
++    if (w->read_fd == -1 || w->write_fd == -1) {
++        funlogline();
++    }
+     close(w->read_fd);
+     close(w->write_fd);
+     w->read_fd = -1;
+```
+
+The logical bug here is that the function doesn't check if the file descriptors are already closed (-1) before attempting to close them. While closing an already closed descriptor might not cause issues on some systems, it's generally not good practice and could potentially cause problems depending on the system. The added check will detect when this situation occurs.
+
+Note that this is a defensive programming issue rather than a strict logical error, but it fits the criteria of being a potential logical flaw in the function's behavior.

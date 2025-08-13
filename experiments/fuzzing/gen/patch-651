@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12879,6 +12879,9 @@
+     uint32_t tag;
+     char buf[32];
+ 
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT && JS_VALUE_GET_OBJ(val)->tmp_mark)
++        return JS_ThrowTypeError(ctx, "circular reference");
++
+     tag = JS_VALUE_GET_NORM_TAG(val);
+     switch(tag) {
+     case JS_TAG_STRING:
+@@ -12941,7 +12944,9 @@
+ {
+     JSValue ret;
+     ret = JS_ToString(ctx, val);
+-    JS_FreeValue(ctx, val);
++    if (!JS_IsException(ret)) {
++        JS_FreeValue(ctx, val);
++    }
+     return ret;
+ }
+ 
+@@ -12961,6 +12966,9 @@
+ {
+     uint32_t tag = JS_VALUE_GET_TAG(val);
+     if (tag == JS_TAG_NULL || tag == JS_TAG_UNDEFINED)
+         return JS_ThrowTypeError(ctx, "null or undefined are forbidden");
++    if (tag == JS_TAG_STRING)
++        return JS_DupValue(ctx, val);
+     return JS_ToString(ctx, val);
+ }

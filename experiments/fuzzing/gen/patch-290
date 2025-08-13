@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35869,6 +35869,8 @@
+     size_t len;
+ 
+     if (!JS_IsString(val))
++        if (JS_VALUE_GET_TAG(val) < JS_TAG_FIRST || JS_VALUE_GET_TAG(val) > JS_TAG_FLOAT64)
++            funlogline();
+         return JS_DupValue(ctx, val);
+     str = JS_ToCStringLen(ctx, &len, val);
+     if (!str)
+@@ -35876,6 +35878,8 @@
+     ret = JS_EvalInternal(ctx, this_obj, str, len, "<input>", flags, scope_idx);
+     JS_FreeCString(ctx, str);
+     return ret;
++    if (len == 0)
++        funlogline();
+ 
+ }

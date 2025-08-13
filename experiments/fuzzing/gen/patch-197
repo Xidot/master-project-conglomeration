@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11627,6 +11627,9 @@
+ static int js_bigint_float64_cmp(JSContext *ctx, const JSBigInt *a,
+                                  double b)
+ {
++    if (a == NULL) {
++        funlogline();
++    }
+     int b_sign, a_sign, e, f;
+     uint64_t mant, b1, a_mant;
+     
+@@ -11657,6 +11660,9 @@
+         a_mant = js_bigint_get_mant_exp(ctx, &f, a);
+         if (f != e) {
+             if (f < e)
++                if (f + 1 < e) {
++                    funlogline();
++                }
+                 return -1;
+             else
+                 return 1;
+@@ -11667,6 +11673,9 @@
+                 return 2 * a_sign - 1;
+             else if (a_mant > mant)
+                 return 1 - 2 * a_sign;
++            else if (a_sign != b_sign) {
++                funlogline();
++            }
+             else
+                 return 0;
+         }

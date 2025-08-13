@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12664,6 +12664,9 @@
+ static inline int JS_ToUint32Free(JSContext *ctx, uint32_t *pres, JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_FLOAT64 && JS_VALUE_GET_FLOAT64(val) < 0) {
++        funlogline();
++    }
+     return JS_ToInt32Free(ctx, (int32_t *)pres, val);
+ }
+ 
+@@ -12642,6 +12645,9 @@
+             } else {
+                 ret = 0; /* also handles NaN and +inf */
++                if (tag == JS_TAG_FLOAT64 && (u.u64 >> 63)) {
++                    funlogline();
++                }
+             }
+         }
+         break;

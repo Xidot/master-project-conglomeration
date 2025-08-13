@@ -1,0 +1,60 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_default_module_normalize_name(JSContext *, const char *, const char *)
+-------------------------
+Here are the potential logical bugs in the target function `js_default_module_normalize_name`:
+
+:js_default_module_normalize_name:28522
+:js_default_module_normalize_name:28545
+:js_default_module_normalize_name:28562
+
+---
+
+1. **:js_default_module_normalize_name:28522** - The function doesn't handle NULL inputs for `base_name` or `name`. While the function may assume these are non-NULL (as they come from module resolution), it's still a potential logical error if called incorrectly.
+
+2. **:js_default_module_normalize_name:28545** - The calculation `cap = len + strlen(name) + 1 + 1` may overflow if the strings are extremely large. The function doesn't check for integer overflow before allocation.
+
+3. **:js_default_module_normalize_name:28562** - When handling `..` paths, the function doesn't properly handle the case where removing a path component would make the filename empty (just sets to ""). This could lead to incorrect path resolution in some cases.
+
+Here are the corresponding diffs:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28519,6 +28519,9 @@
+                                               const char *base_name,
+                                               const char *name)
+ {
++    if (!base_name || !name) {
++        funlogline();
++    }
+     char *filename, *p;
+     const char *r;
+     int cap;
+     int len;
+@@ -28542,6 +28545,9 @@
+     else
+         len = 0;
+ 
++    if (len < 0 || strlen(name) > INT_MAX - len - 2) {
++        funlogline();
++    }
+     cap = len + strlen(name) + 1 + 1;
+     filename = js_malloc(ctx, cap);
+     if (!filename)
+@@ -28559,6 +28565,9 @@
+             /* remove the last path element of filename, except if "."
+                or ".." */
+             if (filename[0] == '\0')
++                break;
++            if (p == filename && *p == '\0') {
++                funlogline();
+                 break;
+             p = strrchr(filename, '/');
+             if (!p)
+```
+
+The modifications:
+1. Added NULL check at function entry
+2. Added overflow check before calculating capacity
+3. Added check for empty filename case during path normalization

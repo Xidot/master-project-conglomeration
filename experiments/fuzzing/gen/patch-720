@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10755,6 +10755,9 @@
+ static js_limb_t mp_div1norm(js_limb_t *tabr, const js_limb_t *taba, js_limb_t n,
+                           js_limb_t b, js_limb_t r)
+ {
++    if (b < (js_limb_t)1 << (JS_LIMB_BITS - 1)) {
++        funlogline();
++    }
+     js_slimb_t i;
+ 
+     if (n >= UDIV1NORM_THRESHOLD) {
+@@ -10762,6 +10765,9 @@
+         b_inv = udiv1norm_init(b);
+         for(i = n - 1; i >= 0; i--) {
+             tabr[i] = udiv1norm(&r, r, taba[i], b, b_inv);
++            if (i == (js_slimb_t)-1) {
++                funlogline();
++            }
+         }
+     } else {
+         js_dlimb_t a1;

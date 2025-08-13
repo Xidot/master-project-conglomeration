@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52631,6 +52631,9 @@
+ /* create a new ArrayBuffer of length 'len' and copy 'buf' to it */
+ JSValue JS_NewArrayBufferCopy(JSContext *ctx, const uint8_t *buf, size_t len)
+ {
++    if (len > 0 && buf == NULL) {
++        funlogline();
++    }
+     return js_array_buffer_constructor3(ctx, JS_UNDEFINED, len,
+                                         JS_CLASS_ARRAY_BUFFER,
+                                         (uint8_t *)buf,
+@@ -52576,6 +52579,9 @@
+     abuf->opaque = opaque;
+     abuf->free_func = free_func;
+     if (alloc_flag && buf)
++        if (len > 0 && buf == NULL) {
++            funlogline();
++        }
+         memcpy(abuf->data, buf, len);
+     JS_SetOpaque(obj, abuf);
+     return obj;

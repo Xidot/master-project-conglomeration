@@ -1,0 +1,134 @@
+Target function: "js_mark_module_def(JSRuntime *, JSModuleDef *, JS_MarkFunc *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 384
+typedef void JS_MarkFunc(JSRuntime *rt, JSGCObjectHeader *gp)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 28271
+static void js_mark_module_def(JSRuntime *rt, JSModuleDef *m,
+                               JS_MarkFunc *mark_func)
+{
+    int i;
+
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JS_MarkValue(rt, rme->attributes, mark_func);
+    }
+    
+    for(i = 0; i < m->export_entries_count; i++) {
+        JSExportEntry *me = &m->export_entries[i];
+        if (me->export_type == JS_EXPORT_TYPE_LOCAL &&
+            me->u.local.var_ref) {
+            mark_func(rt, &me->u.local.var_ref->header);
+        }
+    }
+
+    JS_MarkValue(rt, m->module_ns, mark_func);
+    JS_MarkValue(rt, m->func_obj, mark_func);
+    JS_MarkValue(rt, m->eval_exception, mark_func);
+    JS_MarkValue(rt, m->meta_obj, mark_func);
+    JS_MarkValue(rt, m->promise, mark_func);
+    JS_MarkValue(rt, m->resolving_funcs[0], mark_func);
+    JS_MarkValue(rt, m->resolving_funcs[1], mark_func);
+    JS_MarkValue(rt, m->private_value, mark_func);
+}
+
+/// Line number here: 5948
+void JS_MarkValue(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    if (JS_VALUE_HAS_REF_COUNT(val)) {
+        switch(JS_VALUE_GET_TAG(val)) {
+        case JS_TAG_OBJECT:
+        case JS_TAG_FUNCTION_BYTECODE:
+        case JS_TAG_MODULE:
+            mark_func(rt, JS_VALUE_GET_PTR(val));
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_mark_module_def(JSRuntime *, JSModuleDef *, JS_MarkFunc *)";
+"js_mark_module_def(JSRuntime *, JSModuleDef *, JS_MarkFunc *)" -> "JS_MarkValue(JSRuntime *, JSValue, JS_MarkFunc *)";
+"js_mark_module_def(JSRuntime *, JSModuleDef *, JS_MarkFunc *)" -> "js_mark_module_def::mark_func";
+"JS_MarkValue(JSRuntime *, JSValue, JS_MarkFunc *)";
+"JS_MarkValue(JSRuntime *, JSValue, JS_MarkFunc *)" -> "JS_MarkValue::mark_func";
+}

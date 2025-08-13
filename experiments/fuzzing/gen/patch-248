@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50315,6 +50315,12 @@
+ static JSValue JS_CreateAsyncFromSyncIterator(JSContext *ctx,
+                                               JSValueConst sync_iter)
+ {
++    if (!JS_VALUE_IS_OBJECT(sync_iter)) {
++        funlogline();
++    }
++    if (JS_VALUE_GET_TAG(sync_iter) != JS_TAG_OBJECT) {
++        funlogline();
++    }
++
+     JSValue async_iter, next_method;
+     JSAsyncFromSyncIteratorData *s;
+ 
+@@ -50325,6 +50331,9 @@
+     if (JS_IsException(async_iter)) {
+         JS_FreeValue(ctx, next_method);
+         return async_iter;
++    }
++    if (!JS_IsFunction(ctx, next_method)) {
++        funlogline();
+     }
+     s = js_mallocz(ctx, sizeof(*s));
+     if (!s) {

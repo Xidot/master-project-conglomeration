@@ -1,0 +1,112 @@
+I am a software engineer and I am tasked to manually find logical errors in a
+lot of code, if any exist. You need to help me get this done faster.
+
+### Task
+
+The task is to examine the logic of the code and find where in the code
+possible logical bugs exist in the target function. Then, for each bug I must
+insert a new if-statement just before the bug occurs. The condition must
+evaluate to "True" ONLY WHEN the bug is triggered and the program MUST call a
+function called "funlogline();". If no such condition can be created, insert a
+new statement ("funlogline();") one line before the bug. Only modify the target
+function specified at the beginning.
+
+### Formatting
+
+1. I would like you to format your answers only as a list of the lines of code
+you think the logical bugs exist, then for each line use the following format:
+"file name:function name:line number". After, insert another page-break, and
+only then you may insert your reasons if any but keep them brief. If the
+filename is not provided then leave it explicitly blank.
+
+2. For each identified logical bug: modify the corresponding function by
+inserting a new if statement which calls "funlogline();" if the conditions for
+this bug to trigger are met. Format the modifications as a single file in
+unified diff format.
+
+### Task notes
+
+More notes on your task:
+- obfuscated or non-descriptive function are not logical errors. They might lead to more logical errors from the user's perspective but they are not pertinent to this analysis. A warning about this is fine if appended at the end of all the reasoning provided by you.
+- the following are not logical errors: double-free; use-after-free; out of bounds access; memory leaks.
+- pointer casts are not logical errors.
+- do not "clean up partial state"
+- do not create new functions that would solve current issues
+- do not modify or suggest comment modifications
+- you may use context and the call-graph to infer context
+
+### Examples
+
+= Example 1
+
+Target function: "_strstr(const char* str, const char *needle)"
+
+---- File: grep.c
+
+/* Does some cool stuff with grepping and matching needles.
+ * */
+/// Line: 7
+const char *_strstr(const char* str, const char *needle) {
+    size_t needle_len = strlen(needle);
+    size_t str_len = strlen(str);
+
+    for (int i = 0; i < str_len; ++i) {
+        if (str_len - i < needle_len) {
+            break;
+        }
+
+        // If match first check rest
+        if (str[i] == needle[i]) { // <-- EXAMPLE BUG HERE
+            if (strncmp(&str[i], needle, needle_len) == 0) {
+                return &str[i];
+            }
+        }
+
+    }
+
+    return NULL;
+}
+
+/* Helps with sleep 
+ * */
+int main(int argc, char **argv) {
+    if (argc < 3) {
+        printf("We require arguments: <PAT> <FILE>\n");
+    }
+
+    char *needle = strdup(argv[1]);
+
+    FILE* file = fopen(argv[2], "r");
+    if (file == NULL) {
+        perror("No file");
+        exit(1);
+    }
+
+    char *line = NULL;
+    size_t line_len = 0;
+    while (getline(&line, &line_len, file) != -1) {
+        if (_strstr(line, needle) != NULL) {
+            printf("%s", line);
+        }
+        free(line);
+        line = NULL;
+    }
+
+    free(needle);
+    free(line);
+    fclose(file);
+}
+
+```diff
+--- a/grep.c
++++ b/grep.c
+@@ -14,6 +14,7 @@
+         }
+ 
+         // If match first check rest
++        funlogline(); // <-- Instrumentation, srt[i] == needle[i] incorrect but not a valid predicate
+         if (str[i] == needle[i]) {
+             if (strncmp(&str[i], needle, needle_len) == 0) {
+                 return &str[i];
+```
+

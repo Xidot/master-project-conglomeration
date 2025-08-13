@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39662,6 +39662,9 @@
+     JSValue *tab, ret;
+     JSObject *p;
+ 
++    if (JS_VALUE_GET_TAG(array_arg) == JS_TAG_NULL || JS_VALUE_GET_TAG(array_arg) == JS_TAG_UNDEFINED) {
++        funlogline();
++    }
+     if (JS_VALUE_GET_TAG(array_arg) != JS_TAG_OBJECT) {
+         JS_ThrowTypeError(ctx, "not a object");
+         return NULL;
+@@ -39677,6 +39677,9 @@
+     }
+     len = len64;
+     /* avoid allocating 0 bytes */
++    if (len == 0) {
++        funlogline();
++    }
+     tab = js_mallocz(ctx, sizeof(tab[0]) * max_uint32(1, len));
+     if (!tab)
+         return NULL;
+@@ -39684,6 +39684,9 @@
+     if ((p->class_id == JS_CLASS_ARRAY || p->class_id == JS_CLASS_ARGUMENTS) &&
+         p->fast_array &&
+         len == p->u.array.count) {
++        if (p->u.array.u.values == NULL) {
++            funlogline();
++        }
+         for(i = 0; i < len; i++) {
+             tab[i] = JS_DupValue(ctx, p->u.array.u.values[i]);
+         }

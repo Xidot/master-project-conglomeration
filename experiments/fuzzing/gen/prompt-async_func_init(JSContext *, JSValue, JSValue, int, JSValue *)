@@ -1,0 +1,533 @@
+Target function: "async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/* JSAsyncFunctionState (used by generator and async functions) */
+/// Line number here: 19554
+static JSAsyncFunctionState *async_func_init(JSContext *ctx,
+                                             JSValueConst func_obj, JSValueConst this_obj,
+                                             int argc, JSValueConst *argv)
+{
+    JSAsyncFunctionState *s;
+    JSObject *p;
+    JSFunctionBytecode *b;
+    JSStackFrame *sf;
+    int local_count, i, arg_buf_len, n;
+
+    s = js_mallocz(ctx, sizeof(*s));
+    if (!s)
+        return NULL;
+    s->header.ref_count = 1;
+    add_gc_object(ctx->rt, &s->header, JS_GC_OBJ_TYPE_ASYNC_FUNCTION);
+
+    sf = &s->frame;
+    init_list_head(&sf->var_ref_list);
+    p = JS_VALUE_GET_OBJ(func_obj);
+    b = p->u.func.function_bytecode;
+    sf->js_mode = b->js_mode | JS_MODE_ASYNC;
+    sf->cur_pc = b->byte_code_buf;
+    arg_buf_len = max_int(b->arg_count, argc);
+    local_count = arg_buf_len + b->var_count + b->stack_size;
+    sf->arg_buf = js_malloc(ctx, sizeof(JSValue) * max_int(local_count, 1));
+    if (!sf->arg_buf) {
+        js_free(ctx, s);
+        return NULL;
+    }
+    sf->cur_func = JS_DupValue(ctx, func_obj);
+    s->this_val = JS_DupValue(ctx, this_obj);
+    s->argc = argc;
+    sf->arg_count = arg_buf_len;
+    sf->var_buf = sf->arg_buf + arg_buf_len;
+    sf->cur_sp = sf->var_buf + b->var_count;
+    for(i = 0; i < argc; i++)
+        sf->arg_buf[i] = JS_DupValue(ctx, argv[i]);
+    n = arg_buf_len + b->var_count;
+    for(i = argc; i < n; i++)
+        sf->arg_buf[i] = JS_UNDEFINED;
+    s->resolving_funcs[0] = JS_UNDEFINED;
+    s->resolving_funcs[1] = JS_UNDEFINED;
+    s->is_completed = FALSE;
+    return s;
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1374
+void *js_mallocz(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_mallocz_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 5935
+static void add_gc_object(JSRuntime *rt, JSGCObjectHeader *h,
+                          JSGCObjectTypeEnum type)
+{
+    h->mark = 0;
+    h->gc_obj_type = type;
+    list_add_tail(&h->link, &rt->gc_obj_list);
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1362
+void *js_malloc(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_malloc_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 1385
+void js_free(JSContext *ctx, void *ptr)
+{
+    js_free_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 19694
+typedef struct JSGeneratorData {
+    JSGeneratorStateEnum state;
+    JSAsyncFunctionState *func_state;
+} JSGeneratorData
+
+/* Generators */
+/// Line number here: 19683
+enum JSGeneratorStateEnum {
+    JS_GENERATOR_STATE_SUSPENDED_START,
+    JS_GENERATOR_STATE_SUSPENDED_YIELD,
+    JS_GENERATOR_STATE_SUSPENDED_YIELD_STAR,
+    JS_GENERATOR_STATE_EXECUTING,
+    JS_GENERATOR_STATE_COMPLETED,
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 19820
+static JSValue js_generator_function_call(JSContext *ctx, JSValueConst func_obj,
+                                          JSValueConst this_obj,
+                                          int argc, JSValueConst *argv,
+                                          int flags)
+{
+    JSValue obj, func_ret;
+    JSGeneratorData *s;
+
+    s = js_mallocz(ctx, sizeof(*s));
+    if (!s)
+        return JS_EXCEPTION;
+    s->state = JS_GENERATOR_STATE_SUSPENDED_START;
+    s->func_state = async_func_init(ctx, func_obj, this_obj, argc, argv);
+    if (!s->func_state) {
+        s->state = JS_GENERATOR_STATE_COMPLETED;
+        goto fail;
+    }
+
+    /* execute the function up to 'OP_initial_yield' */
+    func_ret = async_func_resume(ctx, s->func_state);
+    if (JS_IsException(func_ret))
+        goto fail;
+    JS_FreeValue(ctx, func_ret);
+
+    obj = js_create_from_ctor(ctx, func_obj, JS_CLASS_GENERATOR);
+    if (JS_IsException(obj))
+        goto fail;
+    JS_SetOpaque(obj, s);
+    return obj;
+ fail:
+    free_generator_stack_rt(ctx->rt, s);
+    js_free(ctx, s);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 19980
+static JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
+                                      JSValueConst this_obj,
+                                      int argc, JSValueConst *argv, int flags)
+{
+    JSValue promise;
+    JSAsyncFunctionState *s;
+
+    s = async_func_init(ctx, func_obj, this_obj, argc, argv);
+    if (!s)
+        return JS_EXCEPTION;
+
+    promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+    if (JS_IsException(promise)) {
+        async_func_free(ctx->rt, s);
+        return JS_EXCEPTION;
+    }
+
+    js_async_function_resume(ctx, s);
+
+    async_func_free(ctx->rt, s);
+
+    return promise;
+}
+
+/// Line number here: 20031
+typedef struct JSAsyncGeneratorData {
+    JSObject *generator; /* back pointer to the object (const) */
+    JSAsyncGeneratorStateEnum state;
+    /* func_state is NULL is state AWAITING_RETURN and COMPLETED */
+    JSAsyncFunctionState *func_state;
+    struct list_head queue; /* list of JSAsyncGeneratorRequest.link */
+} JSAsyncGeneratorData
+
+/* AsyncGenerator */
+/// Line number here: 20006
+enum JSAsyncGeneratorStateEnum {
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_START,
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD,
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD_STAR,
+    JS_ASYNC_GENERATOR_STATE_EXECUTING,
+    JS_ASYNC_GENERATOR_STATE_AWAITING_RETURN,
+    JS_ASYNC_GENERATOR_STATE_COMPLETED,
+}
+
+/// Line number here: 20411
+static JSValue js_async_generator_function_call(JSContext *ctx, JSValueConst func_obj,
+                                                JSValueConst this_obj,
+                                                int argc, JSValueConst *argv,
+                                                int flags)
+{
+    JSValue obj, func_ret;
+    JSAsyncGeneratorData *s;
+
+    s = js_mallocz(ctx, sizeof(*s));
+    if (!s)
+        return JS_EXCEPTION;
+    s->state = JS_ASYNC_GENERATOR_STATE_SUSPENDED_START;
+    init_list_head(&s->queue);
+    s->func_state = async_func_init(ctx, func_obj, this_obj, argc, argv);
+    if (!s->func_state)
+        goto fail;
+    /* execute the function up to 'OP_initial_yield' (no yield nor
+       await are possible) */
+    func_ret = async_func_resume(ctx, s->func_state);
+    if (JS_IsException(func_ret))
+        goto fail;
+    JS_FreeValue(ctx, func_ret);
+
+    obj = js_create_from_ctor(ctx, func_obj, JS_CLASS_ASYNC_GENERATOR);
+    if (JS_IsException(obj))
+        goto fail;
+    s->generator = JS_VALUE_GET_OBJ(obj);
+    JS_SetOpaque(obj, s);
+    return obj;
+ fail:
+    js_async_generator_free(ctx->rt, s);
+    return JS_EXCEPTION;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 79
+static inline int max_int(int a, int b)
+{
+    if (a > b)
+        return a;
+    else
+        return b;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 40
+static inline void init_list_head(struct list_head *head)
+{
+    head->prev = head;
+    head->next = head;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "js_mallocz(JSContext *, size_t)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "init_list_head(struct list_head *)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "max_int(int, int)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "js_free(JSContext *, void *)";
+"async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_mallocz(JSContext *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_mallocz(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"js_malloc(JSContext *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_malloc(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_mallocz(JSContext *, size_t)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_resume(JSContext *, JSAsyncFunctionState *)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_create_from_ctor(JSContext *, JSValue, int)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_SetOpaque(JSValue, void *)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "free_generator_stack_rt(JSRuntime *, JSGeneratorData *)";
+"js_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_free(JSContext *, void *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_NewPromiseCapability(JSContext *, JSValue *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_async_function_resume(JSContext *, JSAsyncFunctionState *)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_mallocz(JSContext *, size_t)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "init_list_head(struct list_head *)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_resume(JSContext *, JSAsyncFunctionState *)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_create_from_ctor(JSContext *, JSValue, int)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_SetOpaque(JSValue, void *)";
+"js_async_generator_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_async_generator_free(JSRuntime *, JSAsyncGeneratorData *)";
+}

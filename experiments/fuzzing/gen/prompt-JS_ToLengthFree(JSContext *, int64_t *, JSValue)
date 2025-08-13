@@ -1,0 +1,1292 @@
+Target function: "JS_ToLengthFree(JSContext *, int64_t *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* convert a value to a length between 0 and MAX_SAFE_INTEGER.
+   return -1 for exception */
+/// Line number here: 12800
+static __exception int JS_ToLengthFree(JSContext *ctx, int64_t *plen,
+                                       JSValue val)
+{
+    int res = JS_ToInt64Clamp(ctx, plen, val, 0, MAX_SAFE_INTEGER, 0);
+    JS_FreeValue(ctx, val);
+    return res;
+}
+
+/// Line number here: 12528
+int JS_ToInt64Clamp(JSContext *ctx, int64_t *pres, JSValueConst val,
+                    int64_t min, int64_t max, int64_t neg_offset)
+{
+    int res = JS_ToInt64SatFree(ctx, pres, JS_DupValue(ctx, val));
+    if (res == 0) {
+        if (*pres < 0)
+            *pres += neg_offset;
+        if (*pres < min)
+            *pres = min;
+        else if (*pres > max)
+            *pres = max;
+    }
+    return res;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 39640
+static __exception int js_get_length64(JSContext *ctx, int64_t *pres,
+                                       JSValueConst obj)
+{
+    JSValue len_val;
+    len_val = JS_GetProperty(ctx, obj, JS_ATOM_length);
+    if (JS_IsException(len_val)) {
+        *pres = 0;
+        return -1;
+    }
+    return JS_ToLengthFree(ctx, pres, len_val);
+}
+
+/// Line number here: 677
+typedef struct JSRegExp {
+    JSString *pattern;
+    JSString *bytecode; /* also contains the flags */
+} JSRegExp
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 45166
+static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    JSRegExp *re = js_get_regexp(ctx, this_val, TRUE);
+    JSString *str;
+    JSValue t, ret, str_val, obj, val, groups;
+    JSValue indices, indices_groups;
+    uint8_t *re_bytecode;
+    uint8_t **capture, *str_buf;
+    int rc, capture_count, shift, i, re_flags;
+    int64_t last_index;
+    const char *group_name_ptr;
+
+    if (!re)
+        return JS_EXCEPTION;
+
+    str_val = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str_val))
+        return JS_EXCEPTION;
+
+    ret = JS_EXCEPTION;
+    obj = JS_NULL;
+    groups = JS_UNDEFINED;
+    indices = JS_UNDEFINED;
+    indices_groups = JS_UNDEFINED;
+    capture = NULL;
+
+    val = JS_GetProperty(ctx, this_val, JS_ATOM_lastIndex);
+    if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
+        goto fail;
+
+    re_bytecode = re->bytecode->u.str8;
+    re_flags = lre_get_flags(re_bytecode);
+    if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
+        last_index = 0;
+    }
+    str = JS_VALUE_GET_STRING(str_val);
+    capture_count = lre_get_capture_count(re_bytecode);
+    if (capture_count > 0) {
+        capture = js_malloc(ctx, sizeof(capture[0]) * capture_count * 2);
+        if (!capture)
+            goto fail;
+    }
+    shift = str->is_wide_char;
+    str_buf = str->u.str8;
+    if (last_index > str->len) {
+        rc = 2;
+    } else {
+        rc = lre_exec(capture, re_bytecode,
+                      str_buf, last_index, str->len,
+                      shift, ctx);
+    }
+    if (rc != 1) {
+        if (rc >= 0) {
+            if (rc == 2 || (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY))) {
+                if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                                   JS_NewInt32(ctx, 0)) < 0)
+                    goto fail;
+            }
+        } else {
+            if (rc == LRE_RET_TIMEOUT) {
+                JS_ThrowInterrupted(ctx);
+            } else {
+                JS_ThrowInternalError(ctx, "out of memory in regexp execution");
+            }
+            goto fail;
+        }
+    } else {
+        int prop_flags;
+        if (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) {
+            if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                               JS_NewInt32(ctx, (capture[1] - str_buf) >> shift)) < 0)
+                goto fail;
+        }
+        obj = JS_NewArray(ctx);
+        if (JS_IsException(obj))
+            goto fail;
+        prop_flags = JS_PROP_C_W_E | JS_PROP_THROW;
+        group_name_ptr = lre_get_groupnames(re_bytecode);
+        if (group_name_ptr) {
+            groups = JS_NewObjectProto(ctx, JS_NULL);
+            if (JS_IsException(groups))
+                goto fail;
+        }
+        if (re_flags & LRE_FLAG_INDICES) {
+            indices = JS_NewArray(ctx);
+            if (JS_IsException(indices))
+                goto fail;
+            if (group_name_ptr) {
+                indices_groups = JS_NewObjectProto(ctx, JS_NULL);
+                if (JS_IsException(indices_groups))
+                    goto fail;
+            }
+        }
+
+        for(i = 0; i < capture_count; i++) {
+            const char *name = NULL;
+            uint8_t **match = &capture[2 * i];
+            int start = -1;
+            int end = -1;
+            JSValue val;
+
+            if (group_name_ptr && i > 0) {
+                if (*group_name_ptr) name = group_name_ptr;
+                group_name_ptr += strlen(group_name_ptr) + 1;
+            }
+
+            if (match[0] && match[1]) {
+                start = (match[0] - str_buf) >> shift;
+                end = (match[1] - str_buf) >> shift;
+            }
+
+            if (!JS_IsUndefined(indices)) {
+                val = JS_UNDEFINED;
+                if (start != -1) {
+                    val = JS_NewArray(ctx);
+                    if (JS_IsException(val))
+                        goto fail;
+                    if (JS_DefinePropertyValueUint32(ctx, val, 0,
+                                                     JS_NewInt32(ctx, start),
+                                                     prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                    if (JS_DefinePropertyValueUint32(ctx, val, 1,
+                                                     JS_NewInt32(ctx, end),
+                                                     prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                }
+                if (name && !JS_IsUndefined(indices_groups)) {
+                    val = JS_DupValue(ctx, val);
+                    if (JS_DefinePropertyValueStr(ctx, indices_groups,
+                                                  name, val, prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                }
+                if (JS_DefinePropertyValueUint32(ctx, indices, i, val,
+                                                 prop_flags) < 0) {
+                    goto fail;
+                }
+            }
+
+            val = JS_UNDEFINED;
+            if (start != -1) {
+                val = js_sub_string(ctx, str, start, end);
+                if (JS_IsException(val))
+                    goto fail;
+            }
+
+            if (name) {
+                if (JS_DefinePropertyValueStr(ctx, groups, name,
+                                              JS_DupValue(ctx, val),
+                                              prop_flags) < 0) {
+                    JS_FreeValue(ctx, val);
+                    goto fail;
+                }
+            }
+
+            if (JS_DefinePropertyValueUint32(ctx, obj, i, val, prop_flags) < 0)
+                goto fail;
+        }
+
+        t = JS_NewInt32(ctx, (capture[0] - str_buf) >> shift);
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_index, t, prop_flags) < 0)
+            goto fail;
+
+        t = str_val, str_val = JS_UNDEFINED;
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_input, t, prop_flags) < 0)
+            goto fail;
+
+        t = groups, groups = JS_UNDEFINED;
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_groups,
+                                   t, prop_flags) < 0) {
+            goto fail;
+        }
+
+        if (!JS_IsUndefined(indices)) {
+            t = indices_groups, indices_groups = JS_UNDEFINED;
+            if (JS_DefinePropertyValue(ctx, indices, JS_ATOM_groups,
+                                       t, prop_flags) < 0) {
+                goto fail;
+            }
+            t = indices, indices = JS_UNDEFINED;
+            if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_indices,
+                                       t, prop_flags) < 0) {
+                goto fail;
+            }
+        }
+    }
+    ret = obj;
+    obj = JS_UNDEFINED;
+fail:
+    JS_FreeValue(ctx, indices_groups);
+    JS_FreeValue(ctx, indices);
+    JS_FreeValue(ctx, str_val);
+    JS_FreeValue(ctx, groups);
+    JS_FreeValue(ctx, obj);
+    js_free(ctx, capture);
+    return ret;
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/* delete portions of a string that match a given regex */
+/// Line number here: 45371
+static JSValue JS_RegExpDelete(JSContext *ctx, JSValueConst this_val, JSValueConst arg)
+{
+    JSRegExp *re = js_get_regexp(ctx, this_val, TRUE);
+    JSString *str;
+    JSValue str_val, val;
+    uint8_t *re_bytecode;
+    int ret;
+    uint8_t **capture, *str_buf;
+    int capture_count, shift, re_flags;
+    int next_src_pos, start, end;
+    int64_t last_index;
+    StringBuffer b_s, *b = &b_s;
+
+    if (!re)
+        return JS_EXCEPTION;
+
+    string_buffer_init(ctx, b, 0);
+
+    capture = NULL;
+    str_val = JS_ToString(ctx, arg);
+    if (JS_IsException(str_val))
+        goto fail;
+    str = JS_VALUE_GET_STRING(str_val);
+    re_bytecode = re->bytecode->u.str8;
+    re_flags = lre_get_flags(re_bytecode);
+    if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
+        last_index = 0;
+    } else {
+        val = JS_GetProperty(ctx, this_val, JS_ATOM_lastIndex);
+        if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
+            goto fail;
+    }
+    capture_count = lre_get_capture_count(re_bytecode);
+    if (capture_count > 0) {
+        capture = js_malloc(ctx, sizeof(capture[0]) * capture_count * 2);
+        if (!capture)
+            goto fail;
+    }
+    shift = str->is_wide_char;
+    str_buf = str->u.str8;
+    next_src_pos = 0;
+    for (;;) {
+        if (last_index > str->len)
+            break;
+
+        ret = lre_exec(capture, re_bytecode,
+                       str_buf, last_index, str->len, shift, ctx);
+        if (ret != 1) {
+            if (ret >= 0) {
+                if (ret == 2 || (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY))) {
+                    if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                                       JS_NewInt32(ctx, 0)) < 0)
+                        goto fail;
+                }
+            } else {
+                if (ret == LRE_RET_TIMEOUT) {
+                    JS_ThrowInterrupted(ctx);
+                } else {
+                    JS_ThrowInternalError(ctx, "out of memory in regexp execution");
+                }
+                goto fail;
+            }
+            break;
+        }
+        start = (capture[0] - str_buf) >> shift;
+        end = (capture[1] - str_buf) >> shift;
+        last_index = end;
+        if (next_src_pos < start) {
+            if (string_buffer_concat(b, str, next_src_pos, start))
+                goto fail;
+        }
+        next_src_pos = end;
+        if (!(re_flags & LRE_FLAG_GLOBAL)) {
+            if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                               JS_NewInt32(ctx, end)) < 0)
+                goto fail;
+            break;
+        }
+        if (end == start) {
+            if (!(re_flags & LRE_FLAG_UNICODE) || (unsigned)end >= str->len || !str->is_wide_char) {
+                end++;
+            } else {
+                string_getc(str, &end);
+            }
+        }
+        last_index = end;
+    }
+    if (string_buffer_concat(b, str, next_src_pos, str->len))
+        goto fail;
+    JS_FreeValue(ctx, str_val);
+    js_free(ctx, capture);
+    return string_buffer_end(b);
+fail:
+    JS_FreeValue(ctx, str_val);
+    js_free(ctx, capture);
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 45518
+static JSValue js_regexp_Symbol_match(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv)
+{
+    // [Symbol.match](str)
+    JSValueConst rx = this_val;
+    JSValue A, S, flags, result, matchStr;
+    int global, n, fullUnicode, isEmpty;
+    JSString *p;
+
+    if (!JS_IsObject(rx))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    A = JS_UNDEFINED;
+    flags = JS_UNDEFINED;
+    result = JS_UNDEFINED;
+    matchStr = JS_UNDEFINED;
+    S = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(S))
+        goto exception;
+
+    flags = JS_GetProperty(ctx, rx, JS_ATOM_flags);
+    if (JS_IsException(flags))
+        goto exception;
+    flags = JS_ToStringFree(ctx, flags);
+    if (JS_IsException(flags))
+        goto exception;
+    p = JS_VALUE_GET_STRING(flags);
+
+    global = (-1 != string_indexof_char(p, 'g', 0));
+    if (!global) {
+        A = JS_RegExpExec(ctx, rx, S);
+    } else {
+        fullUnicode = (string_indexof_char(p, 'u', 0) >= 0 ||
+                       string_indexof_char(p, 'v', 0) >= 0);
+
+        if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, JS_NewInt32(ctx, 0)) < 0)
+            goto exception;
+        A = JS_NewArray(ctx);
+        if (JS_IsException(A))
+            goto exception;
+        n = 0;
+        for(;;) {
+            JS_FreeValue(ctx, result);
+            result = JS_RegExpExec(ctx, rx, S);
+            if (JS_IsException(result))
+                goto exception;
+            if (JS_IsNull(result))
+                break;
+            matchStr = JS_ToStringFree(ctx, JS_GetPropertyInt64(ctx, result, 0));
+            if (JS_IsException(matchStr))
+                goto exception;
+            isEmpty = JS_IsEmptyString(matchStr);
+            if (JS_DefinePropertyValueInt64(ctx, A, n++, matchStr, JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception;
+            if (isEmpty) {
+                int64_t thisIndex, nextIndex;
+                if (JS_ToLengthFree(ctx, &thisIndex,
+                                    JS_GetProperty(ctx, rx, JS_ATOM_lastIndex)) < 0)
+                    goto exception;
+                p = JS_VALUE_GET_STRING(S);
+                nextIndex = string_advance_index(p, thisIndex, fullUnicode);
+                if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, JS_NewInt64(ctx, nextIndex)) < 0)
+                    goto exception;
+            }
+        }
+        if (n == 0) {
+            JS_FreeValue(ctx, A);
+            A = JS_NULL;
+        }
+    }
+    JS_FreeValue(ctx, result);
+    JS_FreeValue(ctx, flags);
+    JS_FreeValue(ctx, S);
+    return A;
+
+exception:
+    JS_FreeValue(ctx, A);
+    JS_FreeValue(ctx, result);
+    JS_FreeValue(ctx, flags);
+    JS_FreeValue(ctx, S);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 45607
+typedef struct JSRegExpStringIteratorData {
+    JSValue iterating_regexp;
+    JSValue iterated_string;
+    BOOL global;
+    BOOL unicode;
+    BOOL done;
+} JSRegExpStringIteratorData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 45631
+static JSValue js_regexp_string_iterator_next(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv,
+                                              BOOL *pdone, int magic)
+{
+    JSRegExpStringIteratorData *it;
+    JSValueConst R, S;
+    JSValue matchStr = JS_UNDEFINED, match = JS_UNDEFINED;
+    JSString *sp;
+
+    it = JS_GetOpaque2(ctx, this_val, JS_CLASS_REGEXP_STRING_ITERATOR);
+    if (!it)
+        goto exception;
+    if (it->done) {
+        *pdone = TRUE;
+        return JS_UNDEFINED;
+    }
+    R = it->iterating_regexp;
+    S = it->iterated_string;
+    match = JS_RegExpExec(ctx, R, S);
+    if (JS_IsException(match))
+        goto exception;
+    if (JS_IsNull(match)) {
+        it->done = TRUE;
+        *pdone = TRUE;
+        return JS_UNDEFINED;
+    } else if (it->global) {
+        matchStr = JS_ToStringFree(ctx, JS_GetPropertyInt64(ctx, match, 0));
+        if (JS_IsException(matchStr))
+            goto exception;
+        if (JS_IsEmptyString(matchStr)) {
+            int64_t thisIndex, nextIndex;
+            if (JS_ToLengthFree(ctx, &thisIndex,
+                                JS_GetProperty(ctx, R, JS_ATOM_lastIndex)) < 0)
+                goto exception;
+            sp = JS_VALUE_GET_STRING(S);
+            nextIndex = string_advance_index(sp, thisIndex, it->unicode);
+            if (JS_SetProperty(ctx, R, JS_ATOM_lastIndex,
+                               JS_NewInt64(ctx, nextIndex)) < 0)
+                goto exception;
+        }
+        JS_FreeValue(ctx, matchStr);
+    } else {
+        it->done = TRUE;
+    }
+    *pdone = FALSE;
+    return match;
+ exception:
+    JS_FreeValue(ctx, match);
+    JS_FreeValue(ctx, matchStr);
+    *pdone = FALSE;
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 45685
+static JSValue js_regexp_Symbol_matchAll(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv)
+{
+    // [Symbol.matchAll](str)
+    JSValueConst R = this_val;
+    JSValue S, C, flags, matcher, iter;
+    JSValueConst args[2];
+    JSString *strp;
+    int64_t lastIndex;
+    JSRegExpStringIteratorData *it;
+
+    if (!JS_IsObject(R))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    C = JS_UNDEFINED;
+    flags = JS_UNDEFINED;
+    matcher = JS_UNDEFINED;
+    iter = JS_UNDEFINED;
+
+    S = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(S))
+        goto exception;
+    C = JS_SpeciesConstructor(ctx, R, ctx->regexp_ctor);
+    if (JS_IsException(C))
+        goto exception;
+    flags = JS_ToStringFree(ctx, JS_GetProperty(ctx, R, JS_ATOM_flags));
+    if (JS_IsException(flags))
+        goto exception;
+    args[0] = R;
+    args[1] = flags;
+    matcher = JS_CallConstructor(ctx, C, 2, args);
+    if (JS_IsException(matcher))
+        goto exception;
+    if (JS_ToLengthFree(ctx, &lastIndex,
+                        JS_GetProperty(ctx, R, JS_ATOM_lastIndex)))
+        goto exception;
+    if (JS_SetProperty(ctx, matcher, JS_ATOM_lastIndex,
+                       JS_NewInt64(ctx, lastIndex)) < 0)
+        goto exception;
+
+    iter = JS_NewObjectClass(ctx, JS_CLASS_REGEXP_STRING_ITERATOR);
+    if (JS_IsException(iter))
+        goto exception;
+    it = js_malloc(ctx, sizeof(*it));
+    if (!it)
+        goto exception;
+    it->iterating_regexp = matcher;
+    it->iterated_string = S;
+    strp = JS_VALUE_GET_STRING(flags);
+    it->global = string_indexof_char(strp, 'g', 0) >= 0;
+    it->unicode = (string_indexof_char(strp, 'u', 0) >= 0 ||
+                   string_indexof_char(strp, 'v', 0) >= 0);
+    it->done = FALSE;
+    JS_SetOpaque(iter, it);
+
+    JS_FreeValue(ctx, C);
+    JS_FreeValue(ctx, flags);
+    return iter;
+ exception:
+    JS_FreeValue(ctx, S);
+    JS_FreeValue(ctx, C);
+    JS_FreeValue(ctx, flags);
+    JS_FreeValue(ctx, matcher);
+    JS_FreeValue(ctx, iter);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 45759
+typedef struct ValueBuffer {
+    JSContext *ctx;
+    JSValue *arr;
+    JSValue def[4];
+    int len;
+    int size;
+    int error_status;
+} ValueBuffer
+
+/// Line number here: 45834
+static JSValue js_regexp_Symbol_replace(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv)
+{
+    // [Symbol.replace](str, rep)
+    JSValueConst rx = this_val, rep = argv[1];
+    JSValueConst args[6];
+    JSValue flags, str, rep_val, matched, tab, rep_str, namedCaptures, res;
+    JSString *p, *sp, *rp;
+    StringBuffer b_s, *b = &b_s;
+    ValueBuffer v_b, *results = &v_b;
+    int nextSourcePosition, n, j, functionalReplace, is_global, fullUnicode;
+    uint32_t nCaptures;
+    int64_t position;
+
+    if (!JS_IsObject(rx))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    string_buffer_init(ctx, b, 0);
+    value_buffer_init(ctx, results);
+
+    rep_val = JS_UNDEFINED;
+    matched = JS_UNDEFINED;
+    tab = JS_UNDEFINED;
+    flags = JS_UNDEFINED;
+    rep_str = JS_UNDEFINED;
+    namedCaptures = JS_UNDEFINED;
+
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        goto exception;
+
+    sp = JS_VALUE_GET_STRING(str);
+    rp = NULL;
+    functionalReplace = JS_IsFunction(ctx, rep);
+    if (!functionalReplace) {
+        rep_val = JS_ToString(ctx, rep);
+        if (JS_IsException(rep_val))
+            goto exception;
+        rp = JS_VALUE_GET_STRING(rep_val);
+    }
+
+    flags = JS_GetProperty(ctx, rx, JS_ATOM_flags);
+    if (JS_IsException(flags))
+        goto exception;
+    flags = JS_ToStringFree(ctx, flags);
+    if (JS_IsException(flags))
+        goto exception;
+    p = JS_VALUE_GET_STRING(flags);
+
+    fullUnicode = 0;
+    is_global = (-1 != string_indexof_char(p, 'g', 0));
+    if (is_global) {
+        fullUnicode = (string_indexof_char(p, 'u', 0) >= 0 ||
+                       string_indexof_char(p, 'v', 0) >= 0);
+        if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, JS_NewInt32(ctx, 0)) < 0)
+            goto exception;
+    }
+
+    if (rp && rp->len == 0 && is_global && js_is_standard_regexp(ctx, rx)) {
+        /* use faster version for simple cases */
+        res = JS_RegExpDelete(ctx, rx, str);
+        goto done;
+    }
+    for(;;) {
+        JSValue result;
+        result = JS_RegExpExec(ctx, rx, str);
+        if (JS_IsException(result))
+            goto exception;
+        if (JS_IsNull(result))
+            break;
+        if (value_buffer_append(results, result) < 0)
+            goto exception;
+        if (!is_global)
+            break;
+        JS_FreeValue(ctx, matched);
+        matched = JS_ToStringFree(ctx, JS_GetPropertyInt64(ctx, result, 0));
+        if (JS_IsException(matched))
+            goto exception;
+        if (JS_IsEmptyString(matched)) {
+            /* always advance of at least one char */
+            int64_t thisIndex, nextIndex;
+            if (JS_ToLengthFree(ctx, &thisIndex, JS_GetProperty(ctx, rx, JS_ATOM_lastIndex)) < 0)
+                goto exception;
+            nextIndex = string_advance_index(sp, thisIndex, fullUnicode);
+            if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, JS_NewInt64(ctx, nextIndex)) < 0)
+                goto exception;
+        }
+    }
+    nextSourcePosition = 0;
+    for(j = 0; j < results->len; j++) {
+        JSValueConst result;
+        result = results->arr[j];
+        if (js_get_length32(ctx, &nCaptures, result) < 0)
+            goto exception;
+        JS_FreeValue(ctx, matched);
+        matched = JS_ToStringFree(ctx, JS_GetPropertyInt64(ctx, result, 0));
+        if (JS_IsException(matched))
+            goto exception;
+        if (JS_ToLengthFree(ctx, &position, JS_GetProperty(ctx, result, JS_ATOM_index)))
+            goto exception;
+        if (position > sp->len)
+            position = sp->len;
+        else if (position < 0)
+            position = 0;
+        /* ignore substition if going backward (can happen
+           with custom regexp object) */
+        JS_FreeValue(ctx, tab);
+        tab = JS_NewArray(ctx);
+        if (JS_IsException(tab))
+            goto exception;
+        if (JS_DefinePropertyValueInt64(ctx, tab, 0, JS_DupValue(ctx, matched),
+                                        JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+            goto exception;
+        for(n = 1; n < nCaptures; n++) {
+            JSValue capN;
+            capN = JS_GetPropertyInt64(ctx, result, n);
+            if (JS_IsException(capN))
+                goto exception;
+            if (!JS_IsUndefined(capN)) {
+                capN = JS_ToStringFree(ctx, capN);
+                if (JS_IsException(capN))
+                    goto exception;
+            }
+            if (JS_DefinePropertyValueInt64(ctx, tab, n, capN,
+                                            JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception;
+        }
+        JS_FreeValue(ctx, namedCaptures);
+        namedCaptures = JS_GetProperty(ctx, result, JS_ATOM_groups);
+        if (JS_IsException(namedCaptures))
+            goto exception;
+        if (functionalReplace) {
+            if (JS_DefinePropertyValueInt64(ctx, tab, n++, JS_NewInt32(ctx, position), JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception;
+            if (JS_DefinePropertyValueInt64(ctx, tab, n++, JS_DupValue(ctx, str), JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception;
+            if (!JS_IsUndefined(namedCaptures)) {
+                if (JS_DefinePropertyValueInt64(ctx, tab, n++, JS_DupValue(ctx, namedCaptures), JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                    goto exception;
+            }
+            args[0] = JS_UNDEFINED;
+            args[1] = tab;
+            JS_FreeValue(ctx, rep_str);
+            rep_str = JS_ToStringFree(ctx, js_function_apply(ctx, rep, 2, args, 0));
+        } else {
+            JSValue namedCaptures1;
+            if (!JS_IsUndefined(namedCaptures)) {
+                namedCaptures1 = JS_ToObject(ctx, namedCaptures);
+                if (JS_IsException(namedCaptures1))
+                    goto exception;
+            } else {
+                namedCaptures1 = JS_UNDEFINED;
+            }
+            args[0] = matched;
+            args[1] = str;
+            args[2] = JS_NewInt32(ctx, position);
+            args[3] = tab;
+            args[4] = namedCaptures1;
+            args[5] = rep_val;
+            JS_FreeValue(ctx, rep_str);
+            rep_str = js_string___GetSubstitution(ctx, JS_UNDEFINED, 6, args);
+            JS_FreeValue(ctx, namedCaptures1);
+        }
+        if (JS_IsException(rep_str))
+            goto exception;
+        if (position >= nextSourcePosition) {
+            string_buffer_concat(b, sp, nextSourcePosition, position);
+            string_buffer_concat_value(b, rep_str);
+            nextSourcePosition = position + JS_VALUE_GET_STRING(matched)->len;
+        }
+    }
+    string_buffer_concat(b, sp, nextSourcePosition, sp->len);
+    res = string_buffer_end(b);
+    goto done1;
+
+exception:
+    res = JS_EXCEPTION;
+done:
+    string_buffer_free(b);
+done1:
+    value_buffer_free(results);
+    JS_FreeValue(ctx, rep_val);
+    JS_FreeValue(ctx, matched);
+    JS_FreeValue(ctx, flags);
+    JS_FreeValue(ctx, tab);
+    JS_FreeValue(ctx, rep_str);
+    JS_FreeValue(ctx, namedCaptures);
+    JS_FreeValue(ctx, str);
+    return res;
+}
+
+/// Line number here: 46083
+static JSValue js_regexp_Symbol_split(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    // [Symbol.split](str, limit)
+    JSValueConst rx = this_val;
+    JSValueConst args[2];
+    JSValue str, ctor, splitter, A, flags, z, sub;
+    JSString *strp;
+    uint32_t lim, size, p, q;
+    int unicodeMatching;
+    int64_t lengthA, e, numberOfCaptures, i;
+
+    if (!JS_IsObject(rx))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    ctor = JS_UNDEFINED;
+    splitter = JS_UNDEFINED;
+    A = JS_UNDEFINED;
+    flags = JS_UNDEFINED;
+    z = JS_UNDEFINED;
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        goto exception;
+    ctor = JS_SpeciesConstructor(ctx, rx, ctx->regexp_ctor);
+    if (JS_IsException(ctor))
+        goto exception;
+    flags = JS_ToStringFree(ctx, JS_GetProperty(ctx, rx, JS_ATOM_flags));
+    if (JS_IsException(flags))
+        goto exception;
+    strp = JS_VALUE_GET_STRING(flags);
+    unicodeMatching = (string_indexof_char(strp, 'u', 0) >= 0 ||
+                       string_indexof_char(strp, 'v', 0) >= 0);
+    if (string_indexof_char(strp, 'y', 0) < 0) {
+        flags = JS_ConcatString3(ctx, "", flags, "y");
+        if (JS_IsException(flags))
+            goto exception;
+    }
+    args[0] = rx;
+    args[1] = flags;
+    splitter = JS_CallConstructor(ctx, ctor, 2, args);
+    if (JS_IsException(splitter))
+        goto exception;
+    A = JS_NewArray(ctx);
+    if (JS_IsException(A))
+        goto exception;
+    lengthA = 0;
+    if (JS_IsUndefined(argv[1])) {
+        lim = 0xffffffff;
+    } else {
+        if (JS_ToUint32(ctx, &lim, argv[1]) < 0)
+            goto exception;
+        if (lim == 0)
+            goto done;
+    }
+    strp = JS_VALUE_GET_STRING(str);
+    p = q = 0;
+    size = strp->len;
+    if (size == 0) {
+        z = JS_RegExpExec(ctx, splitter, str);
+        if (JS_IsException(z))
+            goto exception;
+        if (JS_IsNull(z))
+            goto add_tail;
+        goto done;
+    }
+    while (q < size) {
+        if (JS_SetProperty(ctx, splitter, JS_ATOM_lastIndex, JS_NewInt32(ctx, q)) < 0)
+            goto exception;
+        JS_FreeValue(ctx, z);
+        z = JS_RegExpExec(ctx, splitter, str);
+        if (JS_IsException(z))
+            goto exception;
+        if (JS_IsNull(z)) {
+            q = string_advance_index(strp, q, unicodeMatching);
+        } else {
+            if (JS_ToLengthFree(ctx, &e, JS_GetProperty(ctx, splitter, JS_ATOM_lastIndex)))
+                goto exception;
+            if (e > size)
+                e = size;
+            if (e == p) {
+                q = string_advance_index(strp, q, unicodeMatching);
+            } else {
+                sub = js_sub_string(ctx, strp, p, q);
+                if (JS_IsException(sub))
+                    goto exception;
+                if (JS_DefinePropertyValueInt64(ctx, A, lengthA++, sub,
+                                                JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                    goto exception;
+                if (lengthA == lim)
+                    goto done;
+                p = e;
+                if (js_get_length64(ctx, &numberOfCaptures, z))
+                    goto exception;
+                for(i = 1; i < numberOfCaptures; i++) {
+                    sub = JS_GetPropertyInt64(ctx, z, i);
+                    if (JS_IsException(sub))
+                        goto exception;
+                    if (JS_DefinePropertyValueInt64(ctx, A, lengthA++, sub, JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                        goto exception;
+                    if (lengthA == lim)
+                        goto done;
+                }
+                q = p;
+            }
+        }
+    }
+add_tail:
+    if (p > size)
+        p = size;
+    sub = js_sub_string(ctx, strp, p, size);
+    if (JS_IsException(sub))
+        goto exception;
+    if (JS_DefinePropertyValueInt64(ctx, A, lengthA++, sub, JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+        goto exception;
+    goto done;
+exception:
+    JS_FreeValue(ctx, A);
+    A = JS_EXCEPTION;
+done:
+    JS_FreeValue(ctx, str);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, splitter);
+    JS_FreeValue(ctx, flags);
+    JS_FreeValue(ctx, z);
+    return A;
+}
+
+/// Line number here: 53243
+static JSValue js_typed_array_create(JSContext *ctx, JSValueConst ctor,
+                                     int argc, JSValueConst *argv)
+{
+    JSValue ret;
+    int new_len;
+    int64_t len;
+
+    ret = JS_CallConstructor(ctx, ctor, argc, argv);
+    if (JS_IsException(ret))
+        return ret;
+    /* validate the typed array */
+    new_len = js_typed_array_get_length_internal(ctx, ret);
+    if (new_len < 0)
+        goto fail;
+    if (argc == 1) {
+        /* ensure that it is large enough */
+        if (JS_ToLengthFree(ctx, &len, JS_DupValue(ctx, argv[0])))
+            goto fail;
+        if (new_len < len) {
+            JS_ThrowTypeError(ctx, "TypedArray length is too small");
+        fail:
+            JS_FreeValue(ctx, ret);
+            return JS_EXCEPTION;
+        }
+    }
+    return ret;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"JS_ToLengthFree(JSContext *, int64_t *, JSValue)" -> "JS_ToInt64Clamp(JSContext *, int64_t *, JSValue, int64_t, int64_t, int64_t)";
+"JS_ToLengthFree(JSContext *, int64_t *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ToInt64Clamp(JSContext *, int64_t *, JSValue, int64_t, int64_t, int64_t)";
+"JS_ToInt64Clamp(JSContext *, int64_t *, JSValue, int64_t, int64_t, int64_t)" -> "JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)";
+"JS_ToInt64Clamp(JSContext *, int64_t *, JSValue, int64_t, int64_t, int64_t)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_get_length64(JSContext *, int64_t *, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_get_length64(JSContext *, int64_t *, JSValue)" -> "JS_IsException(JSValue)";
+"js_get_length64(JSContext *, int64_t *, JSValue)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_get_regexp(JSContext *, JSValue, BOOL)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_flags(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_capture_count(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_exec(uint8_t **, const uint8_t *, const uint8_t *, int, int, int, void *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowInterrupted(JSContext *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_groupnames(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewObjectProto(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "strlen(const char *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueUint32(JSContext *, JSValue, uint32_t, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_sub_string(JSContext *, JSString *, int, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_free(JSContext *, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_get_regexp(JSContext *, JSValue, BOOL)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_get_flags(const uint8_t *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_get_capture_count(const uint8_t *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_malloc(JSContext *, size_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_exec(uint8_t **, const uint8_t *, const uint8_t *, int, int, int, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ThrowInterrupted(JSContext *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_getc(const JSString *, int *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_free(JSContext *, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_end(StringBuffer *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_free(StringBuffer *)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_IsObject(JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "string_indexof_char(JSString *, int, int)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_RegExpExec(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_IsEmptyString(JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueInt64(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "string_advance_index(JSString *, int64_t, BOOL)";
+"js_regexp_Symbol_match(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_GetOpaque2(JSContext *, JSValue, JSClassID)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_RegExpExec(JSContext *, JSValue, JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_IsException(JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_IsNull(JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_IsEmptyString(JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "string_advance_index(JSString *, int64_t, BOOL)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_regexp_string_iterator_next(JSContext *, JSValue, int, JSValue *, BOOL *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_IsObject(JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_SpeciesConstructor(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_NewObjectClass(JSContext *, int)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "string_indexof_char(JSString *, int, int)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_SetOpaque(JSValue, void *)";
+"js_regexp_Symbol_matchAll(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsObject(JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "value_buffer_init(JSContext *, ValueBuffer *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsFunction(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_indexof_char(JSString *, int, int)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "js_is_standard_regexp(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_RegExpDelete(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_RegExpExec(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "value_buffer_append(ValueBuffer *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsEmptyString(JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_advance_index(JSString *, int64_t, BOOL)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "js_get_length32(JSContext *, uint32_t *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueInt64(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "js_function_apply(JSContext *, JSValue, int, JSValue *, int)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "js_string___GetSubstitution(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat_value(StringBuffer *, JSValue)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_free(StringBuffer *)";
+"js_regexp_Symbol_replace(JSContext *, JSValue, int, JSValue *)" -> "value_buffer_free(ValueBuffer *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsObject(JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_SpeciesConstructor(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "string_indexof_char(JSString *, int, int)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ConcatString3(JSContext *, const char *, JSValue, const char *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_RegExpExec(JSContext *, JSValue, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "string_advance_index(JSString *, int64_t, BOOL)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "js_sub_string(JSContext *, JSString *, int, int)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueInt64(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_regexp_Symbol_split(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "js_typed_array_get_length_internal(JSContext *, JSValue)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_typed_array_create(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

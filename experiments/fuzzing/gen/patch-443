@@ -1,0 +1,277 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5250,6 +5250,9 @@
+ JSValue JS_NewObject(JSContext *ctx)
+ {
+     /* inline JS_NewObjectClass(ctx, JS_CLASS_OBJECT); */
++    if (unlikely(!ctx->class_proto[JS_CLASS_OBJECT])) {
++        funlogline();
++    }
+     return JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT], JS_CLASS_OBJECT);
+ }
+ 
+@@ -5169,6 +5172,9 @@
+ {
+     JSShape *sh;
+     JSObject *proto;
++    if (unlikely(!ctx->rt)) {
++        funlogline();
++    }
+ 
+     proto = get_proto_obj(proto_val);
+     sh = find_hashed_shape_proto(ctx->rt, proto);
+@@ -16027,6 +16033,9 @@
+                                          JSValue val,
+                                          BOOL done)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValue obj;
+     obj = JS_NewObject(ctx);
+     if (JS_IsException(obj)) {
+@@ -16331,6 +16340,9 @@
+ static JSValue js_instantiate_prototype(JSContext *ctx, JSObject *p, JSAtom atom, void *opaque)
+ {
++    if (unlikely(!p)) {
++        funlogline();
++    }
+     JSValue obj, this_val;
+     int ret;
+ 
+@@ -16731,6 +16743,9 @@
+                                int argc, JSValue *argv, int flags)
+ {
++    if (unlikely(!caller_ctx)) {
++        funlogline();
++    }
+     JSRuntime *rt = caller_ctx->rt;
+     JSContext *ctx;
+     JSObject *p;
+@@ -37562,6 +37577,9 @@
+ static JSValue JS_ReadObjectTag(BCReaderState *s)
+ {
++    if (unlikely(!s->ctx)) {
++        funlogline();
++    }
+     JSContext *ctx = s->ctx;
+     JSValue obj;
+     uint32_t prop_count, i;
+@@ -38032,6 +38050,9 @@
+ static JSValue JS_InstantiateFunctionListItem2(JSContext *ctx, JSObject *p,
+                                                JSAtom atom, void *opaque)
+ {
++    if (unlikely(!opaque)) {
++        funlogline();
++    }
+     const JSCFunctionListEntry *e = opaque;
+     JSValue val;
+ 
+@@ -38178,6 +38199,9 @@
+ int JS_SetModuleExportList(JSContext *ctx, JSModuleDef *m,
+                            const JSCFunctionListEntry *tab, int len)
+ {
++    if (unlikely(len < 0)) {
++        funlogline();
++    }
+     int i;
+     JSValue val;
+ 
+@@ -38488,6 +38512,9 @@
+ static JSValue js_object_constructor(JSContext *ctx, JSValueConst new_target,
+                                      int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     JSValue ret;
+     if (!JS_IsUndefined(new_target) &&
+         JS_VALUE_GET_OBJ(new_target) !=
+@@ -38649,6 +38676,9 @@
+ static JSValue js_object_getOwnPropertyDescriptor(JSContext *ctx, JSValueConst this_val,
+                                                   int argc, JSValueConst *argv, int magic)
+ {
++    if (unlikely(magic < 0)) {
++        funlogline();
++    }
+     JSValueConst prop;
+     JSAtom atom;
+     JSValue ret, obj;
+@@ -38713,6 +38743,9 @@
+ static JSValue js_object_getOwnPropertyDescriptors(JSContext *ctx, JSValueConst this_val,
+                                                    int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     //getOwnPropertyDescriptors(obj)
+     JSValue obj, r;
+     JSObject *p;
+@@ -39153,6 +39186,9 @@
+ static JSValue js_object_fromEntries(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     JSValue obj, iter, next_method = JS_UNDEFINED;
+     JSValueConst iterable;
+     BOOL done;
+@@ -46251,6 +46287,9 @@
+ void JS_AddIntrinsicRegExp(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValueConst obj;
+ 
+     JS_AddIntrinsicRegExpCompiler(ctx);
+@@ -46283,6 +46322,9 @@
+ static JSValue json_parse_value(JSParseState *s)
+ {
++    if (unlikely(!s->ctx)) {
++        funlogline();
++    }
+     JSContext *ctx = s->ctx;
+     JSValue val = JS_NULL;
+     int ret;
+@@ -46515,6 +46557,9 @@
+ static JSValue js_json_parse(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     JSValue obj, root;
+     JSValueConst reviver;
+     const char *str;
+@@ -46556,6 +46601,9 @@
+ 
+ JSValue JS_JSONStringify(JSContext *ctx, JSValueConst obj,
+                          JSValueConst replacer, JSValueConst space0)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     StringBuffer b_s;
+     JSONStringifyContext jsc_s, *jsc = &jsc_s;
+     JSValue val, v, space, ret, wrapper;
+@@ -47476,6 +47524,9 @@
+ static JSValue js_create_desc(JSContext *ctx, JSValueConst val,
+                               JSValueConst getter, JSValueConst setter,
+                               int flags)
+ {
++    if (unlikely(flags < 0)) {
++        funlogline();
++    }
+     JSValue ret;
+     ret = JS_NewObject(ctx);
+     if (JS_IsException(ret))
+@@ -48061,6 +48112,9 @@
+ static JSValue js_proxy_revocable(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     JSValue proxy_obj, revoke_obj = JS_UNDEFINED, obj;
+ 
+     proxy_obj = js_proxy_constructor(ctx, JS_UNDEFINED, argc, argv);
+@@ -49195,6 +49249,9 @@
+ void JS_AddIntrinsicMapSet(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     int i;
+     JSValue obj1;
+     char buf[ATOM_GET_STR_BUF_SIZE];
+@@ -49725,6 +49782,9 @@
+ static JSValue js_promise_withResolvers(JSContext *ctx,
+                                         JSValueConst this_val,
+                                         int argc, JSValueConst *argv)
+ {
++    if (unlikely(argc < 0)) {
++        funlogline();
++    }
+     JSValue result_promise, resolving_funcs[2], obj;
+     if (!JS_IsObject(this_val))
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+@@ -49799,6 +49859,9 @@
+                                               int argc, JSValueConst *argv,
+                                               int magic,
+                                               JSValue *func_data)
+ {
++    if (unlikely(magic < 0)) {
++        funlogline();
++    }
+     int resolve_type = magic & 3;
+     int is_reject = magic & 4;
+     BOOL alreadyCalled = JS_ToBool(ctx, func_data[0]);
+@@ -50529,6 +50592,9 @@
+ void JS_AddIntrinsicPromise(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSRuntime *rt = ctx->rt;
+     JSValue obj1;
+ 
+@@ -52037,6 +52103,9 @@
+ void JS_AddIntrinsicDate(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValueConst obj;
+ 
+     /* Date */
+@@ -52238,6 +52307,9 @@
+ static void JS_AddIntrinsicBigInt(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValueConst obj1;
+ 
+     ctx->class_proto[JS_CLASS_BIG_INT] = JS_NewObject(ctx);
+@@ -52260,6 +52332,9 @@
+ /* Minimum amount of objects to be able to compile code and display
+    error messages. No JSAtom should be allocated by this function. */
+ /// Line number here: 52260
+ static void JS_AddIntrinsicBasicObjects(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValue proto;
+     int i;
+ 
+@@ -52316,6 +52391,9 @@
+ /// Line number here: 52316
+ void JS_AddIntrinsicBaseObjects(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     int i;
+     JSValueConst obj, number_obj;
+     JSValue obj1;
+@@ -55533,6 +55611,9 @@
+ void JS_AddIntrinsicTypedArrays(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValue typed_array_base_proto, typed_array_base_func;
+     JSValueConst array_buffer_func, shared_array_buffer_func;
+     int i;
+@@ -55873,6 +55954,9 @@
+ void JS_AddIntrinsicWeakRef(JSContext *ctx)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSRuntime *rt = ctx->rt;
+ 
+     /* WeakRef */

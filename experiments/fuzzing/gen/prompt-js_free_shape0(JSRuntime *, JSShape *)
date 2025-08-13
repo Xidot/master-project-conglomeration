@@ -1,0 +1,210 @@
+Target function: "js_free_shape0(JSRuntime *, JSShape *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 4756
+static void js_free_shape0(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t i;
+    JSShapeProperty *pr;
+
+    assert(sh->header.ref_count == 0);
+    if (sh->is_hashed)
+        js_shape_hash_unlink(rt, sh);
+    if (sh->proto != NULL) {
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+    }
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        JS_FreeAtomRT(rt, pr->atom);
+        pr++;
+    }
+    remove_gc_object(&sh->header);
+    js_free_rt(rt, get_alloc_from_shape(sh));
+}
+
+/// Line number here: 4664
+static void js_shape_hash_unlink(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t h;
+    JSShape **psh;
+
+    h = get_shape_hash(sh->hash, rt->shape_hash_bits);
+    psh = &rt->shape_hash[h];
+    while (*psh != sh)
+        psh = &(*psh)->shape_hash_next;
+    *psh = sh->shape_hash_next;
+    rt->shape_hash_count--;
+}
+
+/// Line number here: 4591
+static inline JSShapeProperty *get_shape_prop(JSShape *sh)
+{
+    return sh->prop;
+}
+
+/// Line number here: 3209
+void JS_FreeAtomRT(JSRuntime *rt, JSAtom v)
+{
+    if (!__JS_AtomIsConst(v))
+        __JS_FreeAtom(rt, v);
+}
+
+/// Line number here: 5943
+static void remove_gc_object(JSGCObjectHeader *h)
+{
+    list_del(&h->link);
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+/// Line number here: 4586
+static inline void *get_alloc_from_shape(JSShape *sh)
+{
+    return prop_hash_end(sh) - ((intptr_t)sh->prop_hash_mask + 1);
+}
+
+/// Line number here: 4776
+static void js_free_shape(JSRuntime *rt, JSShape *sh)
+{
+    if (unlikely(--sh->header.ref_count <= 0)) {
+        js_free_shape0(rt, sh);
+    }
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 75
+typedef long int		intptr_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_free_shape0(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_shape_prop(JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_alloc_from_shape(JSShape *)";
+"js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_shape_hash_unlink(JSRuntime *, JSShape *)" -> "get_shape_hash(uint32_t, int)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"JS_FreeAtomRT(JSRuntime *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"JS_FreeAtomRT(JSRuntime *, JSAtom)" -> "__JS_FreeAtom(JSRuntime *, uint32_t)";
+"remove_gc_object(JSGCObjectHeader *)";
+"remove_gc_object(JSGCObjectHeader *)" -> "list_del(struct list_head *)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+"get_alloc_from_shape(JSShape *)";
+"get_alloc_from_shape(JSShape *)" -> "prop_hash_end(JSShape *)";
+"js_free_shape(JSRuntime *, JSShape *)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "__builtin_expect(long, long)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "js_free_shape0(JSRuntime *, JSShape *)";
+}

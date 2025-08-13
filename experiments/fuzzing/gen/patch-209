@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11021,6 +11021,9 @@
+ static JSBigInt *js_bigint_normalize1(JSContext *ctx, JSBigInt *a, int l)
+ {
+     js_limb_t v;
++    
++    if (a->header.ref_count != 1)
++        funlogline();
+ 
+     assert(a->header.ref_count == 1);
+     while (l > 1) {
+@@ -11035,6 +11038,8 @@
+         JSBigInt *a1;
+         /* realloc to reduce the size */
+         a->len = l;
++        if (sizeof(JSBigInt) + l * sizeof(js_limb_t) < sizeof(JSBigInt) + a->len * sizeof(js_limb_t))
++            funlogline();
+         a1 = js_realloc(ctx, a, sizeof(JSBigInt) + l * sizeof(js_limb_t));
+         if (a1)
+             a = a1;

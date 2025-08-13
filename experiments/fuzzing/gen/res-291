@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs:
+
+:JS_EvalThis:35890
+:JS_EvalThis:35894
+
+---
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35887,6 +35887,9 @@
+                     const char *input, size_t input_len,
+                     const char *filename, int eval_flags)
+ {
++    if (eval_flags & ~JS_EVAL_TYPE_MASK) {
++        funlogline();
++    }
+     int eval_type = eval_flags & JS_EVAL_TYPE_MASK;
+     JSValue ret;
+ 
+@@ -35894,6 +35897,9 @@
+            eval_type == JS_EVAL_TYPE_MODULE);
+     ret = JS_EvalInternal(ctx, this_obj, input, input_len, filename,
+                           eval_flags, -1);
++    if (eval_type != JS_EVAL_TYPE_GLOBAL && eval_type != JS_EVAL_TYPE_MODULE) {
++        funlogline();
++    }
+     return ret;
+ }
+```
+
+The first potential bug is that the function doesn't validate eval_flags properly before masking it. The second is that the assert only works in debug builds - in release builds, invalid eval_type values would still be passed through to JS_EvalInternal. The added checks will catch these cases.

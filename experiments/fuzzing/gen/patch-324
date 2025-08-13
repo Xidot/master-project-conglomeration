@@ -1,0 +1,12 @@
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -682,6 +682,9 @@
+ {
+     if (JS_VALUE_HAS_REF_COUNT(v)) {
+         JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
++        if (p->ref_count <= 0) {
++            funlogline();
++        }
+         if (--p->ref_count <= 0) {
+             __JS_FreeValue(ctx, v);
+         }

@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6732,6 +6732,9 @@
+ {
+     JSRuntime *rt = ctx->rt;
+     JS_FreeValue(ctx, rt->current_exception);
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_EXCEPTION && obj.u.exception == rt->current_exception) {
++        funlogline();
++    }
+     rt->current_exception = obj;
+     rt->current_exception_is_uncatchable = FALSE;
+     return JS_EXCEPTION;

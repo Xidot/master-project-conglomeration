@@ -1,0 +1,62 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2369,6 +2369,9 @@
+ /* return an atom with JS_ATOM_TAG_INT tag */
+ static inline JSAtom __JS_AtomFromUInt32(uint32_t v)
+ {
++    if (v > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     return v | JS_ATOM_TAG_INT;
+ }
+ 
+@@ -2910,6 +2913,9 @@
+     uint32_t n;
+     if (is_num_string(&n, p)) {
+         if (n <= JS_ATOM_MAX_INT) {
++            if (n > JS_ATOM_MAX_INT) {
++                funlogline();
++            }
+             js_free_string(rt, p);
+             return __JS_AtomFromUInt32(n);
+         }
+@@ -7935,6 +7941,9 @@
+             add_array_keys:
+                 for(i = 0; i < len; i++) {
+                     tab_atom[num_index].atom = __JS_AtomFromUInt32(i);
++                    if (i > JS_ATOM_MAX_INT) {
++                        funlogline();
++                    }
+                     if (tab_atom[num_index].atom == JS_ATOM_NULL) {
+                         JS_FreePropertyEnum(ctx, tab_atom, num_index);
+                         return -1;
+@@ -15447,6 +15456,9 @@
+             free_var_ref(ctx->rt, var_ref);
+             goto fail;
+         }
++        if (i > JS_ATOM_MAX_INT) {
++            funlogline();
++        }
+         pr->u.var_ref = var_ref;
+     }
+ 
+@@ -24413,6 +24425,9 @@
+     emit_op(s, OP_array_from);
+     emit_u16(s, idx);
+ 
++    if (idx > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     /* larger arrays and holes are handled with explicit indices */
+     need_length = FALSE;
+     while (s->token.val != ']' && idx < 0x7fffffff) {
+@@ -37055,6 +37070,9 @@
+ static int bc_get_atom(BCReaderState *s, JSAtom *patom)
+ {
+     uint32_t v;
++    if (v > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     if (bc_get_leb128(s, &v))
+         return -1;
+     if (v & 1) {

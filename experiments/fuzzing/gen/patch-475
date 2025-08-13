@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15315,6 +15315,8 @@ static __exception int js_operator_delete(JSContext *ctx, JSValue *sp)
+     JSValue op1, op2;
+     JSAtom atom;
+     int ret;
++    
++    if (unlikely(sp < ctx->stack_buf + 2)) goto exception;
+ 
+     op1 = sp[-2];
+     op2 = sp[-1];
+@@ -15322,6 +15324,8 @@ static __exception int js_operator_delete(JSContext *ctx, JSValue *sp)
+     if (unlikely(atom == JS_ATOM_NULL))
+         return -1;
+     ret = JS_DeleteProperty(ctx, op1, atom, JS_PROP_THROW_STRICT);
++    if (ret >= 0 && !JS_IsObject(op1))
++        funlogline();
+     JS_FreeAtom(ctx, atom);
+     if (unlikely(ret < 0))
+         return -1;

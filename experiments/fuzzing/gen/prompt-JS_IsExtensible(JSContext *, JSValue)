@@ -1,0 +1,982 @@
+Target function: "JS_IsExtensible(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 522
+typedef struct JSClassExoticMethods {
+    /* Return -1 if exception (can only happen in case of Proxy object),
+       FALSE if the property does not exists, TRUE if it exists. If 1 is
+       returned, the property descriptor 'desc' is filled if != NULL. */
+    int (*get_own_property)(JSContext *ctx, JSPropertyDescriptor *desc,
+                             JSValueConst obj, JSAtom prop);
+    /* '*ptab' should hold the '*plen' property keys. Return 0 if OK,
+       -1 if exception. The 'is_enumerable' field is ignored.
+    */
+    int (*get_own_property_names)(JSContext *ctx, JSPropertyEnum **ptab,
+                                  uint32_t *plen,
+                                  JSValueConst obj);
+    /* return < 0 if exception, or TRUE/FALSE */
+    int (*delete_property)(JSContext *ctx, JSValueConst obj, JSAtom prop);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*define_own_property)(JSContext *ctx, JSValueConst this_obj,
+                               JSAtom prop, JSValueConst val,
+                               JSValueConst getter, JSValueConst setter,
+                               int flags);
+    /* The following methods can be emulated with the previous ones,
+       so they are usually not needed */
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*has_property)(JSContext *ctx, JSValueConst obj, JSAtom atom);
+    JSValue (*get_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
+                            JSValueConst receiver);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*set_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
+                        JSValueConst value, JSValueConst receiver, int flags);
+
+    /* To get a consistent object behavior when get_prototype != NULL,
+       get_property, set_property and set_prototype must be != NULL
+       and the object must be created with a JS_NULL prototype. */
+    JSValue (*get_prototype)(JSContext *ctx, JSValueConst obj);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*set_prototype)(JSContext *ctx, JSValueConst obj, JSValueConst proto_val);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*is_extensible)(JSContext *ctx, JSValueConst obj);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*prevent_extensions)(JSContext *ctx, JSValueConst obj);
+} JSClassExoticMethods
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+/// Line number here: 481
+typedef struct JSPropertyDescriptor {
+    int flags;
+    JSValue value;
+    JSValue getter;
+    JSValue setter;
+} JSPropertyDescriptor
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* return -1 if exception (exotic object only) or TRUE/FALSE */
+/// Line number here: 8246
+int JS_IsExtensible(JSContext *ctx, JSValueConst obj)
+{
+    JSObject *p;
+
+    if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (unlikely(p->is_exotic)) {
+        const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+        if (em && em->is_extensible) {
+            return em->is_extensible(ctx, obj);
+        }
+    }
+    return p->extensible;
+}
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 9336
+static int JS_CreateProperty(JSContext *ctx, JSObject *p,
+                             JSAtom prop, JSValueConst val,
+                             JSValueConst getter, JSValueConst setter,
+                             int flags)
+{
+    JSProperty *pr;
+    int ret, prop_flags;
+
+    /* add a new property or modify an existing exotic one */
+    if (p->is_exotic) {
+        if (p->class_id == JS_CLASS_ARRAY) {
+            uint32_t idx, len;
+
+            if (p->fast_array) {
+                if (__JS_AtomIsTaggedInt(prop)) {
+                    idx = __JS_AtomToUInt32(prop);
+                    if (idx == p->u.array.count) {
+                        if (!p->extensible)
+                            goto not_extensible;
+                        if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET))
+                            goto convert_to_array;
+                        prop_flags = get_prop_flags(flags, 0);
+                        if (prop_flags != JS_PROP_C_W_E)
+                            goto convert_to_array;
+                        return add_fast_array_element(ctx, p,
+                                                      JS_DupValue(ctx, val), flags);
+                    } else {
+                        goto convert_to_array;
+                    }
+                } else if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
+                    /* convert the fast array to normal array */
+                convert_to_array:
+                    if (convert_fast_array_to_array(ctx, p))
+                        return -1;
+                    goto generic_array;
+                }
+            } else if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
+                JSProperty *plen;
+                JSShapeProperty *pslen;
+            generic_array:
+                /* update the length field */
+                plen = &p->prop[0];
+                JS_ToUint32(ctx, &len, plen->u.value);
+                if ((idx + 1) > len) {
+                    pslen = get_shape_prop(p->shape);
+                    if (unlikely(!(pslen->flags & JS_PROP_WRITABLE)))
+                        return JS_ThrowTypeErrorReadOnly(ctx, flags, JS_ATOM_length);
+                    /* XXX: should update the length after defining
+                       the property */
+                    len = idx + 1;
+                    set_value(ctx, &plen->u.value, JS_NewUint32(ctx, len));
+                }
+            }
+        } else if (p->class_id >= JS_CLASS_UINT8C_ARRAY &&
+                   p->class_id <= JS_CLASS_FLOAT64_ARRAY) {
+            ret = JS_AtomIsNumericIndex(ctx, prop);
+            if (ret != 0) {
+                if (ret < 0)
+                    return -1;
+                return JS_ThrowTypeErrorOrFalse(ctx, flags, "cannot create numeric index in typed array");
+            }
+        } else if (!(flags & JS_PROP_NO_EXOTIC)) {
+            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            if (em) {
+                if (em->define_own_property) {
+                    return em->define_own_property(ctx, JS_MKPTR(JS_TAG_OBJECT, p),
+                                                   prop, val, getter, setter, flags);
+                }
+                ret = JS_IsExtensible(ctx, JS_MKPTR(JS_TAG_OBJECT, p));
+                if (ret < 0)
+                    return -1;
+                if (!ret)
+                    goto not_extensible;
+            }
+        }
+    }
+
+    if (!p->extensible) {
+    not_extensible:
+        return JS_ThrowTypeErrorOrFalse(ctx, flags, "object is not extensible");
+    }
+
+    if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+        prop_flags = (flags & (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
+            JS_PROP_GETSET;
+    } else {
+        prop_flags = flags & JS_PROP_C_W_E;
+    }
+    pr = add_property(ctx, p, prop, prop_flags);
+    if (unlikely(!pr))
+        return -1;
+    if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+        pr->u.getset.getter = NULL;
+        if ((flags & JS_PROP_HAS_GET) && JS_IsFunction(ctx, getter)) {
+            pr->u.getset.getter =
+                JS_VALUE_GET_OBJ(JS_DupValue(ctx, getter));
+        }
+        pr->u.getset.setter = NULL;
+        if ((flags & JS_PROP_HAS_SET) && JS_IsFunction(ctx, setter)) {
+            pr->u.getset.setter =
+                JS_VALUE_GET_OBJ(JS_DupValue(ctx, setter));
+        }
+    } else {
+        if (flags & JS_PROP_HAS_VALUE) {
+            pr->u.value = JS_DupValue(ctx, val);
+        } else {
+            pr->u.value = JS_UNDEFINED;
+        }
+    }
+    return TRUE;
+}
+
+/// Line number here: 38864
+static JSValue js_object_isExtensible(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv, int reflect)
+{
+    JSValueConst obj;
+    int ret;
+
+    obj = argv[0];
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT) {
+        if (reflect)
+            return JS_ThrowTypeErrorNotAnObject(ctx);
+        else
+            return JS_FALSE;
+    }
+    ret = JS_IsExtensible(ctx, obj);
+    if (ret < 0)
+        return JS_EXCEPTION;
+    else
+        return JS_NewBool(ctx, ret);
+}
+
+/// Line number here: 39107
+static JSValue js_object_isSealed(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv, int is_frozen)
+{
+    JSValueConst obj = argv[0];
+    JSObject *p;
+    JSPropertyEnum *props;
+    uint32_t len, i;
+    int flags, res;
+
+    if (!JS_IsObject(obj))
+        return JS_TRUE;
+
+    p = JS_VALUE_GET_OBJ(obj);
+    flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK;
+    if (JS_GetOwnPropertyNamesInternal(ctx, &props, &len, p, flags))
+        return JS_EXCEPTION;
+
+    for(i = 0; i < len; i++) {
+        JSPropertyDescriptor desc;
+        JSAtom prop = props[i].atom;
+
+        res = JS_GetOwnPropertyInternal(ctx, &desc, p, prop);
+        if (res < 0)
+            goto exception;
+        if (res) {
+            js_free_desc(ctx, &desc);
+            if ((desc.flags & JS_PROP_CONFIGURABLE)
+            ||  (is_frozen && (desc.flags & JS_PROP_WRITABLE))) {
+                res = FALSE;
+                goto done;
+            }
+        }
+    }
+    res = JS_IsExtensible(ctx, obj);
+    if (res < 0)
+        return JS_EXCEPTION;
+    res ^= 1;
+done:
+    JS_FreePropertyEnum(ctx, props, len);
+    return JS_NewBool(ctx, res);
+
+exception:
+    JS_FreePropertyEnum(ctx, props, len);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 684
+typedef struct JSProxyData {
+    JSValue target;
+    JSValue handler;
+    uint8_t is_func;
+    uint8_t is_revoked;
+} JSProxyData
+
+/// Line number here: 47190
+static JSValue js_proxy_get_prototype(JSContext *ctx, JSValueConst obj)
+{
+    JSProxyData *s;
+    JSValue method, ret, proto1;
+    int res;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_getPrototypeOf);
+    if (!s)
+        return JS_EXCEPTION;
+    if (JS_IsUndefined(method))
+        return JS_GetPrototype(ctx, s->target);
+    ret = JS_CallFree(ctx, method, s->handler, 1, (JSValueConst *)&s->target);
+    if (JS_IsException(ret))
+        return ret;
+    if (JS_VALUE_GET_TAG(ret) != JS_TAG_NULL &&
+        JS_VALUE_GET_TAG(ret) != JS_TAG_OBJECT) {
+        goto fail;
+    }
+    res = JS_IsExtensible(ctx, s->target);
+    if (res < 0) {
+        JS_FreeValue(ctx, ret);
+        return JS_EXCEPTION;
+    }
+    if (!res) {
+        /* check invariant */
+        proto1 = JS_GetPrototype(ctx, s->target);
+        if (JS_IsException(proto1)) {
+            JS_FreeValue(ctx, ret);
+            return JS_EXCEPTION;
+        }
+        if (!js_same_value(ctx, proto1, ret)) {
+            JS_FreeValue(ctx, proto1);
+        fail:
+            JS_FreeValue(ctx, ret);
+            return JS_ThrowTypeError(ctx, "proxy: inconsistent prototype");
+        }
+        JS_FreeValue(ctx, proto1);
+    }
+    return ret;
+}
+
+/// Line number here: 47231
+static int js_proxy_set_prototype(JSContext *ctx, JSValueConst obj,
+                                  JSValueConst proto_val)
+{
+    JSProxyData *s;
+    JSValue method, ret, proto1;
+    JSValueConst args[2];
+    BOOL res;
+    int res2;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_setPrototypeOf);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method))
+        return JS_SetPrototypeInternal(ctx, s->target, proto_val, FALSE);
+    args[0] = s->target;
+    args[1] = proto_val;
+    ret = JS_CallFree(ctx, method, s->handler, 2, args);
+    if (JS_IsException(ret))
+        return -1;
+    res = JS_ToBoolFree(ctx, ret);
+    if (!res)
+        return FALSE;
+    res2 = JS_IsExtensible(ctx, s->target);
+    if (res2 < 0)
+        return -1;
+    if (!res2) {
+        proto1 = JS_GetPrototype(ctx, s->target);
+        if (JS_IsException(proto1))
+            return -1;
+        if (!js_same_value(ctx, proto_val, proto1)) {
+            JS_FreeValue(ctx, proto1);
+            JS_ThrowTypeError(ctx, "proxy: inconsistent prototype");
+            return -1;
+        }
+        JS_FreeValue(ctx, proto1);
+    }
+    return TRUE;
+}
+
+/// Line number here: 47270
+static int js_proxy_is_extensible(JSContext *ctx, JSValueConst obj)
+{
+    JSProxyData *s;
+    JSValue method, ret;
+    BOOL res;
+    int res2;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_isExtensible);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method))
+        return JS_IsExtensible(ctx, s->target);
+    ret = JS_CallFree(ctx, method, s->handler, 1, (JSValueConst *)&s->target);
+    if (JS_IsException(ret))
+        return -1;
+    res = JS_ToBoolFree(ctx, ret);
+    res2 = JS_IsExtensible(ctx, s->target);
+    if (res2 < 0)
+        return res2;
+    if (res != res2) {
+        JS_ThrowTypeError(ctx, "proxy: inconsistent isExtensible");
+        return -1;
+    }
+    return res;
+}
+
+/// Line number here: 47296
+static int js_proxy_prevent_extensions(JSContext *ctx, JSValueConst obj)
+{
+    JSProxyData *s;
+    JSValue method, ret;
+    BOOL res;
+    int res2;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_preventExtensions);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method))
+        return JS_PreventExtensions(ctx, s->target);
+    ret = JS_CallFree(ctx, method, s->handler, 1, (JSValueConst *)&s->target);
+    if (JS_IsException(ret))
+        return -1;
+    res = JS_ToBoolFree(ctx, ret);
+    if (res) {
+        res2 = JS_IsExtensible(ctx, s->target);
+        if (res2 < 0)
+            return res2;
+        if (res2) {
+            JS_ThrowTypeError(ctx, "proxy: inconsistent preventExtensions");
+            return -1;
+        }
+    }
+    return res;
+}
+
+/// Line number here: 47514
+static int js_proxy_get_own_property(JSContext *ctx, JSPropertyDescriptor *pdesc,
+                                     JSValueConst obj, JSAtom prop)
+{
+    JSProxyData *s;
+    JSValue method, trap_result_obj, prop_val;
+    int res, target_desc_ret, ret;
+    JSObject *p;
+    JSValueConst args[2];
+    JSPropertyDescriptor result_desc, target_desc;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_getOwnPropertyDescriptor);
+    if (!s)
+        return -1;
+    p = JS_VALUE_GET_OBJ(s->target);
+    if (JS_IsUndefined(method)) {
+        return JS_GetOwnPropertyInternal(ctx, pdesc, p, prop);
+    }
+    prop_val = JS_AtomToValue(ctx, prop);
+    if (JS_IsException(prop_val)) {
+        JS_FreeValue(ctx, method);
+        return -1;
+    }
+    args[0] = s->target;
+    args[1] = prop_val;
+    trap_result_obj = JS_CallFree(ctx, method, s->handler, 2, args);
+    JS_FreeValue(ctx, prop_val);
+    if (JS_IsException(trap_result_obj))
+        return -1;
+    if (!JS_IsObject(trap_result_obj) && !JS_IsUndefined(trap_result_obj)) {
+        JS_FreeValue(ctx, trap_result_obj);
+        goto fail;
+    }
+    target_desc_ret = JS_GetOwnPropertyInternal(ctx, &target_desc, p, prop);
+    if (target_desc_ret < 0) {
+        JS_FreeValue(ctx, trap_result_obj);
+        return -1;
+    }
+    if (target_desc_ret)
+        js_free_desc(ctx, &target_desc);
+    if (JS_IsUndefined(trap_result_obj)) {
+        if (target_desc_ret) {
+            if (!(target_desc.flags & JS_PROP_CONFIGURABLE) || !p->extensible)
+                goto fail;
+        }
+        ret = FALSE;
+    } else {
+        int flags1, extensible_target;
+        extensible_target = JS_IsExtensible(ctx, s->target);
+        if (extensible_target < 0) {
+            JS_FreeValue(ctx, trap_result_obj);
+            return -1;
+        }
+        res = js_obj_to_desc(ctx, &result_desc, trap_result_obj);
+        JS_FreeValue(ctx, trap_result_obj);
+        if (res < 0)
+            return -1;
+
+        /* convert the result_desc.flags to property flags */
+        if (result_desc.flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+            result_desc.flags |= JS_PROP_GETSET;
+        } else {
+            result_desc.flags |= JS_PROP_NORMAL;
+        }
+        result_desc.flags &= (JS_PROP_C_W_E | JS_PROP_TMASK);
+        
+        if (target_desc_ret) {
+            /* convert result_desc.flags to defineProperty flags */
+            flags1 = result_desc.flags | JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_ENUMERABLE;
+            if (result_desc.flags & JS_PROP_GETSET)
+                flags1 |= JS_PROP_HAS_GET | JS_PROP_HAS_SET;
+            else
+                flags1 |= JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE;
+            /* XXX: not complete check: need to compare value &
+               getter/setter as in defineproperty */
+            if (!check_define_prop_flags(target_desc.flags, flags1))
+                goto fail1;
+        } else {
+            if (!extensible_target)
+                goto fail1;
+        }
+        if (!(result_desc.flags & JS_PROP_CONFIGURABLE)) {
+            if (!target_desc_ret || (target_desc.flags & JS_PROP_CONFIGURABLE))
+                goto fail1;
+            if ((result_desc.flags &
+                 (JS_PROP_GETSET | JS_PROP_WRITABLE)) == 0 &&
+                target_desc_ret &&
+                (target_desc.flags & JS_PROP_WRITABLE) != 0) {
+                /* proxy-missing-checks */
+            fail1:
+                js_free_desc(ctx, &result_desc);
+            fail:
+                JS_ThrowTypeError(ctx, "proxy: inconsistent getOwnPropertyDescriptor");
+                return -1;
+            }
+        }
+        ret = TRUE;
+        if (pdesc) {
+            *pdesc = result_desc;
+        } else {
+            js_free_desc(ctx, &result_desc);
+        }
+    }
+    return ret;
+}
+
+/// Line number here: 47716
+static int js_proxy_delete_property(JSContext *ctx, JSValueConst obj,
+                                    JSAtom atom)
+{
+    JSProxyData *s;
+    JSValue method, ret, atom_val;
+    int res, res2, is_extensible;
+    JSValueConst args[2];
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_deleteProperty);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method)) {
+        return JS_DeleteProperty(ctx, s->target, atom, 0);
+    }
+    atom_val = JS_AtomToValue(ctx, atom);;
+    if (JS_IsException(atom_val)) {
+        JS_FreeValue(ctx, method);
+        return -1;
+    }
+    args[0] = s->target;
+    args[1] = atom_val;
+    ret = JS_CallFree(ctx, method, s->handler, 2, args);
+    JS_FreeValue(ctx, atom_val);
+    if (JS_IsException(ret))
+        return -1;
+    res = JS_ToBoolFree(ctx, ret);
+    if (res) {
+        JSPropertyDescriptor desc;
+        res2 = JS_GetOwnPropertyInternal(ctx, &desc, JS_VALUE_GET_OBJ(s->target), atom);
+        if (res2 < 0)
+            return -1;
+        if (res2) {
+            if (!(desc.flags & JS_PROP_CONFIGURABLE))
+                goto fail;
+            is_extensible = JS_IsExtensible(ctx, s->target);
+            if (is_extensible < 0)
+                goto fail1;
+            if (!is_extensible) {
+                /* proxy-missing-checks */
+            fail:
+                JS_ThrowTypeError(ctx, "proxy: inconsistent deleteProperty");
+            fail1:
+                js_free_desc(ctx, &desc);
+                return -1;
+            }
+            js_free_desc(ctx, &desc);
+        }
+    }
+    return res;
+}
+
+/// Line number here: 47778
+static int js_proxy_get_own_property_names(JSContext *ctx,
+                                           JSPropertyEnum **ptab,
+                                           uint32_t *plen,
+                                           JSValueConst obj)
+{
+    JSProxyData *s;
+    JSValue method, prop_array, val;
+    uint32_t len, i, len2;
+    JSPropertyEnum *tab, *tab2;
+    JSAtom atom;
+    JSPropertyDescriptor desc;
+    int res, is_extensible, idx;
+
+    s = get_proxy_method(ctx, &method, obj, JS_ATOM_ownKeys);
+    if (!s)
+        return -1;
+    if (JS_IsUndefined(method)) {
+        return JS_GetOwnPropertyNamesInternal(ctx, ptab, plen,
+                                      JS_VALUE_GET_OBJ(s->target),
+                                      JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK);
+    }
+    prop_array = JS_CallFree(ctx, method, s->handler, 1, (JSValueConst *)&s->target);
+    if (JS_IsException(prop_array))
+        return -1;
+    tab = NULL;
+    len = 0;
+    tab2 = NULL;
+    len2 = 0;
+    if (js_get_length32(ctx, &len, prop_array))
+        goto fail;
+    if (len > 0) {
+        tab = js_mallocz(ctx, sizeof(tab[0]) * len);
+        if (!tab)
+            goto fail;
+    }
+    for(i = 0; i < len; i++) {
+        val = JS_GetPropertyUint32(ctx, prop_array, i);
+        if (JS_IsException(val))
+            goto fail;
+        if (!JS_IsString(val) && !JS_IsSymbol(val)) {
+            JS_FreeValue(ctx, val);
+            JS_ThrowTypeError(ctx, "proxy: properties must be strings or symbols");
+            goto fail;
+        }
+        atom = JS_ValueToAtom(ctx, val);
+        JS_FreeValue(ctx, val);
+        if (atom == JS_ATOM_NULL)
+            goto fail;
+        tab[i].atom = atom;
+        tab[i].is_enumerable = FALSE; /* XXX: redundant? */
+    }
+
+    /* check duplicate properties (XXX: inefficient, could store the
+     * properties an a temporary object to use the hash) */
+    for(i = 1; i < len; i++) {
+        if (find_prop_key(tab, i, tab[i].atom) >= 0) {
+            JS_ThrowTypeError(ctx, "proxy: duplicate property");
+            goto fail;
+        }
+    }
+
+    is_extensible = JS_IsExtensible(ctx, s->target);
+    if (is_extensible < 0)
+        goto fail;
+
+    /* check if there are non configurable properties */
+    if (s->is_revoked) {
+        JS_ThrowTypeErrorRevokedProxy(ctx);
+        goto fail;
+    }
+    if (JS_GetOwnPropertyNamesInternal(ctx, &tab2, &len2, JS_VALUE_GET_OBJ(s->target),
+                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK))
+        goto fail;
+    for(i = 0; i < len2; i++) {
+        if (s->is_revoked) {
+            JS_ThrowTypeErrorRevokedProxy(ctx);
+            goto fail;
+        }
+        res = JS_GetOwnPropertyInternal(ctx, &desc, JS_VALUE_GET_OBJ(s->target),
+                                tab2[i].atom);
+        if (res < 0)
+            goto fail;
+        if (res) {  /* safety, property should be found */
+            js_free_desc(ctx, &desc);
+            if (!(desc.flags & JS_PROP_CONFIGURABLE) || !is_extensible) {
+                idx = find_prop_key(tab, len, tab2[i].atom);
+                if (idx < 0) {
+                    JS_ThrowTypeError(ctx, "proxy: target property must be present in proxy ownKeys");
+                    goto fail;
+                }
+                /* mark the property as found */
+                if (!is_extensible)
+                    tab[idx].is_enumerable = TRUE;
+            }
+        }
+    }
+    if (!is_extensible) {
+        /* check that all property in 'tab' were checked */
+        for(i = 0; i < len; i++) {
+            if (!tab[i].is_enumerable) {
+                JS_ThrowTypeError(ctx, "proxy: property not present in target were returned by non extensible proxy");
+                goto fail;
+            }
+        }
+    }
+
+    JS_FreePropertyEnum(ctx, tab2, len2);
+    JS_FreeValue(ctx, prop_array);
+    *ptab = tab;
+    *plen = len;
+    return 0;
+ fail:
+    JS_FreePropertyEnum(ctx, tab2, len2);
+    JS_FreePropertyEnum(ctx, tab, len);
+    JS_FreeValue(ctx, prop_array);
+    return -1;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_IsExtensible(JSContext *, JSValue)";
+"JS_IsExtensible(JSContext *, JSValue)" -> "__builtin_expect(long, long)";
+"JS_IsExtensible(JSContext *, JSValue)" -> "JSClassExoticMethods::is_extensible";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "__JS_AtomToUInt32(JSAtom)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "get_prop_flags(int, int)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "add_fast_array_element(JSContext *, JSObject *, JSValue, int)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_AtomIsArrayIndex(JSContext *, uint32_t *, JSAtom)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "convert_fast_array_to_array(JSContext *, JSObject *)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "get_shape_prop(JSShape *)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "__builtin_expect(long, long)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ThrowTypeErrorReadOnly(JSContext *, int, JSAtom)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_AtomIsNumericIndex(JSContext *, JSAtom)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ThrowTypeErrorOrFalse(JSContext *, int, const char *, ...)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JSClassExoticMethods::define_own_property";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "add_property(JSContext *, JSObject *, JSAtom, int)";
+"JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_IsFunction(JSContext *, JSValue)";
+"js_object_isExtensible(JSContext *, JSValue, int, JSValue *, int)";
+"js_object_isExtensible(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_object_isExtensible(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_object_isExtensible(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewBool(JSContext *, int)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsObject(JSValue)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"js_object_isSealed(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewBool(JSContext *, int)";
+"js_proxy_get_prototype(JSContext *, JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_GetPrototype(JSContext *, JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "js_same_value(JSContext *, JSValue, JSValue)";
+"js_proxy_get_prototype(JSContext *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_SetPrototypeInternal(JSContext *, JSValue, JSValue, BOOL)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_GetPrototype(JSContext *, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "js_same_value(JSContext *, JSValue, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_set_prototype(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_is_extensible(JSContext *, JSValue)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_proxy_is_extensible(JSContext *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_PreventExtensions(JSContext *, JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_prevent_extensions(JSContext *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_AtomToValue(JSContext *, JSAtom)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_IsException(JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_IsObject(JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "js_obj_to_desc(JSContext *, JSPropertyDescriptor *, JSValue)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "check_define_prop_flags(int, int)";
+"js_proxy_get_own_property(JSContext *, JSPropertyDescriptor *, JSValue, JSAtom)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_DeleteProperty(JSContext *, JSValue, JSAtom, int)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_AtomToValue(JSContext *, JSAtom)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_IsException(JSValue)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_delete_property(JSContext *, JSValue, JSAtom)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsException(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_get_length32(JSContext *, uint32_t *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_mallocz(JSContext *, size_t)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetPropertyUint32(JSContext *, JSValue, uint32_t)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsString(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsSymbol(JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ValueToAtom(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "find_prop_key(const JSPropertyEnum *, int, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_IsExtensible(JSContext *, JSValue)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_ThrowTypeErrorRevokedProxy(JSContext *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_proxy_get_own_property_names(JSContext *, JSPropertyEnum **, uint32_t *, JSValue)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+}

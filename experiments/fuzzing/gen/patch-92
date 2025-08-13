@@ -1,0 +1,12 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -2059,6 +2059,9 @@
+ static void free_sh(JSRuntime *rt, JSOSSignalHandler *sh)
+ {
+     list_del(&sh->link);
++    if (sh->func.tag == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     JS_FreeValueRT(rt, sh->func);
+     js_free_rt(rt, sh);
+ }

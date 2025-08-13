@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8560,6 +8560,8 @@
+     if (js_shape_prepare_update(ctx, p, NULL))
+         return -1;
+     len = p->u.array.count;
++    if (len > INT32_MAX)
++        return -1;
+     /* resize the properties once to simplify the error handling */
+     sh = p->shape;
+     new_count = sh->prop_count + len;
+@@ -8567,6 +8569,8 @@
+         if (resize_properties(ctx, &p->shape, p, new_count))
+             return -1;
+     }
++    if (p->u.array.u.values == NULL)
++        return -1;
+ 
+     tab = p->u.array.u.values;
+     for(i = 0; i < len; i++) {

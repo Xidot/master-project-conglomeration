@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13178,6 +13178,9 @@
+ static void js_print_atom(JSPrintValueState *s, JSAtom atom)
+ {
+     int i;
++    if (s->rt == NULL) {
++        funlogline();
++    }
+     if (__JS_AtomIsTaggedInt(atom)) {
+         js_printf(s, "%u", __JS_AtomToUInt32(atom));
+     } else if (atom == JS_ATOM_NULL) {
+@@ -13186,6 +13189,9 @@
+         assert(atom < s->rt->atom_size);
+         JSString *p;
+         p = s->rt->atom_array[atom];
++        if (p == NULL) {
++            funlogline();
++        }
+         if (is_ascii_ident(p)) {
+             for(i = 0; i < p->len; i++) {
+                 js_putc(s, string_get(p, i));

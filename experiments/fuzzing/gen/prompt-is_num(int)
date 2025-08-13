@@ -1,0 +1,220 @@
+Target function: "is_num(int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 2380
+static inline int is_num(int c)
+{
+    return c >= '0' && c <= '9';
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* return TRUE if the string is a number n with 0 <= n <= 2^32-1 */
+/// Line number here: 2386
+static inline BOOL is_num_string(uint32_t *pval, const JSString *p)
+{
+    uint32_t n;
+    uint64_t n64;
+    int c, i, len;
+
+    len = p->len;
+    if (len == 0 || len > 10)
+        return FALSE;
+    c = string_get(p, 0);
+    if (is_num(c)) {
+        if (c == '0') {
+            if (len != 1)
+                return FALSE;
+            n = 0;
+        } else {
+            n = c - '0';
+            for(i = 1; i < len; i++) {
+                c = string_get(p, i);
+                if (!is_num(c))
+                    return FALSE;
+                n64 = (uint64_t)n * 10 + (c - '0');
+                if ((n64 >> 32) != 0)
+                    return FALSE;
+                n = n64;
+            }
+        }
+        *pval = n;
+        return TRUE;
+    } else {
+        return FALSE;
+    }
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* This test must be fast if atom is not a numeric index (e.g. a
+   method name). Return JS_UNDEFINED if not a numeric
+   index. JS_EXCEPTION can also be returned. */
+/// Line number here: 3139
+static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
+{
+    JSRuntime *rt = ctx->rt;
+    JSAtomStruct *p1;
+    JSString *p;
+    int c, ret;
+    JSValue num, str;
+
+    if (__JS_AtomIsTaggedInt(atom))
+        return JS_NewInt32(ctx, __JS_AtomToUInt32(atom));
+    assert(atom < rt->atom_size);
+    p1 = rt->atom_array[atom];
+    if (p1->atom_type != JS_ATOM_TYPE_STRING)
+        return JS_UNDEFINED;
+    switch(atom) {
+    case JS_ATOM_minus_zero:
+        return __JS_NewFloat64(ctx, -0.0);
+    case JS_ATOM_Infinity:
+        return __JS_NewFloat64(ctx, INFINITY);
+    case JS_ATOM_minus_Infinity:
+        return __JS_NewFloat64(ctx, -INFINITY);
+    case JS_ATOM_NaN:
+        return __JS_NewFloat64(ctx, NAN);
+    default:
+        break;
+    }
+    p = p1;
+    if (p->len == 0)
+        return JS_UNDEFINED;
+    c = string_get(p, 0);
+    if (!is_num(c) && c != '-')
+        return JS_UNDEFINED;
+    /* this is ECMA CanonicalNumericIndexString primitive */
+    num = JS_ToNumber(ctx, JS_MKPTR(JS_TAG_STRING, p));
+    if (JS_IsException(num))
+        return num;
+    str = JS_ToString(ctx, num);
+    if (JS_IsException(str)) {
+        JS_FreeValue(ctx, num);
+        return str;
+    }
+    ret = js_string_compare(ctx, p, JS_VALUE_GET_STRING(str));
+    JS_FreeValue(ctx, str);
+    if (ret == 0) {
+        return num;
+    } else {
+        JS_FreeValue(ctx, num);
+        return JS_UNDEFINED;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"is_num_string(uint32_t *, const JSString *)";
+"is_num_string(uint32_t *, const JSString *)" -> "string_get(const JSString *, int)";
+"is_num_string(uint32_t *, const JSString *)" -> "is_num(int)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__JS_AtomToUInt32(JSAtom)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__JS_NewFloat64(JSContext *, double)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__builtin_inff()";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "__builtin_nanf(const char *)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "string_get(const JSString *, int)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "is_num(int)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "JS_ToNumber(JSContext *, JSValue)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "JS_IsException(JSValue)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_AtomIsNumericIndex1(JSContext *, JSAtom)" -> "js_string_compare(JSContext *, const JSString *, const JSString *)";
+}

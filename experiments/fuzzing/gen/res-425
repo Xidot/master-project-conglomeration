@@ -1,0 +1,37 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewCFunctionData` function:
+
+:quickjs.c:JS_NewCFunctionData:5446
+:quickjs.c:JS_NewCFunctionData:5458
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5446,6 +5446,9 @@
+     int i;
+ 
+     func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
++    if (JS_IsException(func_obj) {
++        funlogline();
++    }
+                                       JS_CLASS_C_FUNCTION_DATA);
+     if (JS_IsException(func_obj))
+         return func_obj;
+@@ -5458,6 +5461,9 @@
+     s->length = length;
+     s->data_len = data_len;
+     s->magic = magic;
++    if (data_len < 0 || data_len > INT_MAX / sizeof(JSValue)) {
++        funlogline();
++    }
+     for(i = 0; i < data_len; i++)
+         s->data[i] = JS_DupValue(ctx, data[i]);
+     JS_SetOpaque(func_obj, s);
+```
+
+Reasons:
+1. The first potential bug is when creating the function object - if it fails, we should log it before returning the exception.
+2. The second potential bug is with data_len validation - there's no check for negative values or potential integer overflow when calculating the allocation size.

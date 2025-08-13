@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_new(JSContext *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_new` function:
+
+:js_bigint_new:10880
+
+The main logical issue is that the function doesn't validate that the input `len` parameter is >= 1, which is required according to the JSBigInt struct definition (line 419). While there is a check for maximum size, there's no check for minimum size.
+
+Here's the diff to add the validation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10880,6 +10880,10 @@
+ static JSBigInt *js_bigint_new(JSContext *ctx, int len)
+ {
+     JSBigInt *r;
++    if (len < 1) {
++        funlogline();
++        return NULL;
++    }
+     if (len > JS_BIGINT_MAX_SIZE) {
+         JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+         return NULL;
+```
+
+The reasoning is:
+1. The JSBigInt struct requires len >= 1 (line 419)
+2. The function accepts any integer len without minimum validation
+3. A len <= 0 would create an invalid JSBigInt structure
+4. This could lead to issues in all functions that use js_bigint_new()
+
+The fix adds a check for len < 1 before proceeding with allocation. This matches the struct's requirements and prevents creation of invalid bigint objects.

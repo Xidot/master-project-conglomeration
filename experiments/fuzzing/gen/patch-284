@@ -1,0 +1,80 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14841,6 +14841,7 @@
+     op1 = sp[-2];
+     op2 = sp[-1];
+  redo:
++    if (JS_VALUE_GET_TAG(op1) == JS_TAG_FLOAT64 && isnan(JS_VALUE_GET_FLOAT64(op1))) funlogline();
+     tag1 = JS_VALUE_GET_NORM_TAG(op1);
+     tag2 = JS_VALUE_GET_NORM_TAG(op2);
+     if (tag_is_number(tag1) && tag_is_number(tag2)) {
+@@ -14849,6 +14850,7 @@
+         } else if ((tag1 == JS_TAG_FLOAT64 &&
+                     (tag2 == JS_TAG_INT || tag2 == JS_TAG_FLOAT64)) ||
+                    (tag2 == JS_TAG_FLOAT64 &&
++                    if (JS_VALUE_GET_TAG(op2) == JS_TAG_FLOAT64 && isnan(JS_VALUE_GET_FLOAT64(op2))) funlogline();
+                     (tag1 == JS_TAG_INT || tag1 == JS_TAG_FLOAT64))) {
+             double d1, d2;
+             if (tag1 == JS_TAG_FLOAT64) {
+@@ -14860,6 +14862,7 @@
+             } else {
+                 d2 = JS_VALUE_GET_INT(op2);
+             }
++            if (isnan(d1) || isnan(d2)) funlogline();
+             res = (d1 == d2);
+         } else {
+             res = js_compare_bigint(ctx, OP_eq, op1, op2);
+@@ -14872,6 +14875,7 @@
+         res = TRUE;
+     } else if (tag_is_string(tag1) && tag_is_string(tag2)) {
+         /* needed when comparing strings and ropes */
++        if (tag1 == JS_TAG_STRING_ROPE || tag2 == JS_TAG_STRING_ROPE) funlogline();
+         res = js_strict_eq2(ctx, op1, op2, JS_EQ_STRICT);
+     } else if ((tag_is_string(tag1) && tag_is_number(tag2)) ||
+                (tag_is_string(tag2) && tag_is_number(tag1))) {
+@@ -14880,6 +14884,7 @@
+             tag2 == JS_TAG_BIG_INT || tag2 == JS_TAG_SHORT_BIG_INT) {
+             if (tag_is_string(tag1)) {
+                 op1 = JS_StringToBigInt(ctx, op1);
++                if (JS_IsException(op1)) funlogline();
+                 if (JS_VALUE_GET_TAG(op1) != JS_TAG_BIG_INT &&
+                     JS_VALUE_GET_TAG(op1) != JS_TAG_SHORT_BIG_INT)
+                     goto invalid_bigint_string;
+@@ -14887,6 +14892,7 @@
+             if (tag_is_string(tag2)) {
+                 op2 = JS_StringToBigInt(ctx, op2);
+                 if (JS_VALUE_GET_TAG(op2) != JS_TAG_BIG_INT &&
++                    if (JS_IsException(op2)) funlogline();
+                     JS_VALUE_GET_TAG(op2) != JS_TAG_SHORT_BIG_INT ) {
+                 invalid_bigint_string:
+                     JS_FreeValue(ctx, op1);
+@@ -14899,11 +14905,13 @@
+             op1 = JS_ToNumericFree(ctx, op1);
+             if (JS_IsException(op1)) {
+                 JS_FreeValue(ctx, op2);
++                funlogline();
+                 goto exception;
+             }
+             op2 = JS_ToNumericFree(ctx, op2);
+             if (JS_IsException(op2)) {
+                 JS_FreeValue(ctx, op1);
++                funlogline();
+                 goto exception;
+             }
+         }
+@@ -14920,6 +14928,7 @@
+                (tag2 == JS_TAG_OBJECT &&
+                 (tag_is_number(tag1) || tag_is_string(tag1) || tag1 == JS_TAG_SYMBOL))) {
+             op1 = JS_ToPrimitiveFree(ctx, op1, HINT_NONE);
++            if (JS_IsException(op1)) funlogline();
+             if (JS_IsException(op1)) {
+                 JS_FreeValue(ctx, op2);
+                 goto exception;
+@@ -14935,6 +14944,7 @@
+             (JS_IsHTMLDDA(ctx, op2) &&
+              (tag1 == JS_TAG_NULL || tag1 == JS_TAG_UNDEFINED))) {
+             res = TRUE;
++            funlogline();
+         } else {
+             res = FALSE;
+         }

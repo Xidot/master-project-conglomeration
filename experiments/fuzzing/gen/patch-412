@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2811,6 +2811,9 @@
+ static JSAtom __JS_NewAtomInit(JSRuntime *rt, const char *str, int len,
+                                int atom_type)
+ {
+     JSString *p;
++    if (len < 0 || (str[len] != '\0' && memchr(str, '\0', len) == NULL)) {
++        funlogline();
++    }
+     p = js_alloc_string_rt(rt, len, 0);
+     if (!p)
+         return JS_ATOM_NULL;

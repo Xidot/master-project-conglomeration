@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13645,6 +13645,8 @@
+                                   JSValueConst val, const JSPrintValueOptions *options)
+ {
+     JSPrintValueState ss, *s = &ss;
++    if (!write_func)
++        funlogline();
+     if (options)
+         s->options = *options;
+     else
+@@ -13652,8 +13654,12 @@
+     if (s->options.max_depth <= 0)
+         s->options.max_depth = JS_PRINT_MAX_DEPTH;
+     else
++        if (s->options.max_depth > JS_PRINT_MAX_DEPTH * 2)
++            funlogline();
+         s->options.max_depth = min_int(s->options.max_depth, JS_PRINT_MAX_DEPTH);
+     if (s->options.max_string_length == 0)
++        if (s->options.max_string_length > 1024 * 1024 * 1024) /* 1GB sanity check */
++            funlogline();
+         s->options.max_string_length = UINT32_MAX;
+     if (s->options.max_item_count == 0)
+         s->options.max_item_count = UINT32_MAX;

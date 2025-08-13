@@ -1,0 +1,105 @@
+Target function: "u32toa_len(char *, uint32_t, size_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 531
+static void u32toa_len(char *buf, uint32_t n, size_t len)
+{
+    int digit, i;
+    for(i = len - 1; i >= 0; i--) {
+        digit = n % 10;
+        n = n / 10;
+        buf[i] = digit + '0';
+    }
+}
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/* len >= 1. 2 <= radix <= 36 */
+/// Line number here: 560
+static void limb_to_a(char *buf, limb_t n, unsigned int radix, int len)
+{
+    int digit, i;
+
+    if (radix == 10) {
+        /* specific case with constant divisor */
+#if LIMB_BITS == 32
+        u32toa_len(buf, n, len);
+#else
+        /* XXX: optimize */
+        for(i = len - 1; i >= 0; i--) {
+            digit = (limb_t)n % 10;
+            n = (limb_t)n / 10;
+            buf[i] = digit + '0';
+        }
+#endif
+    } else {
+        for(i = len - 1; i >= 0; i--) {
+            digit = (limb_t)n % radix;
+            n = (limb_t)n / radix;
+            if (digit < 10)
+                digit += '0';
+            else
+                digit += 'a' - 10;
+            buf[i] = digit;
+        }
+    }
+}
+
+/// Line number here: 615
+size_t u64toa(char *buf, uint64_t n)
+{
+    if (n < 0x100000000) {
+        return u32toa(buf, n);
+    } else {
+        uint64_t n1;
+        char *q = buf;
+        uint32_t n2;
+        
+        n1 = n / 1000000000;
+        n %= 1000000000;
+        if (n1 >= 0x100000000) {
+            n2 = n1 / 1000000000;
+            n1 = n1 % 1000000000;
+            /* at most two digits */
+            if (n2 >= 10) {
+                *q++ = n2 / 10 + '0';
+                n2 %= 10;
+            }
+            *q++ = n2 + '0';
+            u32toa_len(q, n1, 9);
+            q += 9;
+        } else {
+            q += u32toa(q, n1);
+        }
+        u32toa_len(q, n, 9);
+        q += 9;
+        return q - buf;
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"limb_to_a(char *, limb_t, unsigned int, int)";
+"limb_to_a(char *, limb_t, unsigned int, int)" -> "u32toa_len(char *, uint32_t, size_t)";
+"u64toa(char *, uint64_t)";
+"u64toa(char *, uint64_t)" -> "u32toa(char *, uint32_t)";
+"u64toa(char *, uint64_t)" -> "u32toa_len(char *, uint32_t, size_t)";
+}

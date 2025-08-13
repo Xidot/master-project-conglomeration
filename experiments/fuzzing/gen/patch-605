@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7168,6 +7168,10 @@
+ static JSValue JS_ThrowReferenceErrorNotDefined(JSContext *ctx, JSAtom name)
+ {
+     char buf[ATOM_GET_STR_BUF_SIZE];
++    if (name == JS_ATOM_NULL) {
++        funlogline();
++        return JS_ThrowReferenceError(ctx, "variable is not defined");
++    }
+     return JS_ThrowReferenceError(ctx, "'%s' is not defined",
+                                   JS_AtomGetStr(ctx, buf, sizeof(buf), name));
+ }

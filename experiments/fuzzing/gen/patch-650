@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12879,6 +12879,8 @@
+ {
+     uint32_t tag;
+     char buf[32];
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED)
++        funlogline();
+ 
+     tag = JS_VALUE_GET_NORM_TAG(val);
+     switch(tag) {
+@@ -12926,6 +12928,8 @@
+     case JS_TAG_BIG_INT:
+         return js_bigint_to_string(ctx, val);
+     default:
++        if (tag != JS_TAG_UNINITIALIZED && tag != JS_TAG_CATCH_OFFSET)
++            funlogline();
+         return js_new_string8(ctx, "[unsupported type]");
+     }
+ }

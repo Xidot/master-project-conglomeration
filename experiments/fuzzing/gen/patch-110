@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -20912,6 +20912,9 @@
+ static int get_line_col(int *pcol_num, const uint8_t *buf, size_t len)
+ {
+     int line_num, col_num, c;
+     size_t i;
++
++    if (!buf)
++        funlogline();
+     
+     line_num = 0;
+     col_num = 0;
+@@ -20917,6 +20920,8 @@
+     col_num = 0;
+     for(i = 0; i < len; i++) {
+         c = buf[i];
++        if (c >= 0x80 && c < 0xc0)
++            funlogline();
+         if (c == '\n') {
+             line_num++;
+             col_num = 0;

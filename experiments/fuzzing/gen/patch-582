@@ -1,0 +1,21 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4227,6 +4227,9 @@
+ void js_std_loop(JSContext *ctx)
+ {
+     int err;
++    
++    if (!os_poll_func)
++        funlogline();
+ 
+     for(;;) {
+         /* execute the pending jobs */
+@@ -4240,6 +4243,8 @@
+         }
+ 
+         js_std_promise_rejection_check(ctx);
++        if (!list_empty(&ts->rejected_promise_list))
++            funlogline();
+         
+         if (!os_poll_func || os_poll_func(ctx))
+             break;

@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5057,6 +5057,9 @@
+ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID class_id)
+ {
+     JSObject *p;
+ 
++    if (unlikely(!ctx || !sh))
++        return JS_EXCEPTION;
++
+     js_trigger_gc(ctx->rt, sizeof(JSObject));
+     p = js_malloc(ctx, sizeof(JSObject));
+     if (unlikely(!p))
+@@ -5082,6 +5085,7 @@
+     p->prop = js_malloc(ctx, sizeof(JSProperty) * sh->prop_size);
+     if (unlikely(!p->prop)) {
+         js_free(ctx, p);
++        funlogline();
+     fail:
+         js_free_shape(ctx->rt, sh);
+         return JS_EXCEPTION;
+@@ -5128,6 +5132,9 @@
+         p->u.regexp.bytecode = NULL;
+         goto set_exotic;
+     default:
++        if (unlikely(class_id >= JS_CLASS_INIT_COUNT)) {
++            funlogline();
++        }
+     set_exotic:
+         if (ctx->rt->class_array[class_id].exotic) {
+             p->is_exotic = 1;

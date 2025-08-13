@@ -1,0 +1,187 @@
+Target function: "hash_string_rope(JSValue, uint32_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 2449
+static uint32_t hash_string_rope(JSValueConst val, uint32_t h)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+        return hash_string(JS_VALUE_GET_STRING(val), h);
+    } else {
+        JSStringRope *r = JS_VALUE_GET_STRING_ROPE(val);
+        h = hash_string_rope(r->left, h);
+        return hash_string_rope(r->right, h);
+    }
+}
+
+/// Line number here: 2440
+static uint32_t hash_string(const JSString *str, uint32_t h)
+{
+    if (str->is_wide_char)
+        h = hash_string16(str->u.str16, str->len, h);
+    else
+        h = hash_string8(str->u.str8, str->len, h);
+    return h;
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/* XXX: better hash ? */
+/* precondition: 1 <= hash_bits <= 32 */
+/// Line number here: 48451
+static uint32_t map_hash_key(JSValueConst key, int hash_bits)
+{
+    uint32_t tag = JS_VALUE_GET_NORM_TAG(key);
+    uint32_t h;
+    double d;
+    JSBigInt *p;
+    JSBigIntBuf buf;
+    
+    switch(tag) {
+    case JS_TAG_BOOL:
+        h = map_hash32(JS_VALUE_GET_INT(key) ^ JS_TAG_BOOL, hash_bits);
+        break;
+    case JS_TAG_STRING:
+        h = map_hash32(hash_string(JS_VALUE_GET_STRING(key), 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_STRING_ROPE:
+        h = map_hash32(hash_string_rope(key, 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_OBJECT:
+    case JS_TAG_SYMBOL:
+        h = map_hash_pointer((uintptr_t)JS_VALUE_GET_PTR(key) ^ tag, hash_bits);
+        break;
+    case JS_TAG_INT:
+        d = JS_VALUE_GET_INT(key);
+        goto hash_float64;
+    case JS_TAG_FLOAT64:
+        d = JS_VALUE_GET_FLOAT64(key);
+        /* normalize the NaN */
+        if (isnan(d))
+            d = JS_FLOAT64_NAN;
+    hash_float64:
+        h = map_hash64(float64_as_uint64(d) ^ JS_TAG_FLOAT64, hash_bits);
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+        p = js_bigint_set_short(&buf, key);
+        goto hash_bigint;
+    case JS_TAG_BIG_INT:
+        p = JS_VALUE_GET_PTR(key);
+    hash_bigint:
+        {
+            int i;
+            h = 1;
+            for(i = p->len - 1; i >= 0; i--) {
+                h = h * 263 + p->tab[i];
+            }
+            /* the final step is necessary otherwise h mod n only
+               depends of p->tab[i] mod n */
+            h = map_hash32(h ^ JS_TAG_BIG_INT, hash_bits);
+        }
+        break;
+    default:
+        h = 0;
+        break;
+    }
+    return h;
+}
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"hash_string_rope(JSValue, uint32_t)";
+"hash_string_rope(JSValue, uint32_t)" -> "hash_string(const JSString *, uint32_t)";
+"hash_string_rope(JSValue, uint32_t)" -> "hash_string_rope(JSValue, uint32_t)";
+"hash_string(const JSString *, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string16(const uint16_t *, size_t, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+"map_hash_key(JSValue, int)";
+"map_hash_key(JSValue, int)" -> "map_hash32(uint32_t, int)";
+"map_hash_key(JSValue, int)" -> "hash_string(const JSString *, uint32_t)";
+"map_hash_key(JSValue, int)" -> "hash_string_rope(JSValue, uint32_t)";
+"map_hash_key(JSValue, int)" -> "map_hash_pointer(uintptr_t, int)";
+"map_hash_key(JSValue, int)" -> "__builtin_isnan()";
+"map_hash_key(JSValue, int)" -> "__builtin_nanf(const char *)";
+"map_hash_key(JSValue, int)" -> "map_hash64(uint64_t, int)";
+"map_hash_key(JSValue, int)" -> "float64_as_uint64(double)";
+"map_hash_key(JSValue, int)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+}

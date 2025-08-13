@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-bc_byte_swap(uint8_t *, int)
+-------------------------
+Let me analyze the `bc_byte_swap` function for potential logical errors.
+
+Potential logical bug locations:
+1. :bc_byte_swap:36204 - No bounds checking when accessing bc_buf[pos + X] offsets
+2. :bc_byte_swap:36204 - No validation that len > 0 before using it to increment pos
+
+Here are the diffs to instrument these potential bugs:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36204,6 +36204,9 @@
+     pos = 0;
+     while (pos < bc_len) {
+         op = bc_buf[pos];
++        if (pos >= bc_len) {
++            funlogline();
++        }
+         len = short_opcode_info(op).size;
+         fmt = short_opcode_info(op).fmt;
+         switch(fmt) {
+@@ -36259,6 +36262,9 @@
+         default:
+             break;
+         }
++        if (len <= 0) {
++            funlogline();
++        }
+         pos += len;
+     }
+ }
+```
+
+Reasons:
+1. The function reads `bc_buf[pos]` without checking if `pos` is within bounds first. While the while loop checks `pos < bc_len`, we should verify the initial position is valid.
+2. The function blindly trusts `len` from `short_opcode_info()` and uses it to increment `pos`. If `len` is 0 or negative, this could cause an infinite loop.
+
+Note: The first check is somewhat redundant with the while condition but ensures we don't start with an invalid position. The second check is more critical as it guards against bad opcode length values.

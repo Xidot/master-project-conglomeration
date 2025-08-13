@@ -1,0 +1,45 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_object_list_add(JSContext *, JSObjectList *, JSObject *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_object_list_add` function:
+
+:js_object_list_add:35977
+:js_object_list_add:35989
+:js_object_list_add:35994
+
+---
+
+1. Line 35977: The function doesn't check if `obj` is NULL before adding it to the list, which could lead to issues when dereferencing the pointer later.
+
+2. Line 35989: The hash calculation could result in collisions when `hash_size` is not a power of two, but the code assumes it is (due to the `& (hash_size - 1)` operation). However, the resize logic ensures it's always a power of two, so this might not be a real issue.
+
+3. Line 35994: The hash table update doesn't handle the case where `s->object_count - 1` could overflow the hash table size, though the resize logic should prevent this.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35974,6 +35974,8 @@
+ /* the reference count of 'obj' is not modified. Return 0 if OK, -1 if
+    memory error */
+ static int js_object_list_add(JSContext *ctx, JSObjectList *s, JSObject *obj)
+ {
++    if (obj == NULL)
++        funlogline();
+     JSObjectListEntry *e;
+     uint32_t h, new_hash_size;
+ 
+@@ -35991,6 +35993,8 @@
+     h = js_object_list_get_hash(obj, s->hash_size);
+     e->obj = obj;
+     e->hash_next = s->hash_table[h];
++    if (s->object_count - 1 >= s->hash_size)
++        funlogline();
+     s->hash_table[h] = s->object_count - 1;
+     return 0;
+ }
+```
+
+The most significant issue is the missing NULL check for `obj`. The other potential issues are mitigated by the resize logic but are still instrumented for completeness.

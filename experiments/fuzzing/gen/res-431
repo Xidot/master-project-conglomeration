@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewContextRaw(JSRuntime *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewContextRaw` function:
+
+:quickjs.c:JS_NewContextRaw:2110
+:quickjs.c:JS_NewContextRaw:2116
+
+---
+
+1. `quickjs.c:JS_NewContextRaw:2110` - The `class_proto` array allocation doesn't check if `rt->class_count` is 0 or negative, which could lead to allocation of 0 bytes or a negative size (though size_t would wrap around).
+
+2. `quickjs.c:JS_NewContextRaw:2116` - The function adds the context to `rt->context_list` before fully initializing all fields, which could cause issues if another thread accesses the partially initialized context.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2107,6 +2107,9 @@
+     add_gc_object(rt, &ctx->header, JS_GC_OBJ_TYPE_JS_CONTEXT);
+ 
+     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
++                                   rt->class_count);
++    if (rt->class_count <= 0) {
++        funlogline();
+                                     rt->class_count);
+     if (!ctx->class_proto) {
+         js_free_rt(rt, ctx);
+@@ -2114,6 +2117,7 @@
+     }
+     ctx->rt = rt;
+     list_add_tail(&ctx->link, &rt->context_list);
++    funlogline(); // Context added to list before full initialization
+     for(i = 0; i < rt->class_count; i++)
+         ctx->class_proto[i] = JS_NULL;
+     ctx->array_ctor = JS_NULL;
+```
+
+The first modification adds a check for invalid `class_count` before allocation. The second adds instrumentation right after adding the context to the list before it's fully initialized.

@@ -1,0 +1,96 @@
+Target function: "JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* same as JS_Eval() but with an explicit 'this_obj' parameter */
+/// Line number here: 35890
+JSValue JS_EvalThis(JSContext *ctx, JSValueConst this_obj,
+                    const char *input, size_t input_len,
+                    const char *filename, int eval_flags)
+{
+    int eval_type = eval_flags & JS_EVAL_TYPE_MASK;
+    JSValue ret;
+
+    assert(eval_type == JS_EVAL_TYPE_GLOBAL ||
+           eval_type == JS_EVAL_TYPE_MODULE);
+    ret = JS_EvalInternal(ctx, this_obj, input, input_len, filename,
+                          eval_flags, -1);
+    return ret;
+}
+
+/* the indirection is needed to make 'eval' optional */
+/// Line number here: 35850
+static JSValue JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
+                               const char *input, size_t input_len,
+                               const char *filename, int flags, int scope_idx)
+{
+    BOOL backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+    int saved_js_mode = 0;
+    JSValue ret;
+    
+    if (unlikely(!ctx->eval_internal)) {
+        return JS_ThrowTypeError(ctx, "eval is not supported");
+    }
+    if (backtrace_barrier && ctx->rt->current_stack_frame) {
+        saved_js_mode = ctx->rt->current_stack_frame->js_mode;
+        ctx->rt->current_stack_frame->js_mode |= JS_MODE_BACKTRACE_BARRIER;
+    }
+    ret = ctx->eval_internal(ctx, this_obj, input, input_len, filename,
+                             flags, scope_idx);
+    if (backtrace_barrier && ctx->rt->current_stack_frame)
+        ctx->rt->current_stack_frame->js_mode = saved_js_mode;
+    return ret;
+}
+
+/* 'input' must be zero terminated i.e. input[input_len] = '\0'. */
+/// Line number here: 35904
+JSValue JS_Eval(JSContext *ctx, const char *input, size_t input_len,
+                const char *filename, int eval_flags)
+{
+    return JS_EvalThis(ctx, ctx->global_obj, input, input_len, filename,
+                       eval_flags);
+}
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)";
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)" -> "JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "__builtin_expect(long, long)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JSContext::eval_internal";
+"JS_Eval(JSContext *, const char *, size_t, const char *, int)";
+"JS_Eval(JSContext *, const char *, size_t, const char *, int)" -> "JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)";
+}

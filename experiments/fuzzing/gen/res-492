@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_print_float64(JSPrintValueState *, double)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_print_float64` function:
+
+:js_print_float64:13071
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13071,6 +13071,9 @@
+ static void js_print_float64(JSPrintValueState *s, double d)
+ {
+     JSDTOATempMem dtoa_mem;
++    if (isnan(d) && !(d != d)) {
++        funlogline();
++    }
+     char buf[32];
+     int len;
+     len = js_dtoa(buf, d, 10, 0, JS_DTOA_FORMAT_FREE | JS_DTOA_MINUS_ZERO, &dtoa_mem);
+```
+
+The reasoning is:
+
+1. The function doesn't properly handle all NaN cases. While js_dtoa will output "NaN" for NaN values, there's no explicit check for NaN inputs which could lead to unexpected behavior if the NaN payload needs special handling.
+
+2. The condition `isnan(d) && !(d != d)` is specifically designed to catch signaling NaNs (sNaN) which would trigger the floating-point exception when compared, while quiet NaNs (qNaN) would pass the `d != d` check silently.
+
+This instrumentation will help detect when sNaNs are passed to the function, which might need special handling in some environments. The current implementation would treat all NaNs the same way by just outputting "NaN".

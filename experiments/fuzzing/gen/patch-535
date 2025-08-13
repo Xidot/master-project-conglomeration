@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -44755,6 +44755,8 @@
+         return JS_EXCEPTION;
+     }
+ 
++    if (JS_IsException(ctor))
++        funlogline();
+     obj = js_create_from_ctor(ctx, ctor, JS_CLASS_REGEXP);
+     if (JS_IsException(obj))
+         goto fail;
+@@ -44762,6 +44764,8 @@
+     re = &p->u.regexp;
+     re->pattern = JS_VALUE_GET_STRING(pattern);
+     re->bytecode = JS_VALUE_GET_STRING(bc);
++    if (!re->pattern || !re->bytecode)
++        funlogline();
+     JS_DefinePropertyValue(ctx, obj, JS_ATOM_lastIndex, JS_NewInt32(ctx, 0),
+                            JS_PROP_WRITABLE);
+     return obj;

@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11684,6 +11684,9 @@
+ static int js_bigint_cmp(JSContext *ctx, const JSBigInt *a,
+                          const JSBigInt *b)
+ {
+     int a_sign, b_sign, res, i;
++    if (a == NULL || b == NULL) {
++        funlogline();
++    }
+     a_sign = js_bigint_sign(a);
+     b_sign = js_bigint_sign(b);
+     if (a_sign != b_sign) {
+@@ -11694,6 +11697,9 @@
+             if (a->len < b->len)
+                 res = 2 * a_sign - 1;
+             else
++                if (a->len > b->len && a_sign == 1) {
++                    funlogline();
++                }
+                 res = 1 - 2 * a_sign;
+         } else {
+             res = 0;
+@@ -11701,6 +11707,9 @@
+                 if (a->tab[i] != b->tab[i]) {
+                     if (a->tab[i] < b->tab[i])
+                         res = -1;
++                    else if (a_sign == 1 && a->tab[i] > b->tab[i]) {
++                        funlogline();
++                    }
+                     else
+                         res = 1;
+                     break;

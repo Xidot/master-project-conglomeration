@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15158,6 +15158,9 @@
+ static no_inline int js_strict_eq_slow(JSContext *ctx, JSValue *sp,
+                                        BOOL is_neq)
+ {
+     BOOL res;
++    if (is_neq && JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_FLOAT64 && JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_FLOAT64) {
++        funlogline();
++    }
+     res = js_strict_eq2(ctx, sp[-2], sp[-1], JS_EQ_STRICT);
+     sp[-2] = JS_NewBool(ctx, res ^ is_neq);
+     return 0;

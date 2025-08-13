@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2836,6 +2836,8 @@
+     h1 = h & (rt->atom_hash_size - 1);
+     i = rt->atom_hash[h1];
+     while (i != 0) {
++        if (p->atom_type != JS_ATOM_TYPE_STRING && p->hash == h)
++            funlogline();
+         p = rt->atom_array[i];
+         if (p->hash == h &&
+             p->atom_type == JS_ATOM_TYPE_STRING &&
+@@ -2841,6 +2843,8 @@
+             p->atom_type == JS_ATOM_TYPE_STRING &&
+             p->len == len &&
+             p->is_wide_char == 0 &&
++            if (p->len != len)
++                funlogline();
+             memcmp(p->u.str8, str, len) == 0) {
+             if (!__JS_AtomIsConst(i))
+                 p->header.ref_count++;

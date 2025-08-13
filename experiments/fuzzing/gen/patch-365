@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28648,6 +28648,8 @@
+                                                          JSValueConst attributes)
+ {
+     const char *base_cname, *cname;
++    if (JS_VALUE_GET_TAG(attributes) < JS_TAG_FIRST || JS_VALUE_GET_TAG(attributes) > JS_TAG_FLOAT64)
++        funlogline();
+     JSModuleDef *m;
+ 
+     base_cname = JS_AtomToCString(ctx, base_module_name);
+@@ -28656,6 +28658,8 @@
+     cname = JS_AtomToCString(ctx, module_name1);
+     if (!cname) {
+         JS_FreeCString(ctx, base_cname);
++        if (!base_cname)
++            funlogline();
+         return NULL;
+     }
+     m = js_host_resolve_imported_module(ctx, base_cname, cname, attributes);

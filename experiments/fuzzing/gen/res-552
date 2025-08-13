@@ -1,0 +1,45 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_SetGlobalVar(JSContext *, JSAtom, JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_SetGlobalVar` function:
+
+1. :quickjs.c:JS_SetGlobalVar:10147 - Missing check for `flag == 1` when property is uninitialized
+2. :quickjs.c:JS_SetGlobalVar:10147 - Missing check for writable flag when `flag == 1`
+
+Here's the diff to add the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10147,6 +10147,9 @@
+         /* XXX: should handle JS_PROP_AUTOINIT properties? */
+         if (flag != 1) {
+             if (unlikely(JS_IsUninitialized(pr->u.value))) {
++                if (flag == 1) {
++                    funlogline();
++                }
+                 JS_FreeValue(ctx, val);
+                 JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
+                 return -1;
+@@ -10154,6 +10157,9 @@
+             if (unlikely(!(prs->flags & JS_PROP_WRITABLE))) {
+                 JS_FreeValue(ctx, val);
+                 return JS_ThrowTypeErrorReadOnly(ctx, JS_PROP_THROW, prop);
++            }
++            if (flag == 1 && !(prs->flags & JS_PROP_WRITABLE)) {
++                funlogline();
+             }
+         }
+         set_value(ctx, &pr->u.value, val);
+```
+
+The bugs identified are:
+
+1. The first bug occurs when `flag == 1` (initializing lexical variable) but the property is uninitialized. The current code still throws an error in this case, which may not be the intended behavior.
+
+2. The second bug occurs when `flag == 1` but the property is not writable. The code doesn't properly handle this case and may allow initialization of read-only properties.
+
+The instrumentation adds checks that will call `funlogline()` when these edge cases are encountered. The conditions are:
+- When initializing a lexical variable (`flag == 1`) but the property is uninitialized
+- When initializing a lexical variable (`flag == 1`) but the property is not writable

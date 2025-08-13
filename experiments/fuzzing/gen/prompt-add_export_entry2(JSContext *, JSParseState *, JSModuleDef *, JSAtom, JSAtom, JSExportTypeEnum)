@@ -1,0 +1,241 @@
+Target function: "add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/// Line number here: 771
+typedef enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+} JSExportTypeEnum
+
+/// Line number here: 28381
+static JSExportEntry *add_export_entry2(JSContext *ctx,
+                                        JSParseState *s, JSModuleDef *m,
+                                       JSAtom local_name, JSAtom export_name,
+                                       JSExportTypeEnum export_type)
+{
+    JSExportEntry *me;
+
+    if (find_export_entry(ctx, m, export_name)) {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        if (s) {
+            js_parse_error(s, "duplicate exported name '%s'",
+                           JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name));
+        } else {
+            JS_ThrowSyntaxErrorAtom(ctx, "duplicate exported name '%s'", export_name);
+        }
+        return NULL;
+    }
+
+    if (js_resize_array(ctx, (void **)&m->export_entries,
+                        sizeof(JSExportEntry),
+                        &m->export_entries_size,
+                        m->export_entries_count + 1))
+        return NULL;
+    me = &m->export_entries[m->export_entries_count++];
+    memset(me, 0, sizeof(*me));
+    me->local_name = JS_DupAtom(ctx, local_name);
+    me->export_name = JS_DupAtom(ctx, export_name);
+    me->export_type = export_type;
+    return me;
+}
+
+/// Line number here: 28368
+static JSExportEntry *find_export_entry(JSContext *ctx, JSModuleDef *m,
+                                        JSAtom export_name)
+{
+    JSExportEntry *me;
+    int i;
+    for(i = 0; i < m->export_entries_count; i++) {
+        me = &m->export_entries[i];
+        if (me->export_name == export_name)
+            return me;
+    }
+    return NULL;
+}
+
+/// Line number here: 20990
+static __attribute__((format(printf, 2, 3))) int js_parse_error(JSParseState *s, const char *fmt, ...)
+{
+    va_list ap;
+    int ret;
+    
+    va_start(ap, fmt);
+    ret = js_parse_error_v(s, s->token.ptr, fmt, ap);
+    va_end(ap);
+    return ret;
+}
+
+/// Line number here: 3069
+static const char *JS_AtomGetStr(JSContext *ctx, char *buf, int buf_size, JSAtom atom)
+{
+    return JS_AtomGetStrRT(ctx->rt, buf, buf_size, atom);
+}
+
+/* never use it directly */
+/// Line number here: 7089
+static JSValue __attribute__((format(printf, 3, 4))) __JS_ThrowSyntaxErrorAtom(JSContext *ctx, JSAtom atom, const char *fmt, ...)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    return JS_ThrowSyntaxError(ctx, fmt,
+                             JS_AtomGetStr(ctx, buf, sizeof(buf), atom));
+}
+
+/* resize the array and update its size if req_size > *psize */
+/// Line number here: 1458
+static inline int js_resize_array(JSContext *ctx, void **parray, int elem_size,
+                                  int *psize, int req_size)
+{
+    if (unlikely(req_size > *psize))
+        return js_realloc_array(ctx, parray, elem_size, psize, req_size);
+    else
+        return 0;
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 2597
+JSAtom JS_DupAtom(JSContext *ctx, JSAtom v)
+{
+    JSRuntime *rt;
+    JSAtomStruct *p;
+
+    if (!__JS_AtomIsConst(v)) {
+        rt = ctx->rt;
+        p = rt->atom_array[v];
+        p->header.ref_count++;
+    }
+    return v;
+}
+
+/// Line number here: 28412
+static JSExportEntry *add_export_entry(JSParseState *s, JSModuleDef *m,
+                                       JSAtom local_name, JSAtom export_name,
+                                       JSExportTypeEnum export_type)
+{
+    return add_export_entry2(s->ctx, s, m, local_name, export_name,
+                             export_type);
+}
+
+/* can only be called before the module is instantiated */
+/// Line number here: 28451
+int JS_AddModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name)
+{
+    JSExportEntry *me;
+    JSAtom name;
+    name = JS_NewAtom(ctx, export_name);
+    if (name == JS_ATOM_NULL)
+        return -1;
+    me = add_export_entry2(ctx, NULL, m, JS_ATOM_NULL, name,
+                           JS_EXPORT_TYPE_LOCAL);
+    JS_FreeAtom(ctx, name);
+    if (!me)
+        return -1;
+    else
+        return 0;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+
+
+----- Callgraph:
+strict digraph G {
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "memset(void *, int, size_t)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"js_parse_error(JSParseState *, const char *, ...)";
+"js_parse_error(JSParseState *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"js_parse_error(JSParseState *, const char *, ...)" -> "js_parse_error_v(JSParseState *, const uint8_t *, const char *, struct __va_list_tag *)";
+"js_parse_error(JSParseState *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)" -> "JS_AtomGetStrRT(JSRuntime *, char *, int, JSAtom)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"js_resize_array(JSContext *, void **, int, int *, int)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "__builtin_expect(long, long)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "js_realloc_array(JSContext *, void **, int, int *, int)";
+"JS_DupAtom(JSContext *, JSAtom)";
+"JS_DupAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"add_export_entry(JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"add_export_entry(JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+}

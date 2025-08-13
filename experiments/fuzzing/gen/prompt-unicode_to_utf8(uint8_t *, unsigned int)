@@ -1,0 +1,53 @@
+Target function: "unicode_to_utf8(uint8_t *, unsigned int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* Note: at most 31 bits are encoded. At most UTF8_CHAR_LEN_MAX bytes
+   are output. */
+/// Line number here: 207
+int unicode_to_utf8(uint8_t *buf, unsigned int c)
+{
+    uint8_t *q = buf;
+
+    if (c < 0x80) {
+        *q++ = c;
+    } else {
+        if (c < 0x800) {
+            *q++ = (c >> 6) | 0xc0;
+        } else {
+            if (c < 0x10000) {
+                *q++ = (c >> 12) | 0xe0;
+            } else {
+                if (c < 0x00200000) {
+                    *q++ = (c >> 18) | 0xf0;
+                } else {
+                    if (c < 0x04000000) {
+                        *q++ = (c >> 24) | 0xf8;
+                    } else if (c < 0x80000000) {
+                        *q++ = (c >> 30) | 0xfc;
+                        *q++ = ((c >> 24) & 0x3f) | 0x80;
+                    } else {
+                        return 0;
+                    }
+                    *q++ = ((c >> 18) & 0x3f) | 0x80;
+                }
+                *q++ = ((c >> 12) & 0x3f) | 0x80;
+            }
+            *q++ = ((c >> 6) & 0x3f) | 0x80;
+        }
+        *q++ = (c & 0x3f) | 0x80;
+    }
+    return q - buf;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+}

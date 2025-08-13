@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4153,6 +4153,9 @@
+ {
+     JSValue ret;
+     JSString *p1, *p2;
++    if (JS_VALUE_GET_TAG(op1) != JS_TAG_STRING || JS_VALUE_GET_TAG(op2) != JS_TAG_STRING) {
++        funlogline();
++    }
+     p1 = JS_VALUE_GET_STRING(op1);
+     if (JS_ConcatStringInPlace(ctx, p1, op2)) {
+         JS_FreeValue(ctx, op2);
+@@ -4160,6 +4163,9 @@
+     }
+     p2 = JS_VALUE_GET_STRING(op2);
+     ret = JS_ConcatString1(ctx, p1, p2);
++    if (JS_VALUE_GET_TAG(op1) != JS_TAG_STRING || JS_VALUE_GET_TAG(op2) != JS_TAG_STRING) {
++        funlogline();
++    }
+     JS_FreeValue(ctx, op1);
+     JS_FreeValue(ctx, op2);
+     return ret;

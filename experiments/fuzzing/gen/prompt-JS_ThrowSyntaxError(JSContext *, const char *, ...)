@@ -1,0 +1,1028 @@
+Target function: "JS_ThrowSyntaxError(JSContext *, const char *, ...)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7043
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowSyntaxError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_SYNTAX_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 7029
+static JSValue JS_ThrowError(JSContext *ctx, JSErrorEnum error_num,
+                             const char *fmt, va_list ap)
+{
+    JSRuntime *rt = ctx->rt;
+    JSStackFrame *sf;
+    BOOL add_backtrace;
+
+    /* the backtrace is added later if called from a bytecode function */
+    sf = rt->current_stack_frame;
+    add_backtrace = !rt->in_out_of_memory &&
+        (!sf || (JS_GetFunctionBytecode(sf->cur_func) == NULL));
+    return JS_ThrowError2(ctx, error_num, fmt, ap, add_backtrace);
+}
+
+/* never use it directly */
+/// Line number here: 7089
+static JSValue __attribute__((format(printf, 3, 4))) __JS_ThrowSyntaxErrorAtom(JSContext *ctx, JSAtom atom, const char *fmt, ...)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    return JS_ThrowSyntaxError(ctx, fmt,
+                             JS_AtomGetStr(ctx, buf, sizeof(buf), atom));
+}
+
+/// Line number here: 13870
+static JSValue JS_StringToBigIntErr(JSContext *ctx, JSValue val)
+{
+    val = JS_StringToBigInt(ctx, val);
+    if (JS_VALUE_IS_NAN(val))
+        return JS_ThrowSyntaxError(ctx, "invalid bigint literal");
+    return val;
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/* JS parser */
+/// Line number here: 20447
+enum {
+    TOK_NUMBER = -128,
+    TOK_STRING,
+    TOK_TEMPLATE,
+    TOK_IDENT,
+    TOK_REGEXP,
+    /* warning: order matters (see js_parse_assign_expr) */
+    TOK_MUL_ASSIGN,
+    TOK_DIV_ASSIGN,
+    TOK_MOD_ASSIGN,
+    TOK_PLUS_ASSIGN,
+    TOK_MINUS_ASSIGN,
+    TOK_SHL_ASSIGN,
+    TOK_SAR_ASSIGN,
+    TOK_SHR_ASSIGN,
+    TOK_AND_ASSIGN,
+    TOK_XOR_ASSIGN,
+    TOK_OR_ASSIGN,
+    TOK_POW_ASSIGN,
+    TOK_LAND_ASSIGN,
+    TOK_LOR_ASSIGN,
+    TOK_DOUBLE_QUESTION_MARK_ASSIGN,
+    TOK_DEC,
+    TOK_INC,
+    TOK_SHL,
+    TOK_SAR,
+    TOK_SHR,
+    TOK_LT,
+    TOK_LTE,
+    TOK_GT,
+    TOK_GTE,
+    TOK_EQ,
+    TOK_STRICT_EQ,
+    TOK_NEQ,
+    TOK_STRICT_NEQ,
+    TOK_LAND,
+    TOK_LOR,
+    TOK_POW,
+    TOK_ARROW,
+    TOK_ELLIPSIS,
+    TOK_DOUBLE_QUESTION_MARK,
+    TOK_QUESTION_MARK_DOT,
+    TOK_ERROR,
+    TOK_PRIVATE_NAME,
+    TOK_EOF,
+    /* keywords: WARNING: same order as atoms */
+    TOK_NULL, /* must be first */
+    TOK_FALSE,
+    TOK_TRUE,
+    TOK_IF,
+    TOK_ELSE,
+    TOK_RETURN,
+    TOK_VAR,
+    TOK_THIS,
+    TOK_DELETE,
+    TOK_VOID,
+    TOK_TYPEOF,
+    TOK_NEW,
+    TOK_IN,
+    TOK_INSTANCEOF,
+    TOK_DO,
+    TOK_WHILE,
+    TOK_FOR,
+    TOK_BREAK,
+    TOK_CONTINUE,
+    TOK_SWITCH,
+    TOK_CASE,
+    TOK_DEFAULT,
+    TOK_THROW,
+    TOK_TRY,
+    TOK_CATCH,
+    TOK_FINALLY,
+    TOK_FUNCTION,
+    TOK_DEBUGGER,
+    TOK_WITH,
+    /* FutureReservedWord */
+    TOK_CLASS,
+    TOK_CONST,
+    TOK_ENUM,
+    TOK_EXPORT,
+    TOK_EXTENDS,
+    TOK_IMPORT,
+    TOK_SUPER,
+    /* FutureReservedWords when parsing strict mode code */
+    TOK_IMPLEMENTS,
+    TOK_INTERFACE,
+    TOK_LET,
+    TOK_PACKAGE,
+    TOK_PRIVATE,
+    TOK_PROTECTED,
+    TOK_PUBLIC,
+    TOK_STATIC,
+    TOK_YIELD,
+    TOK_AWAIT, /* must be last */
+    TOK_OF,     /* only used for js_parse_skip_parens_token() */
+}
+
+/// Line number here: 1043
+enum OPCodeEnum {
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f) OP_ ## id,
+#define def(id, size, n_pop, n_push, f)
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_COUNT, /* excluding temporary opcodes */
+    /* temporary opcodes : overlap with the short opcodes */
+    OP_TEMP_START = OP_nop + 1,
+    OP___dummy = OP_TEMP_START - 1,
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f)
+#define def(id, size, n_pop, n_push, f) OP_ ## id,
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_TEMP_END,
+}
+
+/// Line number here: 24683
+enum {
+    PUT_LVALUE_NOKEEP, /* [depth] v -> */
+    PUT_LVALUE_NOKEEP_DEPTH, /* [depth] v -> , keep depth (currently
+                                just disable optimizations) */
+    PUT_LVALUE_KEEP_TOP,  /* [depth] v -> v */
+    PUT_LVALUE_KEEP_SECOND, /* [depth] v0 v -> v0 */
+    PUT_LVALUE_NOKEEP_BOTTOM, /* v [depth] -> */
+}
+
+/// Line number here: 20741
+typedef struct JSFunctionDef {
+    JSContext *ctx;
+    struct JSFunctionDef *parent;
+    int parent_cpool_idx; /* index in the constant pool of the parent
+                             or -1 if none */
+    int parent_scope_level; /* scope level in parent at point of definition */
+    struct list_head child_list; /* list of JSFunctionDef.link */
+    struct list_head link;
+
+    BOOL is_eval; /* TRUE if eval code */
+    int eval_type; /* only valid if is_eval = TRUE */
+    BOOL is_global_var; /* TRUE if variables are not defined locally:
+                           eval global, eval module or non strict eval */
+    BOOL is_func_expr; /* TRUE if function expression */
+    BOOL has_home_object; /* TRUE if the home object is available */
+    BOOL has_prototype; /* true if a prototype field is necessary */
+    BOOL has_simple_parameter_list;
+    BOOL has_parameter_expressions; /* if true, an argument scope is created */
+    BOOL has_use_strict; /* to reject directive in special cases */
+    BOOL has_eval_call; /* true if the function contains a call to eval() */
+    BOOL has_arguments_binding; /* true if the 'arguments' binding is
+                                   available in the function */
+    BOOL has_this_binding; /* true if the 'this' and new.target binding are
+                              available in the function */
+    BOOL new_target_allowed; /* true if the 'new.target' does not
+                                throw a syntax error */
+    BOOL super_call_allowed; /* true if super() is allowed */
+    BOOL super_allowed; /* true if super. or super[] is allowed */
+    BOOL arguments_allowed; /* true if the 'arguments' identifier is allowed */
+    BOOL is_derived_class_constructor;
+    BOOL in_function_body;
+    JSFunctionKindEnum func_kind : 8;
+    JSParseFunctionEnum func_type : 8;
+    uint8_t js_mode; /* bitmap of JS_MODE_x */
+    JSAtom func_name; /* JS_ATOM_NULL if no name */
+
+    JSVarDef *vars;
+    int var_size; /* allocated size for vars[] */
+    int var_count;
+    JSVarDef *args;
+    int arg_size; /* allocated size for args[] */
+    int arg_count; /* number of arguments */
+    int defined_arg_count;
+    int var_object_idx; /* -1 if none */
+    int arg_var_object_idx; /* -1 if none (var object for the argument scope) */
+    int arguments_var_idx; /* -1 if none */
+    int arguments_arg_idx; /* argument variable definition in argument scope,
+                              -1 if none */
+    int func_var_idx; /* variable containing the current function (-1
+                         if none, only used if is_func_expr is true) */
+    int eval_ret_idx; /* variable containing the return value of the eval, -1 if none */
+    int this_var_idx; /* variable containg the 'this' value, -1 if none */
+    int new_target_var_idx; /* variable containg the 'new.target' value, -1 if none */
+    int this_active_func_var_idx; /* variable containg the 'this.active_func' value, -1 if none */
+    int home_object_var_idx;
+    BOOL need_home_object;
+
+    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_first;    /* index into vd->vars of first lexically scoped variable */
+    int scope_size;     /* allocated size of fd->scopes array */
+    int scope_count;    /* number of entries used in the fd->scopes array */
+    JSVarScope *scopes;
+    JSVarScope def_scope_array[4];
+    int body_scope; /* scope of the body of the function or eval */
+
+    int global_var_count;
+    int global_var_size;
+    JSGlobalVar *global_vars;
+
+    DynBuf byte_code;
+    int last_opcode_pos; /* -1 if no last opcode */
+    const uint8_t *last_opcode_source_ptr;
+    BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
+
+    LabelSlot *label_slots;
+    int label_size; /* allocated size for label_slots[] */
+    int label_count;
+    BlockEnv *top_break; /* break/continue label stack */
+
+    /* constant pool (strings, functions, numbers) */
+    JSValue *cpool;
+    int cpool_count;
+    int cpool_size;
+
+    /* list of variables in the closure */
+    int closure_var_count;
+    int closure_var_size;
+    JSClosureVar *closure_var;
+
+    JumpSlot *jump_slots;
+    int jump_size;
+    int jump_count;
+
+    LineNumberSlot *line_number_slots;
+    int line_number_size;
+    int line_number_count;
+    int line_number_last;
+    int line_number_last_pc;
+
+    /* pc2line table */
+    BOOL strip_debug : 1; /* strip all debug info (implies strip_source = TRUE) */
+    BOOL strip_source : 1; /* strip only source code */
+    JSAtom filename;
+    uint32_t source_pos; /* pointer in the eval() source */
+    GetLineColCache *get_line_col_cache; /* XXX: could remove to save memory */
+    DynBuf pc2line;
+
+    char *source;  /* raw source, utf-8 encoded */
+    int source_len;
+
+    JSModuleDef *module; /* != NULL when parsing a module */
+    BOOL has_await; /* TRUE if await is used (used in module eval) */
+} JSFunctionDef
+
+/// Line number here: 605
+enum JSFunctionKindEnum {
+    JS_FUNC_NORMAL = 0,
+    JS_FUNC_GENERATOR = (1 << 0),
+    JS_FUNC_ASYNC = (1 << 1),
+    JS_FUNC_ASYNC_GENERATOR = (JS_FUNC_GENERATOR | JS_FUNC_ASYNC),
+}
+
+/* allowed parse_flags: PF_POW_ALLOWED, PF_POW_FORBIDDEN */
+/// Line number here: 26189
+static __exception int js_parse_unary(JSParseState *s, int parse_flags)
+{
+    int op;
+    const uint8_t *op_token_ptr;
+
+    switch(s->token.val) {
+    case '+':
+    case '-':
+    case '!':
+    case '~':
+    case TOK_VOID:
+        op_token_ptr = s->token.ptr;
+        op = s->token.val;
+        if (next_token(s))
+            return -1;
+        if (js_parse_unary(s, PF_POW_FORBIDDEN))
+            return -1;
+        switch(op) {
+        case '-':
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_neg);
+            break;
+        case '+':
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_plus);
+            break;
+        case '!':
+            emit_op(s, OP_lnot);
+            break;
+        case '~':
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_not);
+            break;
+        case TOK_VOID:
+            emit_op(s, OP_drop);
+            emit_op(s, OP_undefined);
+            break;
+        default:
+            abort();
+        }
+        parse_flags = 0;
+        break;
+    case TOK_DEC:
+    case TOK_INC:
+        {
+            int opcode, op, scope, label;
+            JSAtom name;
+            op = s->token.val;
+            op_token_ptr = s->token.ptr;
+            if (next_token(s))
+                return -1;
+            if (js_parse_unary(s, 0))
+                return -1;
+            if (get_lvalue(s, &opcode, &scope, &name, &label, NULL, TRUE, op))
+                return -1;
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_dec + op - TOK_DEC);
+            put_lvalue(s, opcode, scope, name, label, PUT_LVALUE_KEEP_TOP,
+                       FALSE);
+        }
+        break;
+    case TOK_TYPEOF:
+        {
+            JSFunctionDef *fd;
+            if (next_token(s))
+                return -1;
+            if (js_parse_unary(s, PF_POW_FORBIDDEN))
+                return -1;
+            /* reference access should not return an exception, so we
+               patch the get_var */
+            fd = s->cur_func;
+            if (get_prev_opcode(fd) == OP_scope_get_var) {
+                fd->byte_code.buf[fd->last_opcode_pos] = OP_scope_get_var_undef;
+            }
+            emit_op(s, OP_typeof);
+            parse_flags = 0;
+        }
+        break;
+    case TOK_DELETE:
+        if (js_parse_delete(s))
+            return -1;
+        parse_flags = 0;
+        break;
+    case TOK_AWAIT:
+        if (!(s->cur_func->func_kind & JS_FUNC_ASYNC))
+            return js_parse_error(s, "unexpected 'await' keyword");
+        if (!s->cur_func->in_function_body)
+            return js_parse_error(s, "await in default expression");
+        if (next_token(s))
+            return -1;
+        if (js_parse_unary(s, PF_POW_FORBIDDEN))
+            return -1;
+        s->cur_func->has_await = TRUE;
+        emit_op(s, OP_await);
+        parse_flags = 0;
+        break;
+    default:
+        if (js_parse_postfix_expr(s, PF_POSTFIX_CALL))
+            return -1;
+        if (!s->got_lf &&
+            (s->token.val == TOK_DEC || s->token.val == TOK_INC)) {
+            int opcode, op, scope, label;
+            JSAtom name;
+            op = s->token.val;
+            op_token_ptr = s->token.ptr;
+            if (get_lvalue(s, &opcode, &scope, &name, &label, NULL, TRUE, op))
+                return -1;
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_post_dec + op - TOK_DEC);
+            put_lvalue(s, opcode, scope, name, label, PUT_LVALUE_KEEP_SECOND,
+                       FALSE);
+            if (next_token(s))
+                return -1;
+        }
+        break;
+    }
+    if (parse_flags & (PF_POW_ALLOWED | PF_POW_FORBIDDEN)) {
+        if (s->token.val == TOK_POW) {
+            /* Strict ES7 exponentiation syntax rules: To solve
+               conficting semantics between different implementations
+               regarding the precedence of prefix operators and the
+               postifx exponential, ES7 specifies that -2**2 is a
+               syntax error. */
+            if (parse_flags & PF_POW_FORBIDDEN) {
+                JS_ThrowSyntaxError(s->ctx, "unparenthesized unary expression can't appear on the left-hand side of '**'");
+                return -1;
+            }
+            op_token_ptr = s->token.ptr;
+            if (next_token(s))
+                return -1;
+            if (js_parse_unary(s, PF_POW_ALLOWED))
+                return -1;
+            emit_source_pos(s, op_token_ptr);
+            emit_op(s, OP_pow);
+        }
+    }
+    return 0;
+}
+
+/// Line number here: 28714
+typedef enum JSResolveResultEnum {
+    JS_RESOLVE_RES_EXCEPTION = -1, /* memory alloc error */
+    JS_RESOLVE_RES_FOUND = 0,
+    JS_RESOLVE_RES_NOT_FOUND,
+    JS_RESOLVE_RES_CIRCULAR,
+    JS_RESOLVE_RES_AMBIGUOUS,
+} JSResolveResultEnum
+
+/// Line number here: 28816
+static void js_resolve_export_throw_error(JSContext *ctx,
+                                          JSResolveResultEnum res,
+                                          JSModuleDef *m, JSAtom export_name)
+{
+    char buf1[ATOM_GET_STR_BUF_SIZE];
+    char buf2[ATOM_GET_STR_BUF_SIZE];
+    switch(res) {
+    case JS_RESOLVE_RES_EXCEPTION:
+        break;
+    default:
+    case JS_RESOLVE_RES_NOT_FOUND:
+        JS_ThrowSyntaxError(ctx, "Could not find export '%s' in module '%s'",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    case JS_RESOLVE_RES_CIRCULAR:
+        JS_ThrowSyntaxError(ctx, "circular reference when looking for export '%s' in module '%s'",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    case JS_RESOLVE_RES_AMBIGUOUS:
+        JS_ThrowSyntaxError(ctx, "export '%s' in module '%s' is ambiguous",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    }
+}
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 36923
+static int bc_read_error_end(BCReaderState *s)
+{
+    if (!s->error_state) {
+        JS_ThrowSyntaxError(s->ctx, "read after the end of the buffer");
+    }
+    return s->error_state = -1;
+}
+
+/// Line number here: 37034
+static int bc_idx_to_atom(BCReaderState *s, JSAtom *patom, uint32_t idx)
+{
+    JSAtom atom;
+
+    if (__JS_AtomIsTaggedInt(idx)) {
+        atom = idx;
+    } else if (idx < s->first_atom) {
+        atom = JS_DupAtom(s->ctx, idx);
+    } else {
+        idx -= s->first_atom;
+        if (idx >= s->idx_to_atom_count) {
+            JS_ThrowSyntaxError(s->ctx, "invalid atom index (pos=%u)",
+                                (unsigned int)(s->ptr - s->buf_start));
+            *patom = JS_ATOM_NULL;
+            return s->error_state = -1;
+        }
+        atom = JS_DupAtom(s->ctx, s->idx_to_atom[idx]);
+    }
+    *patom = atom;
+    return 0;
+}
+
+/*******************************************************************/
+/* binary object writer & reader */
+/// Line number here: 36030
+enum BCTagEnum {
+    BC_TAG_NULL = 1,
+    BC_TAG_UNDEFINED,
+    BC_TAG_BOOL_FALSE,
+    BC_TAG_BOOL_TRUE,
+    BC_TAG_INT32,
+    BC_TAG_FLOAT64,
+    BC_TAG_STRING,
+    BC_TAG_OBJECT,
+    BC_TAG_ARRAY,
+    BC_TAG_BIG_INT,
+    BC_TAG_TEMPLATE_OBJECT,
+    BC_TAG_FUNCTION_BYTECODE,
+    BC_TAG_MODULE,
+    BC_TAG_TYPED_ARRAY,
+    BC_TAG_ARRAY_BUFFER,
+    BC_TAG_SHARED_ARRAY_BUFFER,
+    BC_TAG_DATE,
+    BC_TAG_OBJECT_VALUE,
+    BC_TAG_OBJECT_REFERENCE,
+}
+
+/// Line number here: 485
+typedef union JSFloat64Union {
+    double d;
+    uint64_t u64;
+    uint32_t u32[2];
+} JSFloat64Union
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 37789
+static JSValue JS_ReadObjectRec(BCReaderState *s)
+{
+    JSContext *ctx = s->ctx;
+    uint8_t tag;
+    JSValue obj = JS_UNDEFINED;
+
+    if (js_check_stack_overflow(ctx->rt, 0))
+        return JS_ThrowStackOverflow(ctx);
+
+    if (bc_get_u8(s, &tag))
+        return JS_EXCEPTION;
+
+    bc_read_trace(s, "%s {\n", bc_tag_str[tag]);
+
+    switch(tag) {
+    case BC_TAG_NULL:
+        obj = JS_NULL;
+        break;
+    case BC_TAG_UNDEFINED:
+        obj = JS_UNDEFINED;
+        break;
+    case BC_TAG_BOOL_FALSE:
+    case BC_TAG_BOOL_TRUE:
+        obj = JS_NewBool(ctx, tag - BC_TAG_BOOL_FALSE);
+        break;
+    case BC_TAG_INT32:
+        {
+            int32_t val;
+            if (bc_get_sleb128(s, &val))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%d\n", val);
+            obj = JS_NewInt32(ctx, val);
+        }
+        break;
+    case BC_TAG_FLOAT64:
+        {
+            JSFloat64Union u;
+            if (bc_get_u64(s, &u.u64))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%g\n", u.d);
+            obj = __JS_NewFloat64(ctx, u.d);
+        }
+        break;
+    case BC_TAG_STRING:
+        {
+            JSString *p;
+            p = JS_ReadString(s);
+            if (!p)
+                return JS_EXCEPTION;
+            obj = JS_MKPTR(JS_TAG_STRING, p);
+        }
+        break;
+    case BC_TAG_FUNCTION_BYTECODE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        obj = JS_ReadFunctionTag(s);
+        break;
+    case BC_TAG_MODULE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        obj = JS_ReadModule(s);
+        break;
+    case BC_TAG_OBJECT:
+        obj = JS_ReadObjectTag(s);
+        break;
+    case BC_TAG_ARRAY:
+    case BC_TAG_TEMPLATE_OBJECT:
+        obj = JS_ReadArray(s, tag);
+        break;
+    case BC_TAG_TYPED_ARRAY:
+        obj = JS_ReadTypedArray(s);
+        break;
+    case BC_TAG_ARRAY_BUFFER:
+        obj = JS_ReadArrayBuffer(s);
+        break;
+    case BC_TAG_SHARED_ARRAY_BUFFER:
+        if (!s->allow_sab || !ctx->rt->sab_funcs.sab_dup)
+            goto invalid_tag;
+        obj = JS_ReadSharedArrayBuffer(s);
+        break;
+    case BC_TAG_DATE:
+        obj = JS_ReadDate(s);
+        break;
+    case BC_TAG_OBJECT_VALUE:
+        obj = JS_ReadObjectValue(s);
+        break;
+    case BC_TAG_BIG_INT:
+        obj = JS_ReadBigInt(s);
+        break;
+    case BC_TAG_OBJECT_REFERENCE:
+        {
+            uint32_t val;
+            if (!s->allow_reference)
+                return JS_ThrowSyntaxError(ctx, "object references are not allowed");
+            if (bc_get_leb128(s, &val))
+                return JS_EXCEPTION;
+            bc_read_trace(s, "%u\n", val);
+            if (val >= s->objects_count) {
+                return JS_ThrowSyntaxError(ctx, "invalid object reference (%u >= %u)",
+                                           val, s->objects_count);
+            }
+            obj = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, s->objects[val]));
+        }
+        break;
+    default:
+    invalid_tag:
+        return JS_ThrowSyntaxError(ctx, "invalid tag (tag=%d pos=%u)",
+                                   tag, (unsigned int)(s->ptr - s->buf_start));
+    }
+    bc_read_trace(s, "}\n");
+    return obj;
+}
+
+/// Line number here: 37902
+static int JS_ReadObjectAtoms(BCReaderState *s)
+{
+    uint8_t v8;
+    JSString *p;
+    int i;
+    JSAtom atom;
+
+    if (bc_get_u8(s, &v8))
+        return -1;
+    if (v8 != BC_VERSION) {
+        JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
+                            v8, BC_VERSION);
+        return -1;
+    }
+    if (bc_get_leb128(s, &s->idx_to_atom_count))
+        return -1;
+
+    bc_read_trace(s, "%d atom indexes {\n", s->idx_to_atom_count);
+
+    if (s->idx_to_atom_count != 0) {
+        s->idx_to_atom = js_mallocz(s->ctx, s->idx_to_atom_count *
+                                    sizeof(s->idx_to_atom[0]));
+        if (!s->idx_to_atom)
+            return s->error_state = -1;
+    }
+    for(i = 0; i < s->idx_to_atom_count; i++) {
+        p = JS_ReadString(s);
+        if (!p)
+            return -1;
+        atom = JS_NewAtomStr(s->ctx, p);
+        if (atom == JS_ATOM_NULL)
+            return s->error_state = -1;
+        s->idx_to_atom[i] = atom;
+        if (s->is_rom_data && (atom != (i + s->first_atom)))
+            s->is_rom_data = FALSE; /* atoms must be relocated */
+    }
+    bc_read_trace(s, "}\n");
+    return 0;
+}
+
+/* create a string containing the RegExp bytecode */
+/// Line number here: 44668
+static JSValue js_compile_regexp(JSContext *ctx, JSValueConst pattern,
+                                 JSValueConst flags)
+{
+    const char *str;
+    int re_flags, mask;
+    uint8_t *re_bytecode_buf;
+    size_t i, len;
+    int re_bytecode_len;
+    JSValue ret;
+    char error_msg[64];
+
+    re_flags = 0;
+    if (!JS_IsUndefined(flags)) {
+        str = JS_ToCStringLen(ctx, &len, flags);
+        if (!str)
+            return JS_EXCEPTION;
+        /* XXX: re_flags = LRE_FLAG_OCTAL unless strict mode? */
+        for (i = 0; i < len; i++) {
+            switch(str[i]) {
+            case 'd':
+                mask = LRE_FLAG_INDICES;
+                break;
+            case 'g':
+                mask = LRE_FLAG_GLOBAL;
+                break;
+            case 'i':
+                mask = LRE_FLAG_IGNORECASE;
+                break;
+            case 'm':
+                mask = LRE_FLAG_MULTILINE;
+                break;
+            case 's':
+                mask = LRE_FLAG_DOTALL;
+                break;
+            case 'u':
+                mask = LRE_FLAG_UNICODE;
+                break;
+            case 'v':
+                mask = LRE_FLAG_UNICODE_SETS;
+                break;
+            case 'y':
+                mask = LRE_FLAG_STICKY;
+                break;
+            default:
+                goto bad_flags;
+            }
+            if ((re_flags & mask) != 0) {
+            bad_flags:
+                JS_FreeCString(ctx, str);
+                goto bad_flags1;
+            }
+            re_flags |= mask;
+        }
+        JS_FreeCString(ctx, str);
+    }
+
+    /* 'u' and 'v' cannot be both set */
+    if ((re_flags & LRE_FLAG_UNICODE_SETS) && (re_flags & LRE_FLAG_UNICODE)) {
+    bad_flags1:
+        return JS_ThrowSyntaxError(ctx, "invalid regular expression flags");
+    }
+    
+    str = JS_ToCStringLen2(ctx, &len, pattern, !(re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)));
+    if (!str)
+        return JS_EXCEPTION;
+    re_bytecode_buf = lre_compile(&re_bytecode_len, error_msg,
+                                  sizeof(error_msg), str, len, re_flags, ctx);
+    JS_FreeCString(ctx, str);
+    if (!re_bytecode_buf) {
+        JS_ThrowSyntaxError(ctx, "%s", error_msg);
+        return JS_EXCEPTION;
+    }
+
+    ret = js_new_string8_len(ctx, (const char *)re_bytecode_buf, re_bytecode_len);
+    js_free(ctx, re_bytecode_buf);
+    return ret;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_GetFunctionBytecode(JSValue)";
+"JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)" -> "JS_ThrowError2(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *, BOOL)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_StringToBigIntErr(JSContext *, JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_StringToBigInt(JSContext *, JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_VALUE_IS_NAN(JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"js_parse_unary(JSParseState *, int)";
+"js_parse_unary(JSParseState *, int)" -> "next_token(JSParseState *)";
+"js_parse_unary(JSParseState *, int)" -> "js_parse_unary(JSParseState *, int)";
+"js_parse_unary(JSParseState *, int)" -> "emit_source_pos(JSParseState *, const uint8_t *)";
+"js_parse_unary(JSParseState *, int)" -> "emit_op(JSParseState *, uint8_t)";
+"js_parse_unary(JSParseState *, int)" -> "abort()";
+"js_parse_unary(JSParseState *, int)" -> "get_lvalue(JSParseState *, int *, int *, JSAtom *, int *, int *, BOOL, int)";
+"js_parse_unary(JSParseState *, int)" -> "put_lvalue(JSParseState *, int, int, JSAtom, int, PutLValueEnum, BOOL)";
+"js_parse_unary(JSParseState *, int)" -> "get_prev_opcode(JSFunctionDef *)";
+"js_parse_unary(JSParseState *, int)" -> "js_parse_delete(JSParseState *)";
+"js_parse_unary(JSParseState *, int)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"js_parse_unary(JSParseState *, int)" -> "js_parse_postfix_expr(JSParseState *, int)";
+"js_parse_unary(JSParseState *, int)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"bc_read_error_end(BCReaderState *)";
+"bc_read_error_end(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectRec(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ThrowStackOverflow(JSContext *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_NewBool(JSContext *, int)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_sleb128(BCReaderState *, int32_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_u64(BCReaderState *, uint64_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "__JS_NewFloat64(JSContext *, double)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadString(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadFunctionTag(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadModule(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadObjectTag(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadArray(BCReaderState *, int)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadTypedArray(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadArrayBuffer(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadSharedArrayBuffer(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadDate(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadObjectValue(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ReadBigInt(BCReaderState *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectRec(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadObjectRec(BCReaderState *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ReadObjectAtoms(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "js_mallocz(JSContext *, size_t)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ReadString(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "lre_compile(int *, char *, int, const char *, size_t, int, void *)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"js_compile_regexp(JSContext *, JSValue, JSValue)" -> "js_free(JSContext *, void *)";
+}

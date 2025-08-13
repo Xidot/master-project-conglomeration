@@ -1,0 +1,173 @@
+Target function: "bc_reader_free(BCReaderState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 37942
+static void bc_reader_free(BCReaderState *s)
+{
+    int i;
+    if (s->idx_to_atom) {
+        for(i = 0; i < s->idx_to_atom_count; i++) {
+            JS_FreeAtom(s->ctx, s->idx_to_atom[i]);
+        }
+        js_free(s->ctx, s->idx_to_atom);
+    }
+    js_free(s->ctx, s->objects);
+}
+
+/// Line number here: 3203
+void JS_FreeAtom(JSContext *ctx, JSAtom v)
+{
+    if (!__JS_AtomIsConst(v))
+        __JS_FreeAtom(ctx->rt, v);
+}
+
+/// Line number here: 1385
+void js_free(JSContext *ctx, void *ptr)
+{
+    js_free_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 37954
+JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                       int flags)
+{
+    BCReaderState ss, *s = &ss;
+    JSValue obj;
+
+    ctx->binary_object_count += 1;
+    ctx->binary_object_size += buf_len;
+
+    memset(s, 0, sizeof(*s));
+    s->ctx = ctx;
+    s->buf_start = buf;
+    s->buf_end = buf + buf_len;
+    s->ptr = buf;
+    s->allow_bytecode = ((flags & JS_READ_OBJ_BYTECODE) != 0);
+    s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
+    s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
+    s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
+    if (s->allow_bytecode)
+        s->first_atom = JS_ATOM_END;
+    else
+        s->first_atom = 1;
+    if (JS_ReadObjectAtoms(s)) {
+        obj = JS_EXCEPTION;
+    } else {
+        obj = JS_ReadObjectRec(s);
+    }
+    bc_reader_free(s);
+    return obj;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"bc_reader_free(BCReaderState *)";
+"bc_reader_free(BCReaderState *)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"bc_reader_free(BCReaderState *)" -> "js_free(JSContext *, void *)";
+"JS_FreeAtom(JSContext *, JSAtom)";
+"JS_FreeAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"JS_FreeAtom(JSContext *, JSAtom)" -> "__JS_FreeAtom(JSRuntime *, uint32_t)";
+"js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "memset(void *, int, size_t)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObjectAtoms(BCReaderState *)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObjectRec(BCReaderState *)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "bc_reader_free(BCReaderState *)";
+}

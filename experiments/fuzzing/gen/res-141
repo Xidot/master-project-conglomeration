@@ -1,0 +1,25 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicAtomics(JSContext *)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the target function `JS_AddIntrinsicAtomics`:
+
+:JS_AddIntrinsicAtomics:55525
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -55525,6 +55525,9 @@
+ void JS_AddIntrinsicAtomics(JSContext *ctx)
+ {
+     /* add Atomics as autoinit object */
++    if (ctx->global_obj == NULL) {
++        funlogline();
++    }
+     JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_atomics_obj, countof(js_atomics_obj));
+ }
+```
+
+The logical bug here is that the function doesn't check if `ctx->global_obj` is NULL before using it in `JS_SetPropertyFunctionList`. If `global_obj` is NULL, this would lead to undefined behavior when trying to set properties on it. The added check will detect this condition.

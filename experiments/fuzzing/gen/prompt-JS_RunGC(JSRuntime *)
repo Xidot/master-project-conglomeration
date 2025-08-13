@@ -1,0 +1,60 @@
+Target function: "JS_RunGC(JSRuntime *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 6226
+void JS_RunGC(JSRuntime *rt)
+{
+    JS_RunGCInternal(rt, TRUE);
+}
+
+/// Line number here: 6206
+static void JS_RunGCInternal(JSRuntime *rt, BOOL remove_weak_objects)
+{
+    if (remove_weak_objects) {
+        /* free the weakly referenced object or symbol structures, delete
+           the associated Map/Set entries and queue the finalization
+           registry callbacks. */
+        gc_remove_weak_objects(rt);
+    }
+    
+    /* decrement the reference of the children of each object. mark =
+       1 after this pass. */
+    gc_decref(rt);
+
+    /* keep the GC objects with a non zero refcount and their childs */
+    gc_scan(rt);
+
+    /* free the GC objects in a cycle */
+    gc_free_cycles(rt);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_RunGC(JSRuntime *)";
+"JS_RunGC(JSRuntime *)" -> "JS_RunGCInternal(JSRuntime *, BOOL)";
+"JS_RunGCInternal(JSRuntime *, BOOL)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_remove_weak_objects(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_decref(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_scan(JSRuntime *)";
+"JS_RunGCInternal(JSRuntime *, BOOL)" -> "gc_free_cycles(JSRuntime *)";
+}

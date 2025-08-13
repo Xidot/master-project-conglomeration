@@ -1,0 +1,256 @@
+Target function: "JS_ThrowTypeErrorNotASymbol(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 7166
+static JSValue JS_ThrowTypeErrorNotASymbol(JSContext *ctx)
+{
+    return JS_ThrowTypeError(ctx, "not a symbol");
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/* Private fields can be added even on non extensible objects or
+   Proxies */
+/// Line number here: 7714
+static int JS_DefinePrivateField(JSContext *ctx, JSValueConst obj,
+                                 JSValueConst name, JSValue val)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    JSAtom prop;
+
+    if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)) {
+        JS_ThrowTypeErrorNotAnObject(ctx);
+        goto fail;
+    }
+    /* safety check */
+    if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL)) {
+        JS_ThrowTypeErrorNotASymbol(ctx);
+        goto fail;
+    }
+    prop = js_symbol_to_atom(ctx, (JSValue)name);
+    p = JS_VALUE_GET_OBJ(obj);
+    prs = find_own_property(&pr, p, prop);
+    if (prs) {
+        JS_ThrowTypeErrorAtom(ctx, "private class field '%s' already exists",
+                              prop);
+        goto fail;
+    }
+    pr = add_property(ctx, p, prop, JS_PROP_C_W_E);
+    if (unlikely(!pr)) {
+    fail:
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    pr->u.value = val;
+    return 0;
+}
+
+/// Line number here: 7749
+static JSValue JS_GetPrivateField(JSContext *ctx, JSValueConst obj,
+                                  JSValueConst name)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    JSAtom prop;
+
+    if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+    /* safety check */
+    if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL))
+        return JS_ThrowTypeErrorNotASymbol(ctx);
+    prop = js_symbol_to_atom(ctx, (JSValue)name);
+    p = JS_VALUE_GET_OBJ(obj);
+    prs = find_own_property(&pr, p, prop);
+    if (!prs) {
+        JS_ThrowTypeErrorPrivateNotFound(ctx, prop);
+        return JS_EXCEPTION;
+    }
+    return JS_DupValue(ctx, pr->u.value);
+}
+
+/// Line number here: 7772
+static int JS_SetPrivateField(JSContext *ctx, JSValueConst obj,
+                              JSValueConst name, JSValue val)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    JSAtom prop;
+
+    if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)) {
+        JS_ThrowTypeErrorNotAnObject(ctx);
+        goto fail;
+    }
+    /* safety check */
+    if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL)) {
+        JS_ThrowTypeErrorNotASymbol(ctx);
+        goto fail;
+    }
+    prop = js_symbol_to_atom(ctx, (JSValue)name);
+    p = JS_VALUE_GET_OBJ(obj);
+    prs = find_own_property(&pr, p, prop);
+    if (!prs) {
+        JS_ThrowTypeErrorPrivateNotFound(ctx, prop);
+    fail:
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    set_value(ctx, &pr->u.value, val);
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThrowTypeErrorNotASymbol(JSContext *)";
+"JS_ThrowTypeErrorNotASymbol(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "__builtin_expect(long, long)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotASymbol(JSContext *)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "js_symbol_to_atom(JSContext *, JSValue)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "find_own_property(JSProperty **, JSObject *, JSAtom)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "__JS_ThrowTypeErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "add_property(JSContext *, JSObject *, JSAtom, int)";
+"JS_DefinePrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "__builtin_expect(long, long)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotASymbol(JSContext *)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "js_symbol_to_atom(JSContext *, JSValue)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "find_own_property(JSProperty **, JSObject *, JSAtom)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeErrorPrivateNotFound(JSContext *, JSAtom)";
+"JS_GetPrivateField(JSContext *, JSValue, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "__builtin_expect(long, long)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotASymbol(JSContext *)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "js_symbol_to_atom(JSContext *, JSValue)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "find_own_property(JSProperty **, JSObject *, JSAtom)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorPrivateNotFound(JSContext *, JSAtom)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_SetPrivateField(JSContext *, JSValue, JSValue, JSValue)" -> "set_value(JSContext *, JSValue *, JSValue)";
+}

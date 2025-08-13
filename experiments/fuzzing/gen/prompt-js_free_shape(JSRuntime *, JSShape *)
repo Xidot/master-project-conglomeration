@@ -1,0 +1,513 @@
+Target function: "js_free_shape(JSRuntime *, JSShape *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 524
+typedef void JSClassFinalizer(JSRuntime *rt, JSValue val)
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 4776
+static void js_free_shape(JSRuntime *rt, JSShape *sh)
+{
+    if (unlikely(--sh->header.ref_count <= 0)) {
+        js_free_shape0(rt, sh);
+    }
+}
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 4756
+static void js_free_shape0(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t i;
+    JSShapeProperty *pr;
+
+    assert(sh->header.ref_count == 0);
+    if (sh->is_hashed)
+        js_shape_hash_unlink(rt, sh);
+    if (sh->proto != NULL) {
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+    }
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        JS_FreeAtomRT(rt, pr->atom);
+        pr++;
+    }
+    remove_gc_object(&sh->header);
+    js_free_rt(rt, get_alloc_from_shape(sh));
+}
+
+/// Line number here: 4783
+static void js_free_shape_null(JSRuntime *rt, JSShape *sh)
+{
+    if (sh)
+        js_free_shape(rt, sh);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 5060
+static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID class_id)
+{
+    JSObject *p;
+
+    js_trigger_gc(ctx->rt, sizeof(JSObject));
+    p = js_malloc(ctx, sizeof(JSObject));
+    if (unlikely(!p))
+        goto fail;
+    p->class_id = class_id;
+    p->extensible = TRUE;
+    p->free_mark = 0;
+    p->is_exotic = 0;
+    p->fast_array = 0;
+    p->is_constructor = 0;
+    p->has_immutable_prototype = 0;
+    p->tmp_mark = 0;
+    p->is_HTMLDDA = 0;
+    p->weakref_count = 0;
+    p->u.opaque = NULL;
+    p->shape = sh;
+    p->prop = js_malloc(ctx, sizeof(JSProperty) * sh->prop_size);
+    if (unlikely(!p->prop)) {
+        js_free(ctx, p);
+    fail:
+        js_free_shape(ctx->rt, sh);
+        return JS_EXCEPTION;
+    }
+
+    switch(class_id) {
+    case JS_CLASS_OBJECT:
+        break;
+    case JS_CLASS_ARRAY:
+        {
+            JSProperty *pr;
+            p->is_exotic = 1;
+            p->fast_array = 1;
+            p->u.array.u.values = NULL;
+            p->u.array.count = 0;
+            p->u.array.u1.size = 0;
+            /* the length property is always the first one */
+            if (likely(sh == ctx->array_shape)) {
+                pr = &p->prop[0];
+            } else {
+                /* only used for the first array */
+                /* cannot fail */
+                pr = add_property(ctx, p, JS_ATOM_length,
+                                  JS_PROP_WRITABLE | JS_PROP_LENGTH);
+            }
+            pr->u.value = JS_NewInt32(ctx, 0);
+        }
+        break;
+    case JS_CLASS_C_FUNCTION:
+        p->prop[0].u.value = JS_UNDEFINED;
+        break;
+    case JS_CLASS_ARGUMENTS:
+    case JS_CLASS_UINT8C_ARRAY:
+    case JS_CLASS_INT8_ARRAY:
+    case JS_CLASS_UINT8_ARRAY:
+    case JS_CLASS_INT16_ARRAY:
+    case JS_CLASS_UINT16_ARRAY:
+    case JS_CLASS_INT32_ARRAY:
+    case JS_CLASS_UINT32_ARRAY:
+    case JS_CLASS_BIG_INT64_ARRAY:
+    case JS_CLASS_BIG_UINT64_ARRAY:
+    case JS_CLASS_FLOAT16_ARRAY:
+    case JS_CLASS_FLOAT32_ARRAY:
+    case JS_CLASS_FLOAT64_ARRAY:
+        p->is_exotic = 1;
+        p->fast_array = 1;
+        p->u.array.u.ptr = NULL;
+        p->u.array.count = 0;
+        break;
+    case JS_CLASS_DATAVIEW:
+        p->u.array.u.ptr = NULL;
+        p->u.array.count = 0;
+        break;
+    case JS_CLASS_NUMBER:
+    case JS_CLASS_STRING:
+    case JS_CLASS_BOOLEAN:
+    case JS_CLASS_SYMBOL:
+    case JS_CLASS_DATE:
+    case JS_CLASS_BIG_INT:
+        p->u.object_data = JS_UNDEFINED;
+        goto set_exotic;
+    case JS_CLASS_REGEXP:
+        p->u.regexp.pattern = NULL;
+        p->u.regexp.bytecode = NULL;
+        goto set_exotic;
+    default:
+    set_exotic:
+        if (ctx->rt->class_array[class_id].exotic) {
+            p->is_exotic = 1;
+        }
+        break;
+    }
+    p->header.ref_count = 1;
+    add_gc_object(ctx->rt, &p->header, JS_GC_OBJ_TYPE_JS_OBJECT);
+    return JS_MKPTR(JS_TAG_OBJECT, p);
+}
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 5735
+static void free_object(JSRuntime *rt, JSObject *p)
+{
+    int i;
+    JSClassFinalizer *finalizer;
+    JSShape *sh;
+    JSShapeProperty *pr;
+
+    p->free_mark = 1; /* used to tell the object is invalid when
+                         freeing cycles */
+    /* free all the fields */
+    sh = p->shape;
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        free_property(rt, &p->prop[i], pr->flags);
+        pr++;
+    }
+    js_free_rt(rt, p->prop);
+    /* as an optimization we destroy the shape immediately without
+       putting it in gc_zero_ref_count_list */
+    js_free_shape(rt, sh);
+
+    /* fail safe */
+    p->shape = NULL;
+    p->prop = NULL;
+
+    finalizer = rt->class_array[p->class_id].finalizer;
+    if (finalizer)
+        (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+
+    /* fail safe */
+    p->class_id = 0;
+    p->u.opaque = NULL;
+    p->u.func.var_refs = NULL;
+    p->u.func.home_object = NULL;
+
+    remove_gc_object(&p->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES) {
+        if (p->header.ref_count == 0 && p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            /* keep the object structure because there are may be
+               references to it */
+            list_add_tail(&p->header.link, &rt->gc_zero_ref_count_list);
+        }
+    } else {
+        /* keep the object structure in case there are weak references to it */
+        if (p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            p->header.mark = 0; /* reset the mark so that the weakref can be freed */
+        }
+    }
+}
+
+/* Note: the property value is not initialized. Return NULL if memory
+   error. */
+/// Line number here: 8504
+static JSProperty *add_property(JSContext *ctx,
+                                JSObject *p, JSAtom prop, int prop_flags)
+{
+    JSShape *sh, *new_sh;
+
+    sh = p->shape;
+    if (sh->is_hashed) {
+        /* try to find an existing shape */
+        new_sh = find_hashed_shape_prop(ctx->rt, sh, prop, prop_flags);
+        if (new_sh) {
+            /* matching shape found: use it */
+            /*  the property array may need to be resized */
+            if (new_sh->prop_size != sh->prop_size) {
+                JSProperty *new_prop;
+                new_prop = js_realloc(ctx, p->prop, sizeof(p->prop[0]) *
+                                      new_sh->prop_size);
+                if (!new_prop)
+                    return NULL;
+                p->prop = new_prop;
+            }
+            p->shape = js_dup_shape(new_sh);
+            js_free_shape(ctx->rt, sh);
+            return &p->prop[new_sh->prop_count - 1];
+        } else if (sh->header.ref_count != 1) {
+            /* if the shape is shared, clone it */
+            new_sh = js_clone_shape(ctx, sh);
+            if (!new_sh)
+                return NULL;
+            /* hash the cloned shape */
+            new_sh->is_hashed = TRUE;
+            js_shape_hash_link(ctx->rt, new_sh);
+            js_free_shape(ctx->rt, p->shape);
+            p->shape = new_sh;
+        }
+    }
+    assert(p->shape->header.ref_count == 1);
+    if (add_shape_property(ctx, &p->shape, p, prop, prop_flags))
+        return NULL;
+    return &p->prop[p->shape->prop_count - 1];
+}
+
+/* ensure that the shape can be safely modified */
+/// Line number here: 9479
+static int js_shape_prepare_update(JSContext *ctx, JSObject *p,
+                                   JSShapeProperty **pprs)
+{
+    JSShape *sh;
+    uint32_t idx = 0;    /* prevent warning */
+
+    sh = p->shape;
+    if (sh->is_hashed) {
+        if (sh->header.ref_count != 1) {
+            if (pprs)
+                idx = *pprs - get_shape_prop(sh);
+            /* clone the shape (the resulting one is no longer hashed) */
+            sh = js_clone_shape(ctx, sh);
+            if (!sh)
+                return -1;
+            js_free_shape(ctx->rt, p->shape);
+            p->shape = sh;
+            if (pprs)
+                *pprs = get_shape_prop(sh) + idx;
+        } else {
+            js_shape_hash_unlink(ctx->rt, sh);
+            sh->is_hashed = FALSE;
+        }
+    }
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_free_shape(JSRuntime *, JSShape *)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "__builtin_expect(long, long)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "js_free_shape0(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_shape_prop(JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_alloc_from_shape(JSShape *)";
+"js_free_shape_null(JSRuntime *, JSShape *)";
+"js_free_shape_null(JSRuntime *, JSShape *)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "js_trigger_gc(JSRuntime *, size_t)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "js_malloc(JSContext *, size_t)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "__builtin_expect(long, long)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "js_free(JSContext *, void *)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "add_property(JSContext *, JSObject *, JSAtom, int)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"free_object(JSRuntime *, JSObject *)";
+"free_object(JSRuntime *, JSObject *)" -> "get_shape_prop(JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "free_property(JSRuntime *, JSProperty *, int)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_rt(JSRuntime *, void *)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"free_object(JSRuntime *, JSObject *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "find_hashed_shape_prop(JSRuntime *, JSShape *, JSAtom, int)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "js_realloc(JSContext *, void *, size_t)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "js_dup_shape(JSShape *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "js_clone_shape(JSContext *, JSShape *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "js_shape_hash_link(JSRuntime *, JSShape *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"add_property(JSContext *, JSObject *, JSAtom, int)" -> "add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "get_shape_prop(JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_clone_shape(JSContext *, JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+}

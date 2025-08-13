@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_std_promise_rejection_check(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_std_promise_rejection_check:4213
+
+---
+
+The logical bug is in `js_std_promise_rejection_check()` where it immediately exits the program when it finds any unhandled promise rejections. This is too aggressive - it should only exit if the rejection remains unhandled after giving the program a chance to handle it (like in the next event loop iteration).
+
+Here's the diff to instrument this:
+
+```diff
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4219,6 +4219,7 @@
+             JSRejectedPromiseEntry *rp = list_entry(el, JSRejectedPromiseEntry, link);
+             fprintf(stderr, "Possibly unhandled promise rejection: ");
+             js_std_dump_error1(ctx, rp->reason);
+         }
++        funlogline();
+         exit(1);
+     }
+ }
+```
+
+The instrumentation calls `funlogline()` right before the premature exit. A better approach would be to track if rejections persist across event loop iterations before exiting.

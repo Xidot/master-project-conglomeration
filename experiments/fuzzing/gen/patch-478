@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15195,6 +15195,8 @@
+     JSValue op1, op2;
+     int ret;
+ 
++    if (JS_VALUE_GET_TAG(sp[-2]) != JS_TAG_OBJECT)
++        funlogline();
+     op1 = sp[-2]; /* object */
+     op2 = sp[-1]; /* field name or method function */
+ 
+@@ -15205,6 +15207,8 @@
+     if (JS_IsObject(op2)) {
+         /* method: use the brand */
+         ret = JS_CheckBrand(ctx, op1, op2);
++        if (ret < 0 && !JS_IsException(op1) && !JS_IsException(op2))
++            funlogline();
+         if (ret < 0)
+             return -1;
+     } else {
+@@ -15212,6 +15216,8 @@
+         JSObject *p;
+         JSShapeProperty *prs;
+         JSProperty *pr;
++        if (JS_VALUE_GET_TAG(op2) == JS_TAG_OBJECT)
++            funlogline();
+         /* field */
+         atom = JS_ValueToAtom(ctx, op2);
+         if (unlikely(atom == JS_ATOM_NULL))
+@@ -15218,6 +15224,8 @@
+             return -1;
+         p = JS_VALUE_GET_OBJ(op1);
+         prs = find_own_property(&pr, p, atom);
++        if (prs == NULL && JS_HasProperty(ctx, op1, atom) < 0)
++            funlogline();
+         JS_FreeAtom(ctx, atom);
+         ret = (prs != NULL);
+     }

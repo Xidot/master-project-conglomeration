@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5212,6 +5212,9 @@
+         case JS_CLASS_DATE:
+         case JS_CLASS_BIG_INT:
+             JS_FreeValue(ctx, p->u.object_data);
++            if (p->class_id == JS_CLASS_STRING && JS_VALUE_GET_TAG(val) != JS_TAG_STRING) {
++                funlogline();
++            }
+             p->u.object_data = val; /* for JS_CLASS_STRING, 'val' must
+                                        be JS_TAG_STRING (and not a
+                                        rope) */
+@@ -5219,6 +5222,9 @@
+         }
+     }
+     JS_FreeValue(ctx, val);
++    if (JS_IsException(obj)) {
++        funlogline();
++    }
+     if (!JS_IsException(obj))
+         JS_ThrowTypeError(ctx, "invalid object type");
+     return -1;

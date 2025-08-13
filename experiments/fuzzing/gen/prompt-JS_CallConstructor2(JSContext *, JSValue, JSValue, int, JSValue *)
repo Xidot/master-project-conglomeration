@@ -1,0 +1,380 @@
+Target function: "JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 528
+typedef JSValue JSClassCall(JSContext *ctx, JSValueConst func_obj,
+                            JSValueConst this_val, int argc, JSValueConst *argv,
+                            int flags)
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 19518
+JSValue JS_CallConstructor2(JSContext *ctx, JSValueConst func_obj,
+                            JSValueConst new_target,
+                            int argc, JSValueConst *argv)
+{
+    return JS_CallConstructorInternal(ctx, func_obj, new_target,
+                                      argc, (JSValue *)argv,
+                                      JS_CALL_FLAG_COPY_ARGV);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
+/// Line number here: 19470
+static JSValue JS_CallConstructorInternal(JSContext *ctx,
+                                          JSValueConst func_obj,
+                                          JSValueConst new_target,
+                                          int argc, JSValue *argv, int flags)
+{
+    JSObject *p;
+    JSFunctionBytecode *b;
+
+    if (js_poll_interrupts(ctx))
+        return JS_EXCEPTION;
+    flags |= JS_CALL_FLAG_CONSTRUCTOR;
+    if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT))
+        goto not_a_function;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    if (unlikely(!p->is_constructor))
+        return JS_ThrowTypeError(ctx, "not a constructor");
+    if (unlikely(p->class_id != JS_CLASS_BYTECODE_FUNCTION)) {
+        JSClassCall *call_func;
+        call_func = ctx->rt->class_array[p->class_id].call;
+        if (!call_func) {
+        not_a_function:
+            return JS_ThrowTypeError(ctx, "not a function");
+        }
+        return call_func(ctx, func_obj, new_target, argc,
+                         (JSValueConst *)argv, flags);
+    }
+
+    b = p->u.func.function_bytecode;
+    if (b->is_derived_class_constructor) {
+        return JS_CallInternal(ctx, func_obj, JS_UNDEFINED, new_target, argc, argv, flags);
+    } else {
+        JSValue obj, ret;
+        /* legacy constructor behavior */
+        obj = js_create_from_ctor(ctx, new_target, JS_CLASS_OBJECT);
+        if (JS_IsException(obj))
+            return JS_EXCEPTION;
+        ret = JS_CallInternal(ctx, func_obj, obj, new_target, argc, argv, flags);
+        if (JS_VALUE_GET_TAG(ret) == JS_TAG_OBJECT ||
+            JS_IsException(ret)) {
+            JS_FreeValue(ctx, obj);
+            return ret;
+        } else {
+            JS_FreeValue(ctx, ret);
+            return obj;
+        }
+    }
+}
+
+/* magic value: 0 = normal apply, 1 = apply for constructor, 2 =
+   Reflect.apply */
+/// Line number here: 39710
+static JSValue js_function_apply(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic)
+{
+    JSValueConst this_arg, array_arg;
+    uint32_t len;
+    JSValue *tab, ret;
+
+    if (check_function(ctx, this_val))
+        return JS_EXCEPTION;
+    this_arg = argv[0];
+    array_arg = argv[1];
+    if ((JS_VALUE_GET_TAG(array_arg) == JS_TAG_UNDEFINED ||
+         JS_VALUE_GET_TAG(array_arg) == JS_TAG_NULL) && magic != 2) {
+        return JS_Call(ctx, this_val, this_arg, 0, NULL);
+    }
+    tab = build_arg_list(ctx, &len, array_arg);
+    if (!tab)
+        return JS_EXCEPTION;
+    if (magic & 1) {
+        ret = JS_CallConstructor2(ctx, this_val, this_arg, len, (JSValueConst *)tab);
+    } else {
+        ret = JS_Call(ctx, this_val, this_arg, len, (JSValueConst *)tab);
+    }
+    free_arg_list(ctx, tab, len);
+    return ret;
+}
+
+/// Line number here: 46977
+static JSValue js_reflect_construct(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    JSValueConst func, array_arg, new_target;
+    JSValue *tab, ret;
+    uint32_t len;
+
+    func = argv[0];
+    array_arg = argv[1];
+    if (argc > 2) {
+        new_target = argv[2];
+        if (!JS_IsConstructor(ctx, new_target))
+            return JS_ThrowTypeError(ctx, "not a constructor");
+    } else {
+        new_target = func;
+    }
+    tab = build_arg_list(ctx, &len, array_arg);
+    if (!tab)
+        return JS_EXCEPTION;
+    ret = JS_CallConstructor2(ctx, func, new_target, len, (JSValueConst *)tab);
+    free_arg_list(ctx, tab, len);
+    return ret;
+}
+
+/// Line number here: 684
+typedef struct JSProxyData {
+    JSValue target;
+    JSValue handler;
+    uint8_t is_func;
+    uint8_t is_revoked;
+} JSProxyData
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 47896
+static JSValue js_proxy_call_constructor(JSContext *ctx, JSValueConst func_obj,
+                                         JSValueConst new_target,
+                                         int argc, JSValueConst *argv)
+{
+    JSProxyData *s;
+    JSValue method, arg_array, ret;
+    JSValueConst args[3];
+
+    s = get_proxy_method(ctx, &method, func_obj, JS_ATOM_construct);
+    if (!s)
+        return JS_EXCEPTION;
+    if (!JS_IsConstructor(ctx, s->target))
+        return JS_ThrowTypeError(ctx, "not a constructor");
+    if (JS_IsUndefined(method))
+        return JS_CallConstructor2(ctx, s->target, new_target, argc, argv);
+    arg_array = js_create_array(ctx, argc, argv);
+    if (JS_IsException(arg_array)) {
+        ret = JS_EXCEPTION;
+        goto fail;
+    }
+    args[0] = s->target;
+    args[1] = arg_array;
+    args[2] = new_target;
+    ret = JS_Call(ctx, method, s->handler, 3, args);
+    if (!JS_IsException(ret) && JS_VALUE_GET_TAG(ret) != JS_TAG_OBJECT) {
+        JS_FreeValue(ctx, ret);
+        ret = JS_ThrowTypeErrorNotAnObject(ctx);
+    }
+ fail:
+    JS_FreeValue(ctx, method);
+    JS_FreeValue(ctx, arg_array);
+    return ret;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_poll_interrupts(JSContext *)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "__builtin_expect(long, long)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_CallConstructorInternal::call_func";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_CallInternal(JSContext *, JSValue, JSValue, JSValue, int, JSValue *, int)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_create_from_ctor(JSContext *, JSValue, int)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"JS_CallConstructorInternal(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)" -> "check_function(JSContext *, JSValue)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)" -> "build_arg_list(JSContext *, uint32_t *, JSValue)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)" -> "JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_function_apply(JSContext *, JSValue, int, JSValue *, int)" -> "free_arg_list(JSContext *, JSValue *, uint32_t)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)" -> "JS_IsConstructor(JSContext *, JSValue)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)" -> "build_arg_list(JSContext *, uint32_t *, JSValue)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_reflect_construct(JSContext *, JSValue, int, JSValue *)" -> "free_arg_list(JSContext *, JSValue *, uint32_t)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "get_proxy_method(JSContext *, JSValue *, JSValue, JSAtom)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_IsConstructor(JSContext *, JSValue)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "js_create_array(JSContext *, int, JSValue *)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_proxy_call_constructor(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+}

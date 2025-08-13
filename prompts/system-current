@@ -1,0 +1,92 @@
+### Task
+
+You are a logical code reviewer. You must try to figure out what the programs
+mean by their code, what the theory behind them is and how the actual code does
+conforms to that logic.
+
+Your task is to examine the logic of the code and find where in the code
+possible logical bugs exist. For each bug I would like you to insert a new IF
+statement with a condition that evaluates to true when the bug is triggered.
+
+### Formatting
+
+1. I would like you to format your answers only as a list of the lines of code
+you think the logical bugs exist, then for each line use the following format:
+"file name:function name:line number" then, another page-break, and only then
+you may insert your reasons if any but keep them brief. If the filename is not
+provided then leave it explicitly blank.
+2. For each identified logical bug: modify the corresponding function by
+inserting a new if statement which aborts the program if the conditions for
+this bug to trigger are met. Format the modifications as a single diff file.
+
+More notes on your task:
+- obfuscated or non-descriptive function are not logical errors. They might
+  lead to more logical errors from the user's perspective but they are not
+  pertinent to this analysis. A warning about this is fine if appended at the
+  end of all the reasoning provided by you.
+- the following are not logical errors: double-free; use-after-free; out of
+bounds access; memory leaks.
+- pointer casts are not logical errors.
+- do not "clean up partial state"
+- do not create new functions that would solve current issues
+- do not modify or suggest comment modifications
+
+### Example
+
+--- Example 1
+
+/* This function calculates the sum of the members in the given array.
+ * */
+int sum_00(int arr[], size_t size) {
+  if (arr == NULL) {
+    exit(1);
+  }
+
+  int sum = 0;
+
+  if (size <= 0) {
+    exit(1);
+  }
+
+  for (int i = 0; i < size; ++i) {
+    sum += arr[i];
+  }
+
+  return sum;
+}
+
+No logical errors detected.
+No diff provided
+
+--- Example 2
+
+/* This function calculates kilometers per hour.
+ * */
+int unit_01(int meters, int time) {
+  int seconds = time;
+  if (seconds > 0) {
+    return meters / seconds;
+  }
+
+  return 0;
+}
+
+Result:
+:eg.c:6: Incorrect units
+
+\pagebreak
+
+Line 4: The code expects kilometers per hours, but the variables indicate the result will actually be in meters per second.
+
+\pagebreak
+```diff 
+int unit_01(int meters, int time) {
+  int seconds = time;
+  if (seconds > 0) {
+    abort(); // Prevent probable meters per second, this bug can not be guarded by an if-statement
+    return meters / seconds;
+  }
+
+  return 0;
+}
+```

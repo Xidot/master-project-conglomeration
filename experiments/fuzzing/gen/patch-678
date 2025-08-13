@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36586,6 +36586,8 @@
+         for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count; i++, pr++) {
+             atom = pr->atom;
+             if (atom != JS_ATOM_NULL &&
++                i < p->prop_count &&
++                p->prop[i].u.value.tag != JS_TAG_UNINITIALIZED &&
+                 JS_AtomIsString(s->ctx, atom) &&
+                 (pr->flags & JS_PROP_ENUMERABLE)) {
+                 if (pr->flags & JS_PROP_TMASK) {
+@@ -36593,6 +36595,7 @@
+                     goto fail;
+                 }
+                 if (pass == 0) {
++                    if (i >= p->prop_count) funlogline();
+                     prop_count++;
+                 } else {
+                     bc_put_atom(s, atom);

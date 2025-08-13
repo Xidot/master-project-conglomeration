@@ -1,0 +1,182 @@
+Target function: "mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 55
+typedef int32_t slimb_t
+
+/// Line number here: 185
+static no_inline limb_t mp_div1norm(limb_t *tabr, const limb_t *taba, limb_t n,
+                                    limb_t b, limb_t r, limb_t b_inv, int shift)
+{
+    slimb_t i;
+
+    if (shift != 0) {
+        r = (r << shift) | mp_shl(tabr, taba, n, shift, 0);
+    }
+    for(i = n - 1; i >= 0; i--) {
+        tabr[i] = udiv1norm(&r, r, taba[i], b, b_inv);
+    }
+    r >>= shift;
+    return r;
+}
+
+/// Line number here: 66
+typedef intptr_t mp_size_t
+
+/* r = (a << shift) + low. 1 <= shift <= LIMB_BITS - 1, 0 <= low <
+   2^shift. */
+/// Line number here: 169
+static limb_t mp_shl(limb_t *tab_r, const limb_t *tab, mp_size_t n, 
+              int shift, limb_t low)
+{
+    mp_size_t i;
+    limb_t l, a;
+
+    assert(shift >= 1 && shift < LIMB_BITS);
+    l = low;
+    for(i = 0; i < n; i++) {
+        a = tab[i];
+        tab_r[i] = (a << shift) | l;
+        l = (a >> (LIMB_BITS - shift)); 
+    }
+    return l;
+}
+
+/// Line number here: 57
+typedef uint64_t dlimb_t
+
+/* return the quotient and the remainder in '*pr'of 'a1*2^LIMB_BITS+a0
+   / d' with 0 <= a1 < d. */
+/// Line number here: 116
+static inline limb_t udiv1norm(limb_t *pr, limb_t a1, limb_t a0,
+                                limb_t d, limb_t d_inv)
+{
+    limb_t n1m, n_adj, q, r, ah;
+    dlimb_t a;
+    n1m = ((slimb_t)a0 >> (LIMB_BITS - 1));
+    n_adj = a0 + (n1m & d);
+    a = (dlimb_t)d_inv * (a1 - n1m) + n_adj;
+    q = (a >> LIMB_BITS) + a1;
+    /* compute a - q * r and update q so that the remainder is between
+       0 and d - 1 */
+    a = ((dlimb_t)a1 << LIMB_BITS) | a0;
+    a = a - (dlimb_t)q * d - d;
+    ah = a >> LIMB_BITS;
+    q += 1 + ah;
+    r = (limb_t)a + (ah & d);
+    *pr = r;
+    return q;
+}
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* return (a, e_offset) such that a = a * (radix1*2^radix_shift)^f *
+   2^-e_offset. 'f' can be negative. */
+/// Line number here: 892
+static int mul_pow(mpb_t *a, int radix1, int radix_shift, int f, BOOL is_int, int e)
+{
+    int e_offset, d, n, n0;
+
+    e_offset = -f * radix_shift;
+    if (radix1 != 1) {
+        d = digits_per_limb_table[radix1 - 2];
+        if (f >= 0) {
+            limb_t h, b;
+            
+            b = 0;
+            n0 = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui(radix1, n);
+                    n0 = n;
+                }
+                h = mp_mul1(a->tab, a->tab, a->len, b, 0);
+                if (h != 0) {
+                    a->tab[a->len++] = h;
+                }
+                f -= n;
+            }
+        } else {
+            int extra_bits, l, shift;
+            limb_t r, rem, b, b_inv;
+            
+            f = -f;
+            l = (f + d - 1) / d; /* high bound for the number of limbs (XXX: make it better) */
+            e_offset += l * LIMB_BITS;
+            if (!is_int) {
+                /* at least 'e' bits are needed in the final result for rounding */
+                extra_bits = max_int(e - mpb_floor_log2(a), 0);
+            } else {
+                /* at least two extra bits are needed in the final result
+                   for rounding */
+                extra_bits = max_int(2 + e - e_offset, 0);
+            }
+            e_offset += extra_bits;
+            mpb_shr_round(a, -(l * LIMB_BITS + extra_bits), JS_RNDZ);
+            
+            b = 0;
+            b_inv = 0;
+            shift = 0;
+            n0 = 0;
+            rem = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui_inv(&b_inv, &shift, radix1, n);
+                    n0 = n;
+                }
+                r = mp_div1norm(a->tab, a->tab, a->len, b, 0, b_inv, shift);
+                rem |= r;
+                mpb_renorm(a);
+                f -= n;
+            }
+            /* if the remainder is non zero, use it for rounding */
+            a->tab[0] |= (rem != 0);
+        }
+    }
+    return e_offset;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)" -> "mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)" -> "udiv1norm(limb_t *, limb_t, limb_t, limb_t, limb_t)";
+"mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "min_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui(uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_mul1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "max_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_floor_log2(mpb_t *)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_renorm(mpb_t *)";
+}

@@ -1,0 +1,150 @@
+Target function: "dbuf_realloc(DynBuf *, size_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* return < 0 if error */
+/// Line number here: 103
+int dbuf_realloc(DynBuf *s, size_t new_size)
+{
+    size_t size;
+    uint8_t *new_buf;
+    if (new_size > s->allocated_size) {
+        if (s->error)
+            return -1;
+        size = s->allocated_size * 3 / 2;
+        if (size > new_size)
+            new_size = size;
+        new_buf = s->realloc_func(s->opaque, s->buf, new_size);
+        if (!new_buf) {
+            s->error = TRUE;
+            return -1;
+        }
+        s->buf = new_buf;
+        s->allocated_size = new_size;
+    }
+    return 0;
+}
+
+/// Line number here: 124
+int dbuf_write(DynBuf *s, size_t offset, const uint8_t *data, size_t len)
+{
+    size_t end;
+    end = offset + len;
+    if (dbuf_realloc(s, end))
+        return -1;
+    memcpy(s->buf + offset, data, len);
+    if (end > s->size)
+        s->size = end;
+    return 0;
+}
+
+/// Line number here: 136
+int dbuf_put(DynBuf *s, const uint8_t *data, size_t len)
+{
+    if (unlikely((s->size + len) > s->allocated_size)) {
+        if (dbuf_realloc(s, s->size + len))
+            return -1;
+    }
+    memcpy_no_ub(s->buf + s->size, data, len);
+    s->size += len;
+    return 0;
+}
+
+/// Line number here: 147
+int dbuf_put_self(DynBuf *s, size_t offset, size_t len)
+{
+    if (unlikely((s->size + len) > s->allocated_size)) {
+        if (dbuf_realloc(s, s->size + len))
+            return -1;
+    }
+    memcpy(s->buf + s->size, s->buf + offset, len);
+    s->size += len;
+    return 0;
+}
+
+/// Line number here: 168
+int __attribute__((format(printf, 2, 3))) dbuf_printf(DynBuf *s,
+                                                      const char *fmt, ...)
+{
+    va_list ap;
+    char buf[128];
+    int len;
+
+    va_start(ap, fmt);
+    len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (len < 0)
+        return -1;
+    if (len < sizeof(buf)) {
+        /* fast case */
+        return dbuf_put(s, (uint8_t *)buf, len);
+    } else {
+        if (dbuf_realloc(s, s->size + len + 1))
+            return -1;
+        va_start(ap, fmt);
+        vsnprintf((char *)(s->buf + s->size), s->allocated_size - s->size,
+                  fmt, ap);
+        va_end(ap);
+        s->size += len;
+    }
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"dbuf_realloc(DynBuf *, size_t)";
+"dbuf_realloc(DynBuf *, size_t)" -> "DynBuf::realloc_func";
+"dbuf_write(DynBuf *, size_t, const uint8_t *, size_t)";
+"dbuf_write(DynBuf *, size_t, const uint8_t *, size_t)" -> "dbuf_realloc(DynBuf *, size_t)";
+"dbuf_write(DynBuf *, size_t, const uint8_t *, size_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "__builtin_expect(long, long)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "dbuf_realloc(DynBuf *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "memcpy_no_ub(void *, const void *, size_t)";
+"dbuf_put_self(DynBuf *, size_t, size_t)";
+"dbuf_put_self(DynBuf *, size_t, size_t)" -> "__builtin_expect(long, long)";
+"dbuf_put_self(DynBuf *, size_t, size_t)" -> "dbuf_realloc(DynBuf *, size_t)";
+"dbuf_put_self(DynBuf *, size_t, size_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"dbuf_printf(DynBuf *, const char *, ...)";
+"dbuf_printf(DynBuf *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"dbuf_printf(DynBuf *, const char *, ...)" -> "vsnprintf(char *restrict, size_t, const char *restrict, struct __va_list_tag *)";
+"dbuf_printf(DynBuf *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"dbuf_printf(DynBuf *, const char *, ...)" -> "dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_printf(DynBuf *, const char *, ...)" -> "dbuf_realloc(DynBuf *, size_t)";
+}

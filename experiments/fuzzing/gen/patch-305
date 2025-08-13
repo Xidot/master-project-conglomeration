@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2902,6 +2902,9 @@
+ {
+     JSAtomStruct *p;
+ 
++    if (rt->atom_array[i] == NULL) {
++        funlogline();
++    }
+     p = rt->atom_array[i];
+     if (--p->header.ref_count > 0)
+         return;
+     JS_FreeAtomStruct(rt, p);
+@@ -2853,6 +2856,9 @@
+     uint32_t i = p->hash_next;  /* atom_index */
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p0, *p1;
+         uint32_t h0;
++        if (i >= rt->atom_size) {
++            funlogline();
++        }
+ 
+         h0 = p->hash & (rt->atom_hash_size - 1);
+         i = rt->atom_hash[h0];

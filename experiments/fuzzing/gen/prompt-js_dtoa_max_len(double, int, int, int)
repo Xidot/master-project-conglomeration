@@ -1,0 +1,126 @@
+Target function: "js_dtoa_max_len(double, int, int, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* return a maximum bound of the string length. The bound depends on
+   'd' only if format = JS_DTOA_FORMAT_FRAC or if JS_DTOA_EXP_DISABLED
+   is enabled. */
+/// Line number here: 1033
+int js_dtoa_max_len(double d, int radix, int n_digits, int flags)
+{
+    int fmt = flags & JS_DTOA_FORMAT_MASK;
+    int n, e;
+    uint64_t a;
+
+    if (fmt != JS_DTOA_FORMAT_FRAC) {
+        if (fmt == JS_DTOA_FORMAT_FREE) {
+            n = dtoa_max_digits_table[radix - 2];
+        } else {
+            n = n_digits;
+        }
+        if ((flags & JS_DTOA_EXP_MASK) == JS_DTOA_EXP_DISABLED) {
+            /* no exponential */
+            a = float64_as_uint64(d);
+            e = (a >> 52) & 0x7ff;
+            if (e == 0x7ff) {
+                /* NaN, Infinity */
+                n = 0;
+            } else {
+                e -= 1023;
+                /* XXX: adjust */
+                n += 10 + abs(mul_log2_radix(e - 1, radix));
+            }
+        } else {
+            /* extra: sign, 1 dot and exponent "e-1000" */
+            n += 1 + 1 + 6;
+        }
+    } else {
+        a = float64_as_uint64(d);
+        e = (a >> 52) & 0x7ff;
+        if (e == 0x7ff) {
+            /* NaN, Infinity */
+            n = 0;
+        } else {
+            /* high bound for the integer part */
+            e -= 1023;
+            /* x < 2^(e + 1) */
+            if (e < 0) {
+                n = 1;
+            } else {
+                n = 2 + mul_log2_radix(e - 1, radix);
+            }
+            /* sign, extra digit, 1 dot */
+            n += 1 + 1 + 1 + n_digits;
+        }
+    }
+    return max_int(n, 9); /* also include NaN and [-]Infinity */
+}
+
+/* return floor(a / log2(radix)) for -2048 <= a <= 2047 */
+/// Line number here: 473
+static int mul_log2_radix(int a, int radix)
+{
+    int radix_bits, mult;
+
+    if ((radix & (radix - 1)) == 0) {
+        /* if the radix is a power of two better to do it exactly */
+        radix_bits = 31 - clz32(radix);
+        if (a < 0)
+            a -= radix_bits - 1;
+        return a / radix_bits;
+    } else {
+        mult = mul_log2_radix_table[radix - 2];
+        return ((int64_t)a * mult) >> MUL_LOG2_RADIX_BASE_LOG2;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 346
+static inline uint64_t float64_as_uint64(double d)
+{
+    union {
+        double d;
+        uint64_t u64;
+    } u;
+    u.d = d;
+    return u.u64;
+}
+
+/// Line number here: 79
+static inline int max_int(int a, int b)
+{
+    if (a > b)
+        return a;
+    else
+        return b;
+}
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 979
+extern int abs (int __x) __THROW __attribute__ ((__const__))
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_dtoa_max_len(double, int, int, int)";
+"js_dtoa_max_len(double, int, int, int)" -> "float64_as_uint64(double)";
+"js_dtoa_max_len(double, int, int, int)" -> "abs(int)";
+"js_dtoa_max_len(double, int, int, int)" -> "mul_log2_radix(int, int)";
+"js_dtoa_max_len(double, int, int, int)" -> "max_int(int, int)";
+"mul_log2_radix(int, int)";
+"mul_log2_radix(int, int)" -> "clz32(unsigned int)";
+}

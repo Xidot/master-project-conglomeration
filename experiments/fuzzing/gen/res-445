@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewObjectProto(JSContext *, JSValue)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `JS_NewObjectProto` function for logical bugs. Here are the potential issues:
+
+:JS_NewObjectProto:5239
+:JS_NewObjectProtoClass:5169
+:js_closure:16359
+:js_op_define_class:16416
+:JS_CallInternal:16731
+:JS_GetImportMeta:29523
+:js_dynamic_import:29702
+:js_parse_with_clause:30223
+:js_object_create:38511
+:js_regexp_exec:46251
+:JS_AddIntrinsicRegExp:46251
+:js_object_groupBy:48819
+:JS_AddIntrinsicMapSet:49195
+:JS_AddIntrinsicPromise:50529
+:JS_AddIntrinsicBasicObjects:52260
+:JS_AddIntrinsicBaseObjects:52316
+:JS_AddIntrinsicTypedArrays:55533
+
+----- Page Break -----
+
+The main logical bug appears in `JS_NewObjectProtoClass` (called by `JS_NewObjectProto`). The issue is that it doesn't properly validate the `proto_val` parameter before using it, which could lead to problems if an invalid prototype value is passed.
+
+Here's the diff to add validation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5166,6 +5166,11 @@
+ {
+     JSShape *sh;
+     JSObject *proto;
++    
++    if (!JS_IsObject(proto_val) && !JS_IsNull(proto_val)) {
++        JS_ThrowTypeError(ctx, "prototype must be an object or null");
++        return JS_EXCEPTION;
++    }
+ 
+     proto = get_proto_obj(proto_val);
+     sh = find_hashed_shape_proto(ctx->rt, proto);
+```
+
+This change adds proper validation of the prototype parameter before proceeding with object creation. The bug could manifest when:
+1. An invalid prototype value (neither object nor null) is passed
+2. The function would proceed with undefined behavior instead of failing cleanly
+
+The fix ensures proper error handling while maintaining the documented behavior that "proto must be an object or JS_NULL" as mentioned in the comment above the function.

@@ -1,0 +1,59 @@
+Target function: "dbuf_put_u16(DynBuf *, uint16_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+/// Line number here: 272
+static inline int dbuf_put_u16(DynBuf *s, uint16_t val)
+{
+    return dbuf_put(s, (uint8_t *)&val, 2);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/// Line number here: 136
+int dbuf_put(DynBuf *s, const uint8_t *data, size_t len)
+{
+    if (unlikely((s->size + len) > s->allocated_size)) {
+        if (dbuf_realloc(s, s->size + len))
+            return -1;
+    }
+    memcpy_no_ub(s->buf + s->size, data, len);
+    s->size += len;
+    return 0;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"dbuf_put_u16(DynBuf *, uint16_t)";
+"dbuf_put_u16(DynBuf *, uint16_t)" -> "dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "__builtin_expect(long, long)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "dbuf_realloc(DynBuf *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "memcpy_no_ub(void *, const void *, size_t)";
+}

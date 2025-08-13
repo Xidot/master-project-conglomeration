@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewPromiseCapability(JSContext *, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_NewPromiseCapability` and related functions:
+
+:quickjs.c:js_new_promise_capability:49651
+:quickjs.c:js_new_promise_capability:49687
+
+---
+Here are the reasons:
+1. In `js_new_promise_capability`, there's no check if `resolving_funcs` is NULL before using it, which could lead to null pointer dereference.
+2. The function `JS_NewPromiseCapability` is just a wrapper that passes JS_UNDEFINED as ctor without any validation of inputs.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49684,6 +49684,9 @@
+ 
+ JSValue JS_NewPromiseCapability(JSContext *ctx, JSValue *resolving_funcs)
+ {
++    if (!resolving_funcs) {
++        funlogline();
++    }
+     return js_new_promise_capability(ctx, resolving_funcs, JS_UNDEFINED);
+ }
+ 
+@@ -49651,6 +49654,9 @@
+                                          JSValue *resolving_funcs,
+                                          JSValueConst ctor)
+ {
++    if (!resolving_funcs) {
++        funlogline();
++    }
+     JSValue executor, result_promise;
+     JSCFunctionDataRecord *s;
+     int i;
+```

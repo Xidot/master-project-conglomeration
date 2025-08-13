@@ -1,0 +1,37 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)
+-------------------------
+Based on the provided code and call graph, I'll analyze the `JS_NewGlobalCConstructor` function for potential logical bugs.
+
+Potential logical bug locations:
+
+:JS_NewGlobalCConstructor:38250
+:JS_NewGlobalCConstructor:38251
+
+---
+
+The main logical issue appears to be in `JS_NewGlobalCConstructor` where it:
+1. Creates a new constructor function
+2. Calls `JS_NewGlobalCConstructor2` with the new function
+3. Returns the function object
+
+The bug is that there's no error checking between creating the function and using it. If `JS_NewCFunction2` fails (returns an exception), we still proceed to call `JS_NewGlobalCConstructor2` with the invalid value.
+
+Here's the diff to add error checking:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38250,6 +38250,8 @@
+ {
+     JSValue func_obj;
+     func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor_or_func, 0);
++    if (JS_IsException(func_obj))
++        funlogline();
+     JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
+     return func_obj;
+ }
+```
+
+The fix adds a check for exception values before proceeding with the constructor setup. This matches the pattern seen in other similar functions in the codebase where error values are checked before further operations.

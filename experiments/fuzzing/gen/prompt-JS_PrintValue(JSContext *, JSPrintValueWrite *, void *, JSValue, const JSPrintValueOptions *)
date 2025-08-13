@@ -1,0 +1,100 @@
+Target function: "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 1154
+typedef void JSPrintValueWrite(void *opaque, const char *buf, size_t len)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/* debug value output */
+/// Line number here: 1152
+typedef struct {
+    JS_BOOL show_hidden : 8; /* only show enumerable properties */
+    JS_BOOL raw_dump : 8; /* avoid doing autoinit and avoid any malloc() call (for internal use) */
+    uint32_t max_depth; /* recurse up to this depth, 0 = no limit */
+    uint32_t max_string_length; /* print no more than this length for
+                                   strings, 0 = no limit */
+    uint32_t max_item_count; /*  print no more than this count for
+                                 arrays or objects, 0 = no limit */
+} JSPrintValueOptions
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 13679
+void JS_PrintValue(JSContext *ctx, JSPrintValueWrite *write_func, void *write_opaque,
+                   JSValueConst val, const JSPrintValueOptions *options)
+{
+    JS_PrintValueInternal(ctx->rt, ctx, write_func, write_opaque, val, options);
+}
+
+/// Line number here: 13046
+typedef struct {
+    JSRuntime *rt;
+    JSContext *ctx; /* may be NULL */
+    JSPrintValueOptions options;
+    JSPrintValueWrite *write_func;
+    void *write_opaque;
+    int level;
+    JSObject *print_stack[JS_PRINT_MAX_DEPTH]; /* level values */
+} JSPrintValueState
+
+/// Line number here: 13648
+static void JS_PrintValueInternal(JSRuntime *rt, JSContext *ctx, 
+                                  JSPrintValueWrite *write_func, void *write_opaque,
+                                  JSValueConst val, const JSPrintValueOptions *options)
+{
+    JSPrintValueState ss, *s = &ss;
+    if (options)
+        s->options = *options;
+    else
+        JS_PrintValueSetDefaultOptions(&s->options);
+    if (s->options.max_depth <= 0)
+        s->options.max_depth = JS_PRINT_MAX_DEPTH;
+    else
+        s->options.max_depth = min_int(s->options.max_depth, JS_PRINT_MAX_DEPTH);
+    if (s->options.max_string_length == 0)
+        s->options.max_string_length = UINT32_MAX;
+    if (s->options.max_item_count == 0)
+        s->options.max_item_count = UINT32_MAX;
+    s->rt = rt;
+    s->ctx = ctx;
+    s->write_func = write_func;
+    s->write_opaque = write_opaque;
+    s->level = 0;
+    js_print_value(s, val);
+}
+
+/// Line number here: 13702
+static __maybe_unused void JS_DumpValue(JSContext *ctx, const char *str, JSValueConst val)
+{
+    printf("%s=", str);
+    JS_PrintValue(ctx, js_dump_value_write, stdout, val, NULL);
+    printf("\n");
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "JS_PrintValueSetDefaultOptions(JSPrintValueOptions *)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "min_int(int, int)";
+"JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "js_print_value(JSPrintValueState *, JSValue)";
+"JS_DumpValue(JSContext *, const char *, JSValue)";
+"JS_DumpValue(JSContext *, const char *, JSValue)" -> "printf(const char *restrict, ...)";
+"JS_DumpValue(JSContext *, const char *, JSValue)" -> "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+}

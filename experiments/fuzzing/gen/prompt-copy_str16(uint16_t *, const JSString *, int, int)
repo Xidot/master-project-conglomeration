@@ -1,0 +1,129 @@
+Target function: "copy_str16(uint16_t *, const JSString *, int, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 4082
+static void copy_str16(uint16_t *dst, const JSString *p, int offset, int len)
+{
+    if (p->is_wide_char) {
+        memcpy(dst, p->u.str16 + offset, len * 2);
+    } else {
+        const uint8_t *src1 = p->u.str8 + offset;
+        int i;
+
+        for(i = 0; i < len; i++)
+            dst[i] = src1[i];
+    }
+}
+
+/// Line number here: 4095
+static JSValue JS_ConcatString1(JSContext *ctx,
+                                const JSString *p1, const JSString *p2)
+{
+    JSString *p;
+    uint32_t len;
+    int is_wide_char;
+
+    len = p1->len + p2->len;
+    if (len > JS_STRING_LEN_MAX)
+        return JS_ThrowInternalError(ctx, "string too long");
+    is_wide_char = p1->is_wide_char | p2->is_wide_char;
+    p = js_alloc_string(ctx, len, is_wide_char);
+    if (!p)
+        return JS_EXCEPTION;
+    if (!is_wide_char) {
+        memcpy(p->u.str8, p1->u.str8, p1->len);
+        memcpy(p->u.str8 + p1->len, p2->u.str8, p2->len);
+        p->u.str8[len] = '\0';
+    } else {
+        copy_str16(p->u.str16, p1, 0, p1->len);
+        copy_str16(p->u.str16 + p1->len, p2, 0, p2->len);
+    }
+    return JS_MKPTR(JS_TAG_STRING, p);
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 42
+extern void *memcpy (void *__restrict __dest, const void *__restrict __src,
+		     size_t __n) __THROW __nonnull ((1, 2))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"copy_str16(uint16_t *, const JSString *, int, int)";
+"copy_str16(uint16_t *, const JSString *, int, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "js_alloc_string(JSContext *, int, int)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "copy_str16(uint16_t *, const JSString *, int, int)";
+}

@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4326,6 +4326,8 @@
+     JSValue res;
+     
+     if (JS_VALUE_GET_TAG(op1) == JS_TAG_STRING) {
++        if (unlikely(JS_VALUE_GET_TAG(op1) != JS_TAG_STRING && JS_VALUE_GET_TAG(op1) != JS_TAG_STRING_ROPE))
++            funlogline();
+         JSString *p1 = JS_VALUE_GET_STRING(op1);
+         len = p1->len;
+         is_wide_char = p1->is_wide_char;
+@@ -4338,6 +4340,8 @@
+     }
+ 
+     if (JS_VALUE_GET_TAG(op2) == JS_TAG_STRING) {
++        if (unlikely(JS_VALUE_GET_TAG(op2) != JS_TAG_STRING && JS_VALUE_GET_TAG(op2) != JS_TAG_STRING_ROPE))
++            funlogline();
+         JSString *p2 = JS_VALUE_GET_STRING(op2);
+         len += p2->len;
+         is_wide_char |= p2->is_wide_char;
+@@ -4348,6 +4352,8 @@
+         depth = max_int(depth, r2->depth);
+     }
+     if (len > JS_STRING_LEN_MAX) {
++        if (is_wide_char > 1)
++            funlogline();
+         JS_ThrowInternalError(ctx, "string too long");
+         goto fail;
+     }

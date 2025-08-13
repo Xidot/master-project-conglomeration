@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4465,6 +4465,8 @@
+     a = JS_NULL;
+     for(i = 0; i < ROPE_N_BUCKETS; i++) {
+         b = buckets[i];
++        if (!JS_IsNull(b) && JS_IsNull(a) && i == ROPE_N_BUCKETS - 1)
++            funlogline();
+         if (!JS_IsNull(b)) {
+             buckets[i] = JS_NULL;
+             if (JS_IsNull(a)) {
+@@ -4470,6 +4472,8 @@
+             if (JS_IsNull(a)) {
+                 a = b;
+             } else {
++                if (JS_IsException(a))
++                    funlogline();
+                 a = js_new_string_rope(ctx, b, a);
+                 if (JS_IsException(a))
+                     goto fail;

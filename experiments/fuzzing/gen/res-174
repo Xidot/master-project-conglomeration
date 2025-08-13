@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AtomGetStrRT(JSRuntime *, char *, int, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_AtomGetStrRT`:
+
+:quickjs.c:JS_AtomGetStrRT:3033
+:quickjs.c:JS_AtomGetStrRT:3041
+:quickjs.c:JS_AtomGetStrRT:3051
+
+---
+
+1. Line 3033: No check for buf_size <= 0 before using snprintf
+2. Line 3041: No check for buf_size before accessing buf in the ASCII string special case
+3. Line 3051: No check for UTF8_CHAR_LEN_MAX being larger than remaining buffer space
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3030,6 +3030,8 @@
+ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
+                                    JSAtom atom)
+ {
++    if (buf_size <= 0)
++        funlogline();
+     if (__JS_AtomIsTaggedInt(atom)) {
+         snprintf(buf, buf_size, "%u", __JS_AtomToUInt32(atom));
+     } else {
+@@ -3038,6 +3040,8 @@
+         if (atom == JS_ATOM_NULL) {
+             snprintf(buf, buf_size, "<null>");
+         } else {
++            if (buf_size <= 0)
++                funlogline();
+             int i, c;
+             char *q;
+             JSString *str;
+@@ -3051,6 +3055,8 @@
+                     for(i = 0; i < str->len; i++) {
+                         c |= str->u.str8[i];
+                     }
+                     if (c < 0x80)
++                        if (str->len >= buf_size)
++                            funlogline();
+                         return (const char *)str->u.str8;
+                 }
+                 for(i = 0; i < str->len; i++) {
+```
+
+The changes add buffer size checks before critical operations that could lead to buffer overflows or invalid memory accesses. The `funlogline()` calls will help detect when these edge cases occur during execution.

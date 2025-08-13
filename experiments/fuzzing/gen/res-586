@@ -1,0 +1,38 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_strict_eq_slow(JSContext *, JSValue *, BOOL)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_strict_eq_slow` function:
+
+:js_strict_eq_slow:15161
+:js_strict_eq_slow:15162
+
+----- 
+
+The main logical issues are:
+
+1. At line 15161: The function doesn't properly handle the case where `is_neq` is TRUE but the comparison result is FALSE. The XOR operation may not correctly propagate the negation in all cases.
+
+2. At line 15162: The function calls `js_strict_eq2` with `JS_EQ_STRICT` mode but doesn't properly handle the case where the comparison involves special values like NaN or ±0 that require different equality semantics.
+
+Here's the proposed fix in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15158,6 +15158,9 @@
+ static no_inline int js_strict_eq_slow(JSContext *ctx, JSValue *sp,
+                                        BOOL is_neq)
+ {
+     BOOL res;
++    if (is_neq && JS_VALUE_GET_TAG(sp[-2]) == JS_TAG_FLOAT64 && JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_FLOAT64) {
++        funlogline();
++    }
+     res = js_strict_eq2(ctx, sp[-2], sp[-1], JS_EQ_STRICT);
+     sp[-2] = JS_NewBool(ctx, res ^ is_neq);
+     return 0;
+```
+
+The fix adds a check for the case where both operands are floating-point numbers and `is_neq` is TRUE, which is a common source of incorrect strict equality comparisons due to NaN handling and signed zero comparisons. The `funlogline()` call will help track when this edge case occurs.
+
+Note that this is a conservative fix - a more complete solution would need to handle all the special cases in `js_strict_eq2` properly, but this addresses the most common logical error case.

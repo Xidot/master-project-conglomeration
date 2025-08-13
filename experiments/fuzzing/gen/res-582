@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_std_loop(JSContext *)
+-------------------------
+Based on the provided code and call graph, here are the potential logical bugs in the `js_std_loop` function:
+
+:js_std_loop:4230
+:js_std_loop:4237
+
+--- Page Break ---
+
+1. Line 4230: The infinite loop (`for(;;)`) has no exit condition other than `os_poll_func`. If `os_poll_func` is NULL or never returns false, this becomes an infinite loop with no way to exit.
+
+2. Line 4237: After checking for promise rejections, the code immediately exits if any are found. This is too aggressive - it should probably continue processing other events or at least give the application a chance to handle the rejection.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4227,6 +4227,9 @@
+ void js_std_loop(JSContext *ctx)
+ {
+     int err;
++    
++    if (!os_poll_func)
++        funlogline();
+ 
+     for(;;) {
+         /* execute the pending jobs */
+@@ -4240,6 +4243,8 @@
+         }
+ 
+         js_std_promise_rejection_check(ctx);
++        if (!list_empty(&ts->rejected_promise_list))
++            funlogline();
+         
+         if (!os_poll_func || os_poll_func(ctx))
+             break;
+```
+
+The first modification checks if `os_poll_func` is NULL (which could lead to an infinite loop). The second modification logs when there are rejected promises before the forced exit.

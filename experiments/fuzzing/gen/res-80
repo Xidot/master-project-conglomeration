@@ -1,0 +1,38 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-find_own_property(JSProperty **, JSObject *, JSAtom)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `find_own_property` function:
+
+:quickjs.c:find_own_property:5534
+:quickjs.c:find_own_property:5534
+:quickjs.c:find_own_property:5534
+
+\pagebreak
+
+1. The hash calculation `h = (uintptr_t)atom & sh->prop_hash_mask` could result in an out-of-bounds access if `prop_hash_mask` is not properly initialized or is corrupted. However, this would be a memory safety issue rather than a pure logic bug.
+
+2. The function doesn't validate that `sh->prop_hash_mask` is non-zero before using it, which could lead to division by zero or incorrect hash calculations.
+
+3. The loop condition `while (h)` assumes the hash chain is properly terminated, but there's no validation that the chain isn't circular or corrupted.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5540,6 +5540,9 @@
+     sh = p->shape;
+     h = (uintptr_t)atom & sh->prop_hash_mask;
+     h = prop_hash_end(sh)[-h - 1];
++    if (h >= sh->prop_count) {
++        funlogline();
++    }
+     prop = get_shape_prop(sh);
+     while (h) {
+         pr = &prop[h - 1];
+```
+
+The added check ensures the initial hash index is within bounds before proceeding with property lookup. This would catch cases where the hash chain is corrupted or the hash calculation is invalid.
+
+Note that this is a conservative check - the function could potentially have other edge cases, but they would likely fall into the memory safety category rather than pure logic errors. The main logical assumption being validated here is that the hash chain indices are within the valid property array bounds.

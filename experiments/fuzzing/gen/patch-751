@@ -1,0 +1,29 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -977,6 +977,8 @@
+     int e;
+     uint64_t m;
+ 
++    if (a->len > 1 && a->tab[a->len - 1] == 0)
++        funlogline();
+     if (a->tab[0] == 0 && a->len == 1) {
+         /* zero result */
+         m = 0;
+@@ -987,6 +989,8 @@
+         prec1 = 53;
+         e_min = -1021;
+         if (e < e_min) {
++            if (prec1 - (e_min - e) <= 0)
++                funlogline();
+             /* subnormal result or zero */
+             prec = prec1 - (e_min - e);
+         } else {
+@@ -994,6 +998,8 @@
+         }
+         mpb_shr_round(a, e + e_offset - prec, rnd_mode);
+         m = mpb_get_u64(a);
++        if (53 - prec < 0 || 53 - prec > 64)
++            funlogline();
+         m <<= (53 - prec);
+         /* mantissa overflow due to rounding */
+         if (m >= (uint64_t)1 << 53) {

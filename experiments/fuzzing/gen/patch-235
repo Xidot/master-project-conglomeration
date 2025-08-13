@@ -1,0 +1,14 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1567,6 +1567,10 @@
+ static inline BOOL js_check_stack_overflow(JSRuntime *rt, size_t alloca_size)
+ {
+     uintptr_t sp;
++    if (alloca_size > (1 << 20)) { /* arbitrary 1MB limit */
++        return TRUE;
++    }
+     sp = js_get_stack_pointer() - alloca_size;
+-    return unlikely(sp < rt->stack_limit);
++    /* stack grows downward */
++    return unlikely(sp < rt->stack_limit); 
+ }

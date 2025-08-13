@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29450,6 +29450,9 @@
+ static int js_link_module(JSContext *ctx, JSModuleDef *m)
+ {
+     JSModuleDef *stack_top, *m1;
++    
++    if (m->status < JS_MODULE_STATUS_UNLINKED || m->status > JS_MODULE_STATUS_EVALUATED)
++        funlogline();
+ 
+ #ifdef DUMP_MODULE_RESOLVE
+     {
+@@ -29467,6 +29470,8 @@
+             m1->status = JS_MODULE_STATUS_UNLINKED;
+             stack_top = m1->stack_prev;
+         }
++        if (m->status != JS_MODULE_STATUS_UNLINKED)
++            funlogline();
+         return -1;
+     }
+     assert(stack_top == NULL);

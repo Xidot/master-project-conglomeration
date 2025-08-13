@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5806,6 +5806,8 @@
+ static void free_gc_object(JSRuntime *rt, JSGCObjectHeader *gp)
+ {
+     switch(gp->gc_obj_type) {
++    if (gp->gc_obj_type >= JS_GC_OBJ_TYPE_JS_CONTEXT)  // Invalid gc_obj_type
++        funlogline();
+     case JS_GC_OBJ_TYPE_JS_OBJECT:
+         free_object(rt, (JSObject *)gp);
+         break;

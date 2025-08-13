@@ -1,0 +1,17 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36801,6 +36801,9 @@
+     bc_put_u8(s, BC_VERSION);
+ 
+     bc_put_leb128(s, s->idx_to_atom_count);
+     for(i = 0; i < s->idx_to_atom_count; i++) {
++        if (s->idx_to_atom[i] >= rt->atom_size) {
++            funlogline();
++        }
+         JSAtomStruct *p = rt->atom_array[s->idx_to_atom[i]];
++        if (p == NULL) {
++            funlogline();
++        }
+         JS_WriteString(s, p);
+     }
+     /* XXX: should check for OOM in above phase */

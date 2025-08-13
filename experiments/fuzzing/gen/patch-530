@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1437,6 +1437,9 @@
+     size_t slack;
+     void *new_array;
+     /* XXX: potential arithmetic overflow */
++    if (*psize > INT_MAX / 3 * 2) {
++        funlogline();
++    }
+     new_size = max_int(req_size, *psize * 3 / 2);
+     new_array = js_realloc2(ctx, *parray, new_size * elem_size, &slack);
+     if (!new_array)
+@@ -1444,6 +1447,9 @@
+     new_size += slack / elem_size;
+     *psize = new_size;
+     *parray = new_array;
++    if (new_size < 0) {
++        funlogline();
++    }
+     return 0;
+ }

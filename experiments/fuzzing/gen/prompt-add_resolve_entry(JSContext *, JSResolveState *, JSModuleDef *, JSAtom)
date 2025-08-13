@@ -1,0 +1,213 @@
+Target function: "add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 28679
+typedef struct JSResolveState {
+    JSResolveEntry *array;
+    int size;
+    int count;
+} JSResolveState
+
+/// Line number here: 28673
+typedef struct JSResolveEntry {
+    JSModuleDef *module;
+    JSAtom name;
+} JSResolveEntry
+
+/// Line number here: 28693
+static int add_resolve_entry(JSContext *ctx, JSResolveState *s,
+                             JSModuleDef *m, JSAtom name)
+{
+    JSResolveEntry *re;
+
+    if (js_resize_array(ctx, (void **)&s->array,
+                        sizeof(JSResolveEntry),
+                        &s->size, s->count + 1))
+        return -1;
+    re = &s->array[s->count++];
+    re->module = m;
+    re->name = JS_DupAtom(ctx, name);
+    return 0;
+}
+
+/* resize the array and update its size if req_size > *psize */
+/// Line number here: 1458
+static inline int js_resize_array(JSContext *ctx, void **parray, int elem_size,
+                                  int *psize, int req_size)
+{
+    if (unlikely(req_size > *psize))
+        return js_realloc_array(ctx, parray, elem_size, psize, req_size);
+    else
+        return 0;
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 2597
+JSAtom JS_DupAtom(JSContext *ctx, JSAtom v)
+{
+    JSRuntime *rt;
+    JSAtomStruct *p;
+
+    if (!__JS_AtomIsConst(v)) {
+        rt = ctx->rt;
+        p = rt->atom_array[v];
+        p->header.ref_count++;
+    }
+    return v;
+}
+
+/// Line number here: 28714
+typedef enum JSResolveResultEnum {
+    JS_RESOLVE_RES_EXCEPTION = -1, /* memory alloc error */
+    JS_RESOLVE_RES_FOUND = 0,
+    JS_RESOLVE_RES_NOT_FOUND,
+    JS_RESOLVE_RES_CIRCULAR,
+    JS_RESOLVE_RES_AMBIGUOUS,
+} JSResolveResultEnum
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 789
+typedef struct JSStarExportEntry {
+    int req_module_idx; /* in req_module_entries */
+} JSStarExportEntry
+
+/// Line number here: 28716
+static JSResolveResultEnum js_resolve_export1(JSContext *ctx,
+                                              JSModuleDef **pmodule,
+                                              JSExportEntry **pme,
+                                              JSModuleDef *m,
+                                              JSAtom export_name,
+                                              JSResolveState *s)
+{
+    JSExportEntry *me;
+
+    *pmodule = NULL;
+    *pme = NULL;
+    if (find_resolve_entry(s, m, export_name) >= 0)
+        return JS_RESOLVE_RES_CIRCULAR;
+    if (add_resolve_entry(ctx, s, m, export_name) < 0)
+        return JS_RESOLVE_RES_EXCEPTION;
+    me = find_export_entry(ctx, m, export_name);
+    if (me) {
+        if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
+            /* local export */
+            *pmodule = m;
+            *pme = me;
+            return JS_RESOLVE_RES_FOUND;
+        } else {
+            /* indirect export */
+            JSModuleDef *m1;
+            m1 = m->req_module_entries[me->u.req_module_idx].module;
+            if (me->local_name == JS_ATOM__star_) {
+                /* export ns from */
+                *pmodule = m;
+                *pme = me;
+                return JS_RESOLVE_RES_FOUND;
+            } else {
+                return js_resolve_export1(ctx, pmodule, pme, m1,
+                                          me->local_name, s);
+            }
+        }
+    } else {
+        if (export_name != JS_ATOM_default) {
+            /* not found in direct or indirect exports: try star exports */
+            int i;
+
+            for(i = 0; i < m->star_export_entries_count; i++) {
+                JSStarExportEntry *se = &m->star_export_entries[i];
+                JSModuleDef *m1, *res_m;
+                JSExportEntry *res_me;
+                JSResolveResultEnum ret;
+
+                m1 = m->req_module_entries[se->req_module_idx].module;
+                ret = js_resolve_export1(ctx, &res_m, &res_me, m1,
+                                         export_name, s);
+                if (ret == JS_RESOLVE_RES_AMBIGUOUS ||
+                    ret == JS_RESOLVE_RES_EXCEPTION) {
+                    return ret;
+                } else if (ret == JS_RESOLVE_RES_FOUND) {
+                    if (*pme != NULL) {
+                        if (*pmodule != res_m ||
+                            res_me->local_name != (*pme)->local_name) {
+                            *pmodule = NULL;
+                            *pme = NULL;
+                            return JS_RESOLVE_RES_AMBIGUOUS;
+                        }
+                    } else {
+                        *pmodule = res_m;
+                        *pme = res_me;
+                    }
+                }
+            }
+            if (*pme != NULL)
+                return JS_RESOLVE_RES_FOUND;
+        }
+        return JS_RESOLVE_RES_NOT_FOUND;
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)";
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"js_resize_array(JSContext *, void **, int, int *, int)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "__builtin_expect(long, long)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "js_realloc_array(JSContext *, void **, int, int *, int)";
+"JS_DupAtom(JSContext *, JSAtom)";
+"JS_DupAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "find_resolve_entry(JSResolveState *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)";
+}

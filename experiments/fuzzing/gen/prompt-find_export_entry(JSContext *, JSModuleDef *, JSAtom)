@@ -1,0 +1,258 @@
+Target function: "find_export_entry(JSContext *, JSModuleDef *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 28368
+static JSExportEntry *find_export_entry(JSContext *ctx, JSModuleDef *m,
+                                        JSAtom export_name)
+{
+    JSExportEntry *me;
+    int i;
+    for(i = 0; i < m->export_entries_count; i++) {
+        me = &m->export_entries[i];
+        if (me->export_name == export_name)
+            return me;
+    }
+    return NULL;
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/// Line number here: 771
+typedef enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+} JSExportTypeEnum
+
+/// Line number here: 28381
+static JSExportEntry *add_export_entry2(JSContext *ctx,
+                                        JSParseState *s, JSModuleDef *m,
+                                       JSAtom local_name, JSAtom export_name,
+                                       JSExportTypeEnum export_type)
+{
+    JSExportEntry *me;
+
+    if (find_export_entry(ctx, m, export_name)) {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        if (s) {
+            js_parse_error(s, "duplicate exported name '%s'",
+                           JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name));
+        } else {
+            JS_ThrowSyntaxErrorAtom(ctx, "duplicate exported name '%s'", export_name);
+        }
+        return NULL;
+    }
+
+    if (js_resize_array(ctx, (void **)&m->export_entries,
+                        sizeof(JSExportEntry),
+                        &m->export_entries_size,
+                        m->export_entries_count + 1))
+        return NULL;
+    me = &m->export_entries[m->export_entries_count++];
+    memset(me, 0, sizeof(*me));
+    me->local_name = JS_DupAtom(ctx, local_name);
+    me->export_name = JS_DupAtom(ctx, export_name);
+    me->export_type = export_type;
+    return me;
+}
+
+/* can only be called after the module is instantiated */
+/// Line number here: 28467
+int JS_SetModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name,
+                       JSValue val)
+{
+    JSExportEntry *me;
+    JSAtom name;
+    name = JS_NewAtom(ctx, export_name);
+    if (name == JS_ATOM_NULL)
+        goto fail;
+    me = find_export_entry(ctx, m, name);
+    JS_FreeAtom(ctx, name);
+    if (!me)
+        goto fail;
+    set_value(ctx, me->u.local.var_ref->pvalue, val);
+    return 0;
+ fail:
+    JS_FreeValue(ctx, val);
+    return -1;
+}
+
+/// Line number here: 28714
+typedef enum JSResolveResultEnum {
+    JS_RESOLVE_RES_EXCEPTION = -1, /* memory alloc error */
+    JS_RESOLVE_RES_FOUND = 0,
+    JS_RESOLVE_RES_NOT_FOUND,
+    JS_RESOLVE_RES_CIRCULAR,
+    JS_RESOLVE_RES_AMBIGUOUS,
+} JSResolveResultEnum
+
+/// Line number here: 28679
+typedef struct JSResolveState {
+    JSResolveEntry *array;
+    int size;
+    int count;
+} JSResolveState
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 789
+typedef struct JSStarExportEntry {
+    int req_module_idx; /* in req_module_entries */
+} JSStarExportEntry
+
+/// Line number here: 28716
+static JSResolveResultEnum js_resolve_export1(JSContext *ctx,
+                                              JSModuleDef **pmodule,
+                                              JSExportEntry **pme,
+                                              JSModuleDef *m,
+                                              JSAtom export_name,
+                                              JSResolveState *s)
+{
+    JSExportEntry *me;
+
+    *pmodule = NULL;
+    *pme = NULL;
+    if (find_resolve_entry(s, m, export_name) >= 0)
+        return JS_RESOLVE_RES_CIRCULAR;
+    if (add_resolve_entry(ctx, s, m, export_name) < 0)
+        return JS_RESOLVE_RES_EXCEPTION;
+    me = find_export_entry(ctx, m, export_name);
+    if (me) {
+        if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
+            /* local export */
+            *pmodule = m;
+            *pme = me;
+            return JS_RESOLVE_RES_FOUND;
+        } else {
+            /* indirect export */
+            JSModuleDef *m1;
+            m1 = m->req_module_entries[me->u.req_module_idx].module;
+            if (me->local_name == JS_ATOM__star_) {
+                /* export ns from */
+                *pmodule = m;
+                *pme = me;
+                return JS_RESOLVE_RES_FOUND;
+            } else {
+                return js_resolve_export1(ctx, pmodule, pme, m1,
+                                          me->local_name, s);
+            }
+        }
+    } else {
+        if (export_name != JS_ATOM_default) {
+            /* not found in direct or indirect exports: try star exports */
+            int i;
+
+            for(i = 0; i < m->star_export_entries_count; i++) {
+                JSStarExportEntry *se = &m->star_export_entries[i];
+                JSModuleDef *m1, *res_m;
+                JSExportEntry *res_me;
+                JSResolveResultEnum ret;
+
+                m1 = m->req_module_entries[se->req_module_idx].module;
+                ret = js_resolve_export1(ctx, &res_m, &res_me, m1,
+                                         export_name, s);
+                if (ret == JS_RESOLVE_RES_AMBIGUOUS ||
+                    ret == JS_RESOLVE_RES_EXCEPTION) {
+                    return ret;
+                } else if (ret == JS_RESOLVE_RES_FOUND) {
+                    if (*pme != NULL) {
+                        if (*pmodule != res_m ||
+                            res_me->local_name != (*pme)->local_name) {
+                            *pmodule = NULL;
+                            *pme = NULL;
+                            return JS_RESOLVE_RES_AMBIGUOUS;
+                        }
+                    } else {
+                        *pmodule = res_m;
+                        *pme = res_me;
+                    }
+                }
+            }
+            if (*pme != NULL)
+                return JS_RESOLVE_RES_FOUND;
+        }
+        return JS_RESOLVE_RES_NOT_FOUND;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+
+
+----- Callgraph:
+strict digraph G {
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "memset(void *, int, size_t)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"JS_SetModuleExport(JSContext *, JSModuleDef *, const char *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "find_resolve_entry(JSResolveState *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)" -> "js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)";
+}

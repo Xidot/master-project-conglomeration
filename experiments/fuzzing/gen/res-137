@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-is_num(int)
+-------------------------
+Based on the code provided, here are the potential logical bugs:
+
+:is_num_string:2398
+:JS_AtomIsNumericIndex1:3161
+
+---
+The first potential bug is in `is_num_string` where it checks for numbers with length > 10 but doesn't properly handle the case where the number is exactly 10 digits and exceeds 2^32-1. The check `if (len == 0 || len > 10)` is correct, but the subsequent overflow check could be more robust.
+
+The second potential bug is in `JS_AtomIsNumericIndex1` where it checks for negative numbers with `c != '-'` but doesn't properly validate the rest of the string format for negative numbers. The function could accept malformed negative numbers.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2395,6 +2395,9 @@
+                 if (!is_num(c))
+                     return FALSE;
+                 n64 = (uint64_t)n * 10 + (c - '0');
++                if (len == 10 && i == 9 && n64 > UINT32_MAX) {
++                    funlogline();
++                }
+                 if ((n64 >> 32) != 0)
+                     return FALSE;
+                 n = n64;
+@@ -3160,6 +3163,9 @@
+     if (p->len == 0)
+         return JS_UNDEFINED;
+     c = string_get(p, 0);
++    if (c == '-' && p->len == 1) {
++        funlogline();
++    }
+     if (!is_num(c) && c != '-')
+         return JS_UNDEFINED;
+     /* this is ECMA CanonicalNumericIndexString primitive */
+```
+
+The changes add checks for:
+1. Exactly 10-digit numbers that exceed UINT32_MAX
+2. Strings containing just a '-' character with no following digits

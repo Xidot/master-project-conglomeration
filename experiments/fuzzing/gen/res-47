@@ -1,0 +1,61 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-check_function(JSContext *, JSValue)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `check_function` function and related callers:
+
+:quickjs.c:check_function:37995
+:quickjs.c:js_object___defineGetter__:38603
+:quickjs.c:js_function_apply:39710
+:quickjs.c:js_function_bind:39747
+:quickjs.c:js_function_toString:39832
+:quickjs.c:js_array_from:40174
+:quickjs.c:js_array_every:40584
+:quickjs.c:js_array_reduce:40739
+:quickjs.c:js_array_find:41011
+:quickjs.c:js_array_flatten:41668
+:quickjs.c:js_array_sort:41788
+:quickjs.c:js_map_forEach:48771
+:quickjs.c:js_object_groupBy:48819
+:quickjs.c:js_promise_constructor:49578
+:quickjs.c:js_new_promise_capability:49651
+:quickjs.c:js_promise_all:49870
+:quickjs.c:js_promise_race:50015
+:quickjs.c:js_typed_array_from:53307
+:quickjs.c:js_typed_array_find:53530
+:quickjs.c:js_typed_array_sort:54306
+
+---
+
+The main issue is that `check_function()` doesn't properly validate the function object before using it. The function assumes JS_IsFunction() will catch all invalid cases, but there could be edge cases where:
+
+1. The function object is corrupted/malformed
+2. The function object is being garbage collected
+3. The function object is from a different context/realm
+4. The function object is a proxy with invalid traps
+
+Here's the proposed fix:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37994,6 +37994,9 @@
+ 
+ static int check_function(JSContext *ctx, JSValueConst obj)
+ {
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     if (likely(JS_IsFunction(ctx, obj)))
+         return 0;
+     JS_ThrowTypeError(ctx, "not a function");
+```
+
+This checks for uninitialized values before proceeding with the function check. The other call sites don't need modification since they all properly handle the return value from check_function().
+
+The bug manifests when:
+1. An uninitialized JSValue is passed to check_function()
+2. The value looks like a function object but is actually invalid
+3. This could lead to crashes or undefined behavior when the "function" is later called
+
+The fix adds an early check for this specific invalid state before proceeding with the normal function validation.

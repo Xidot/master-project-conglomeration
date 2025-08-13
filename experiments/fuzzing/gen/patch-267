@@ -1,0 +1,18 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9870,6 +9870,7 @@
+ {
+     JSAtom atom;
+     int ret;
++    if (prop == NULL) funlogline();
+     atom = JS_NewAtom(ctx, prop);
+     if (atom == JS_ATOM_NULL) {
+         JS_FreeValue(ctx, val);
+@@ -9876,6 +9877,7 @@
+         return -1;
+     }
+     ret = JS_DefinePropertyValue(ctx, this_obj, atom, val, flags);
++    if (ret < 0 && atom != JS_ATOM_NULL) funlogline();
+     JS_FreeAtom(ctx, atom);
+     return ret;
+ }

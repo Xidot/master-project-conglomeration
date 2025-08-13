@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38149,6 +38149,9 @@
+ int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
+                                const JSCFunctionListEntry *tab, int len)
+ {
++    if (!tab || len < 0) {
++        funlogline();
++    }
+     int i, ret;
+ 
+     for (i = 0; i < len; i++) {
+@@ -38153,6 +38156,9 @@
+ 
+     for (i = 0; i < len; i++) {
+         const JSCFunctionListEntry *e = &tab[i];
++        if (!e->name) {
++            funlogline();
++        }
+         JSAtom atom = find_atom(ctx, e->name);
+         if (atom == JS_ATOM_NULL)
+             return -1;

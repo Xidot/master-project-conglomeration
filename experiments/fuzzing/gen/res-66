@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-dbuf_put_sleb128(DynBuf *, int32_t)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the target function `dbuf_put_sleb128`:
+
+:dbuf_put_sleb128:6771
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6770,6 +6770,9 @@
+ static void dbuf_put_sleb128(DynBuf *s, int32_t v1)
+ {
+     uint32_t v = v1;
++    if (v1 == INT32_MIN) {
++        funlogline();
++    }
+     dbuf_put_leb128(s, (2 * v) ^ -(v >> 31));
+ }
+```
+
+The logical bug occurs when `v1` is `INT32_MIN` because:
+1. The expression `-(v >> 31)` will be 1 when v is negative (including INT32_MIN)
+2. But for INT32_MIN, `2 * v` will overflow uint32_t (wrapping around to 0)
+3. The XOR operation `0 ^ 1` results in 1, which is not the correct LEB128 encoding for INT32_MIN
+
+This causes incorrect encoding of the minimum 32-bit signed integer value. The inserted check catches this specific case.

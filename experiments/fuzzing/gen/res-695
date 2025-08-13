@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_hash64(uint64_t, int)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:map_hash64:48435
+
+---
+
+The logical bug in `map_hash64` is that it doesn't handle the case where `hash_bits` is 0 or negative, despite the precondition comment stating "1 <= hash_bits <= 32". The function could right-shift by 64 or more bits if hash_bits is 0 or negative, which is undefined behavior.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48434,6 +48434,9 @@
+ /// Line number here: 48435
+ static uint32_t map_hash64(uint64_t a, int hash_bits)
+ {
++    if (hash_bits <= 0 || hash_bits > 32) {
++        funlogline();
++    }
+     return (a * HASH_MUL64) >> (64 - hash_bits);
+ }
+ 
+```
+
+The check ensures `funlogline()` is called when the precondition is violated, which would lead to undefined behavior in the right-shift operation.

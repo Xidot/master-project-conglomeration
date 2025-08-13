@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-dbuf_put_leb128(DynBuf *, uint32_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `dbuf_put_leb128` function:
+
+:dbuf_put_leb128:6756
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6756,6 +6756,9 @@
+ static void dbuf_put_leb128(DynBuf *s, uint32_t v)
+ {
+     uint32_t a;
++    if (s->error) {
++        funlogline();
++    }
+     for(;;) {
+         a = v & 0x7f;
+         v >>= 7;
+```
+
+The logical bug is that the function doesn't check if the DynBuf is in an error state before attempting to write to it. If `s->error` is true, the function should not attempt to write any data to the buffer, but currently it will continue processing and potentially call `dbuf_putc` on an invalid buffer state.
+
+The fix adds a check at the start of the function to detect this error condition. While we can't prevent the function from being called in this state (since it's void return), we can at least detect and log when this occurs.

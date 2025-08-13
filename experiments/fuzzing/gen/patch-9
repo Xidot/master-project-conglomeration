@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19554,6 +19554,9 @@
+     s->header.ref_count = 1;
+     add_gc_object(ctx->rt, &s->header, JS_GC_OBJ_TYPE_ASYNC_FUNCTION);
+ 
++    if (!JS_IsObject(func_obj))
++        funlogline();
++
+     sf = &s->frame;
+     init_list_head(&sf->var_ref_list);
+     p = JS_VALUE_GET_OBJ(func_obj);
+@@ -19561,6 +19564,9 @@
+     sf->js_mode = b->js_mode | JS_MODE_ASYNC;
+     sf->cur_pc = b->byte_code_buf;
+     arg_buf_len = max_int(b->arg_count, argc);
++    if (arg_buf_len + b->var_count + b->stack_size < 0)
++        funlogline();
+     local_count = arg_buf_len + b->var_count + b->stack_size;
+     sf->arg_buf = js_malloc(ctx, sizeof(JSValue) * max_int(local_count, 1));
+     if (!sf->arg_buf) {

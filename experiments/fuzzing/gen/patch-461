@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2995,6 +2995,9 @@
+ static JSValue JS_NewSymbol(JSContext *ctx, JSString *p, int atom_type)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!ctx || !rt) {
++        funlogline();
++    }
+     JSAtom atom;
+     atom = __JS_NewAtom(rt, p, atom_type);
+     if (atom == JS_ATOM_NULL)
+@@ -3002,6 +3005,9 @@
+     return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+ }
+ 
++    if (atom >= rt->atom_size) {
++        funlogline();
++    }
+     return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+ }

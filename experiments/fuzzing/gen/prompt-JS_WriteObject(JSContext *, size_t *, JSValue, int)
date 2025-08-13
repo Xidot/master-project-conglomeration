@@ -1,0 +1,123 @@
+Target function: "JS_WriteObject(JSContext *, size_t *, JSValue, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36860
+uint8_t *JS_WriteObject(JSContext *ctx, size_t *psize, JSValueConst obj,
+                        int flags)
+{
+    return JS_WriteObject2(ctx, psize, obj, flags, NULL, NULL);
+}
+
+/// Line number here: 36071
+typedef struct BCWriterState {
+    JSContext *ctx;
+    DynBuf dbuf;
+    BOOL allow_bytecode : 8;
+    BOOL allow_sab : 8;
+    BOOL allow_reference : 8;
+    uint32_t first_atom;
+    uint32_t *atom_to_idx;
+    int atom_to_idx_size;
+    JSAtom *idx_to_atom;
+    int idx_to_atom_count;
+    int idx_to_atom_size;
+    uint8_t **sab_tab;
+    int sab_tab_len;
+    int sab_tab_size;
+    /* list of referenced objects (used if allow_reference = TRUE) */
+    JSObjectList object_list;
+} BCWriterState
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 36816
+uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
+                         int flags, uint8_t ***psab_tab, size_t *psab_tab_len)
+{
+    BCWriterState ss, *s = &ss;
+
+    memset(s, 0, sizeof(*s));
+    s->ctx = ctx;
+    s->allow_bytecode = ((flags & JS_WRITE_OBJ_BYTECODE) != 0);
+    s->allow_sab = ((flags & JS_WRITE_OBJ_SAB) != 0);
+    s->allow_reference = ((flags & JS_WRITE_OBJ_REFERENCE) != 0);
+    /* XXX: could use a different version when bytecode is included */
+    if (s->allow_bytecode)
+        s->first_atom = JS_ATOM_END;
+    else
+        s->first_atom = 1;
+    js_dbuf_init(ctx, &s->dbuf);
+    js_object_list_init(&s->object_list);
+
+    if (JS_WriteObjectRec(s, obj))
+        goto fail;
+    if (JS_WriteObjectAtoms(s))
+        goto fail;
+    js_object_list_end(ctx, &s->object_list);
+    js_free(ctx, s->atom_to_idx);
+    js_free(ctx, s->idx_to_atom);
+    *psize = s->dbuf.size;
+    if (psab_tab)
+        *psab_tab = s->sab_tab;
+    if (psab_tab_len)
+        *psab_tab_len = s->sab_tab_len;
+    return s->dbuf.buf;
+ fail:
+    js_object_list_end(ctx, &s->object_list);
+    js_free(ctx, s->atom_to_idx);
+    js_free(ctx, s->idx_to_atom);
+    dbuf_free(&s->dbuf);
+    *psize = 0;
+    if (psab_tab)
+        *psab_tab = NULL;
+    if (psab_tab_len)
+        *psab_tab_len = 0;
+    return NULL;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_WriteObject(JSContext *, size_t *, JSValue, int)";
+"JS_WriteObject(JSContext *, size_t *, JSValue, int)" -> "JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "memset(void *, int, size_t)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_dbuf_init(JSContext *, DynBuf *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_object_list_init(JSObjectList *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "JS_WriteObjectRec(BCWriterState *, JSValue)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "JS_WriteObjectAtoms(BCWriterState *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_object_list_end(JSContext *, JSObjectList *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_free(JSContext *, void *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "dbuf_free(DynBuf *)";
+}

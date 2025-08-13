@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5169,6 +5169,9 @@
+ JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                                JSClassID class_id)
+ {
++    if (!ctx || !ctx->rt)
++        return JS_EXCEPTION;
++
+     JSShape *sh;
+     JSObject *proto;
+ 
+@@ -5176,6 +5179,9 @@
+     sh = find_hashed_shape_proto(ctx->rt, proto);
+     if (likely(sh)) {
+         sh = js_dup_shape(sh);
++        if (class_id >= JS_CLASS_INIT_COUNT) {
++            funlogline();
++        }
+     } else {
+         sh = js_new_shape(ctx, proto);
+         if (!sh)

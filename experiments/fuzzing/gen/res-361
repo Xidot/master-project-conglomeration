@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_GetScriptOrModuleName(JSContext *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_GetScriptOrModuleName`:
+
+1. :quickjs.c:JS_GetScriptOrModuleName:29483
+2. :quickjs.c:JS_GetScriptOrModuleName:29494
+3. :quickjs.c:JS_GetScriptOrModuleName:29500
+
+\pagebreak
+
+Reasons:
+1. Line 29483: No check for negative `n_stack_levels` which could lead to infinite loop or incorrect behavior
+2. Line 29494: No validation that `sf->prev_frame` is valid before dereferencing it in the loop
+3. Line 29500: No check for NULL `b->debug.filename` before calling `JS_DupAtom`
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29480,6 +29480,8 @@
+ JSAtom JS_GetScriptOrModuleName(JSContext *ctx, int n_stack_levels)
+ {
+     JSStackFrame *sf;
++    if (n_stack_levels < 0)
++        funlogline();
+     JSFunctionBytecode *b;
+     JSObject *p;
+     /* XXX: currently we just use the filename of the englobing
+@@ -29491,6 +29493,8 @@
+     while (n_stack_levels-- > 0) {
+         sf = sf->prev_frame;
+         if (!sf)
++            return JS_ATOM_NULL;
++        if (!sf->prev_frame && n_stack_levels > 0)
+             return JS_ATOM_NULL;
+     }
+     for(;;) {
+@@ -29500,6 +29504,8 @@
+         if (!js_class_has_bytecode(p->class_id))
+             return JS_ATOM_NULL;
+         b = p->u.func.function_bytecode;
++        if (!b)
++            funlogline();
+         if (!b->is_direct_or_indirect_eval) {
+             if (!b->has_debug)
+                 return JS_ATOM_NULL;
+```
+
+Note: For line 29500, since we can't create a valid predicate to check if `b->debug.filename` is NULL before `JS_DupAtom` is called (as it's accessed inside that function), I've added a check for NULL `b` instead which would be an even more fundamental issue. The actual filename NULL check would need to be handled inside `JS_DupAtom`.

@@ -1,0 +1,542 @@
+Target function: "free_gc_object(JSRuntime *, JSGCObjectHeader *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 524
+typedef void JSClassFinalizer(JSRuntime *rt, JSValue val)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 5789
+static void free_gc_object(JSRuntime *rt, JSGCObjectHeader *gp)
+{
+    switch(gp->gc_obj_type) {
+    case JS_GC_OBJ_TYPE_JS_OBJECT:
+        free_object(rt, (JSObject *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
+        free_function_bytecode(rt, (JSFunctionBytecode *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
+        __async_func_free(rt, (JSAsyncFunctionState *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_MODULE:
+        js_free_module_def(rt, (JSModuleDef *)gp);
+        break;
+    default:
+        abort();
+    }
+}
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 5735
+static void free_object(JSRuntime *rt, JSObject *p)
+{
+    int i;
+    JSClassFinalizer *finalizer;
+    JSShape *sh;
+    JSShapeProperty *pr;
+
+    p->free_mark = 1; /* used to tell the object is invalid when
+                         freeing cycles */
+    /* free all the fields */
+    sh = p->shape;
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        free_property(rt, &p->prop[i], pr->flags);
+        pr++;
+    }
+    js_free_rt(rt, p->prop);
+    /* as an optimization we destroy the shape immediately without
+       putting it in gc_zero_ref_count_list */
+    js_free_shape(rt, sh);
+
+    /* fail safe */
+    p->shape = NULL;
+    p->prop = NULL;
+
+    finalizer = rt->class_array[p->class_id].finalizer;
+    if (finalizer)
+        (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+
+    /* fail safe */
+    p->class_id = 0;
+    p->u.opaque = NULL;
+    p->u.func.var_refs = NULL;
+    p->u.func.home_object = NULL;
+
+    remove_gc_object(&p->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES) {
+        if (p->header.ref_count == 0 && p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            /* keep the object structure because there are may be
+               references to it */
+            list_add_tail(&p->header.link, &rt->gc_zero_ref_count_list);
+        }
+    } else {
+        /* keep the object structure in case there are weak references to it */
+        if (p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            p->header.mark = 0; /* reset the mark so that the weakref can be freed */
+        }
+    }
+}
+
+/// Line number here: 544
+typedef struct JSClosureVar {
+    uint8_t is_local : 1;
+    uint8_t is_arg : 1;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* 8 bits available */
+    uint16_t var_idx; /* is_local = TRUE: index to a normal variable of the
+                    parent function. otherwise: index to a closure
+                    variable of the parent function */
+    JSAtom var_name;
+} JSClosureVar
+
+/// Line number here: 34832
+static void free_function_bytecode(JSRuntime *rt, JSFunctionBytecode *b)
+{
+    int i;
+
+#if 0
+    {
+        char buf[ATOM_GET_STR_BUF_SIZE];
+        printf("freeing %s\n",
+               JS_AtomGetStrRT(rt, buf, sizeof(buf), b->func_name));
+    }
+#endif
+    free_bytecode_atoms(rt, b->byte_code_buf, b->byte_code_len, TRUE);
+
+    if (b->vardefs) {
+        for(i = 0; i < b->arg_count + b->var_count; i++) {
+            JS_FreeAtomRT(rt, b->vardefs[i].var_name);
+        }
+    }
+    for(i = 0; i < b->cpool_count; i++)
+        JS_FreeValueRT(rt, b->cpool[i]);
+
+    for(i = 0; i < b->closure_var_count; i++) {
+        JSClosureVar *cv = &b->closure_var[i];
+        JS_FreeAtomRT(rt, cv->var_name);
+    }
+    if (b->realm)
+        JS_FreeContext(b->realm);
+
+    JS_FreeAtomRT(rt, b->func_name);
+    if (b->has_debug) {
+        JS_FreeAtomRT(rt, b->debug.filename);
+        js_free_rt(rt, b->debug.pc2line_buf);
+        js_free_rt(rt, b->debug.source);
+    }
+
+    remove_gc_object(&b->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && b->header.ref_count != 0) {
+        list_add_tail(&b->header.link, &rt->gc_zero_ref_count_list);
+    } else {
+        js_free_rt(rt, b);
+    }
+}
+
+/// Line number here: 19649
+static void __async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+    /* cannot close the closure variables here because it would
+       potentially modify the object graph */
+    if (!s->is_completed) {
+        async_func_free_frame(rt, s);
+    }
+
+    JS_FreeValueRT(rt, s->resolving_funcs[0]);
+    JS_FreeValueRT(rt, s->resolving_funcs[1]);
+
+    remove_gc_object(&s->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && s->header.ref_count != 0) {
+        list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
+    } else {
+        js_free_rt(rt, s);
+    }
+}
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 796
+typedef struct JSImportEntry {
+    int var_idx; /* closure variable index */
+    BOOL is_star; /* import_name = '*' is a valid import name, so need a flag */
+    JSAtom import_name;
+    int req_module_idx; /* in req_module_entries */
+} JSImportEntry
+
+/// Line number here: 28299
+static void js_free_module_def(JSRuntime *rt, JSModuleDef *m)
+{
+    int i;
+
+    JS_FreeAtomRT(rt, m->module_name);
+
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        JS_FreeAtomRT(rt, rme->module_name);
+        JS_FreeValueRT(rt, rme->attributes);
+    }
+    js_free_rt(rt, m->req_module_entries);
+
+    for(i = 0; i < m->export_entries_count; i++) {
+        JSExportEntry *me = &m->export_entries[i];
+        if (me->export_type == JS_EXPORT_TYPE_LOCAL)
+            free_var_ref(rt, me->u.local.var_ref);
+        JS_FreeAtomRT(rt, me->export_name);
+        JS_FreeAtomRT(rt, me->local_name);
+    }
+    js_free_rt(rt, m->export_entries);
+
+    js_free_rt(rt, m->star_export_entries);
+
+    for(i = 0; i < m->import_entries_count; i++) {
+        JSImportEntry *mi = &m->import_entries[i];
+        JS_FreeAtomRT(rt, mi->import_name);
+    }
+    js_free_rt(rt, m->import_entries);
+    js_free_rt(rt, m->async_parent_modules);
+
+    JS_FreeValueRT(rt, m->module_ns);
+    JS_FreeValueRT(rt, m->func_obj);
+    JS_FreeValueRT(rt, m->eval_exception);
+    JS_FreeValueRT(rt, m->meta_obj);
+    JS_FreeValueRT(rt, m->promise);
+    JS_FreeValueRT(rt, m->resolving_funcs[0]);
+    JS_FreeValueRT(rt, m->resolving_funcs[1]);
+    JS_FreeValueRT(rt, m->private_value);
+    /* during the GC the finalizers are called in an arbitrary
+       order so the module may no longer be referenced by the JSContext list */
+    if (m->link.next) {
+        list_del(&m->link);
+    }
+    remove_gc_object(&m->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && m->header.ref_count != 0) {
+        list_add_tail(&m->header.link, &rt->gc_zero_ref_count_list);
+    } else {
+        js_free_rt(rt, m);
+    }
+}
+
+/// Line number here: 5809
+static void free_zero_refcount(JSRuntime *rt)
+{
+    struct list_head *el;
+    JSGCObjectHeader *p;
+
+    rt->gc_phase = JS_GC_PHASE_DECREF;
+    for(;;) {
+        el = rt->gc_zero_ref_count_list.next;
+        if (el == &rt->gc_zero_ref_count_list)
+            break;
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->ref_count == 0);
+        free_gc_object(rt, p);
+    }
+    rt->gc_phase = JS_GC_PHASE_NONE;
+}
+
+/// Line number here: 6147
+static void gc_free_cycles(JSRuntime *rt)
+{
+    struct list_head *el, *el1;
+    JSGCObjectHeader *p;
+#ifdef DUMP_GC_FREE
+    BOOL header_done = FALSE;
+#endif
+
+    rt->gc_phase = JS_GC_PHASE_REMOVE_CYCLES;
+
+    for(;;) {
+        el = rt->tmp_obj_list.next;
+        if (el == &rt->tmp_obj_list)
+            break;
+        p = list_entry(el, JSGCObjectHeader, link);
+        /* Only need to free the GC object associated with JS values
+           or async functions. The rest will be automatically removed
+           because they must be referenced by them. */
+        switch(p->gc_obj_type) {
+        case JS_GC_OBJ_TYPE_JS_OBJECT:
+        case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
+        case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
+        case JS_GC_OBJ_TYPE_MODULE:
+#ifdef DUMP_GC_FREE
+            if (!header_done) {
+                printf("Freeing cycles:\n");
+                JS_DumpObjectHeader(rt);
+                header_done = TRUE;
+            }
+            JS_DumpGCObject(rt, p);
+#endif
+            free_gc_object(rt, p);
+            break;
+        default:
+            list_del(&p->link);
+            list_add_tail(&p->link, &rt->gc_zero_ref_count_list);
+            break;
+        }
+    }
+    rt->gc_phase = JS_GC_PHASE_NONE;
+
+    list_for_each_safe(el, el1, &rt->gc_zero_ref_count_list) {
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT ||
+               p->gc_obj_type == JS_GC_OBJ_TYPE_FUNCTION_BYTECODE ||
+               p->gc_obj_type == JS_GC_OBJ_TYPE_ASYNC_FUNCTION ||
+               p->gc_obj_type == JS_GC_OBJ_TYPE_MODULE);
+        if (p->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT &&
+            ((JSObject *)p)->weakref_count != 0) {
+            /* keep the object because there are weak references to it */
+            p->mark = 0;
+        } else {
+            js_free_rt(rt, p);
+        }
+    }
+
+    init_list_head(&rt->gc_zero_ref_count_list);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 729
+extern void abort (void) __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "free_object(JSRuntime *, JSObject *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "free_function_bytecode(JSRuntime *, JSFunctionBytecode *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "__async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "js_free_module_def(JSRuntime *, JSModuleDef *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "abort()";
+"free_object(JSRuntime *, JSObject *)";
+"free_object(JSRuntime *, JSObject *)" -> "get_shape_prop(JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "free_property(JSRuntime *, JSProperty *, int)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_rt(JSRuntime *, void *)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"free_object(JSRuntime *, JSObject *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "free_bytecode_atoms(JSRuntime *, const uint8_t *, int, BOOL)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "JS_FreeContext(JSContext *)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "js_free_rt(JSRuntime *, void *)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"free_function_bytecode(JSRuntime *, JSFunctionBytecode *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "free_var_ref(JSRuntime *, JSVarRef *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "list_del(struct list_head *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"js_free_module_def(JSRuntime *, JSModuleDef *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"free_zero_refcount(JSRuntime *)";
+"free_zero_refcount(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"free_zero_refcount(JSRuntime *)" -> "free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"gc_free_cycles(JSRuntime *)";
+"gc_free_cycles(JSRuntime *)" -> "free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"gc_free_cycles(JSRuntime *)" -> "list_del(struct list_head *)";
+"gc_free_cycles(JSRuntime *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"gc_free_cycles(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"gc_free_cycles(JSRuntime *)" -> "js_free_rt(JSRuntime *, void *)";
+"gc_free_cycles(JSRuntime *)" -> "init_list_head(struct list_head *)";
+}

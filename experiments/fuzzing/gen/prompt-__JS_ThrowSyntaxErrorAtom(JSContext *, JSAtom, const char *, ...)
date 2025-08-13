@@ -1,0 +1,443 @@
+Target function: "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* never use it directly */
+/// Line number here: 7089
+static JSValue __attribute__((format(printf, 3, 4))) __JS_ThrowSyntaxErrorAtom(JSContext *ctx, JSAtom atom, const char *fmt, ...)
+{
+    char buf[ATOM_GET_STR_BUF_SIZE];
+    return JS_ThrowSyntaxError(ctx, fmt,
+                             JS_AtomGetStr(ctx, buf, sizeof(buf), atom));
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7043
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowSyntaxError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_SYNTAX_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 3069
+static const char *JS_AtomGetStr(JSContext *ctx, char *buf, int buf_size, JSAtom atom)
+{
+    return JS_AtomGetStrRT(ctx->rt, buf, buf_size, atom);
+}
+
+/// Line number here: 9963
+static JSValue JS_ThrowSyntaxErrorVarRedeclaration(JSContext *ctx, JSAtom prop)
+{
+    return JS_ThrowSyntaxErrorAtom(ctx, "redeclaration of '%s'", prop);
+}
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/// Line number here: 771
+typedef enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+} JSExportTypeEnum
+
+/// Line number here: 28381
+static JSExportEntry *add_export_entry2(JSContext *ctx,
+                                        JSParseState *s, JSModuleDef *m,
+                                       JSAtom local_name, JSAtom export_name,
+                                       JSExportTypeEnum export_type)
+{
+    JSExportEntry *me;
+
+    if (find_export_entry(ctx, m, export_name)) {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        if (s) {
+            js_parse_error(s, "duplicate exported name '%s'",
+                           JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name));
+        } else {
+            JS_ThrowSyntaxErrorAtom(ctx, "duplicate exported name '%s'", export_name);
+        }
+        return NULL;
+    }
+
+    if (js_resize_array(ctx, (void **)&m->export_entries,
+                        sizeof(JSExportEntry),
+                        &m->export_entries_size,
+                        m->export_entries_count + 1))
+        return NULL;
+    me = &m->export_entries[m->export_entries_count++];
+    memset(me, 0, sizeof(*me));
+    me->local_name = JS_DupAtom(ctx, local_name);
+    me->export_name = JS_DupAtom(ctx, export_name);
+    me->export_type = export_type;
+    return me;
+}
+
+/// Line number here: 20741
+typedef struct JSFunctionDef {
+    JSContext *ctx;
+    struct JSFunctionDef *parent;
+    int parent_cpool_idx; /* index in the constant pool of the parent
+                             or -1 if none */
+    int parent_scope_level; /* scope level in parent at point of definition */
+    struct list_head child_list; /* list of JSFunctionDef.link */
+    struct list_head link;
+
+    BOOL is_eval; /* TRUE if eval code */
+    int eval_type; /* only valid if is_eval = TRUE */
+    BOOL is_global_var; /* TRUE if variables are not defined locally:
+                           eval global, eval module or non strict eval */
+    BOOL is_func_expr; /* TRUE if function expression */
+    BOOL has_home_object; /* TRUE if the home object is available */
+    BOOL has_prototype; /* true if a prototype field is necessary */
+    BOOL has_simple_parameter_list;
+    BOOL has_parameter_expressions; /* if true, an argument scope is created */
+    BOOL has_use_strict; /* to reject directive in special cases */
+    BOOL has_eval_call; /* true if the function contains a call to eval() */
+    BOOL has_arguments_binding; /* true if the 'arguments' binding is
+                                   available in the function */
+    BOOL has_this_binding; /* true if the 'this' and new.target binding are
+                              available in the function */
+    BOOL new_target_allowed; /* true if the 'new.target' does not
+                                throw a syntax error */
+    BOOL super_call_allowed; /* true if super() is allowed */
+    BOOL super_allowed; /* true if super. or super[] is allowed */
+    BOOL arguments_allowed; /* true if the 'arguments' identifier is allowed */
+    BOOL is_derived_class_constructor;
+    BOOL in_function_body;
+    JSFunctionKindEnum func_kind : 8;
+    JSParseFunctionEnum func_type : 8;
+    uint8_t js_mode; /* bitmap of JS_MODE_x */
+    JSAtom func_name; /* JS_ATOM_NULL if no name */
+
+    JSVarDef *vars;
+    int var_size; /* allocated size for vars[] */
+    int var_count;
+    JSVarDef *args;
+    int arg_size; /* allocated size for args[] */
+    int arg_count; /* number of arguments */
+    int defined_arg_count;
+    int var_object_idx; /* -1 if none */
+    int arg_var_object_idx; /* -1 if none (var object for the argument scope) */
+    int arguments_var_idx; /* -1 if none */
+    int arguments_arg_idx; /* argument variable definition in argument scope,
+                              -1 if none */
+    int func_var_idx; /* variable containing the current function (-1
+                         if none, only used if is_func_expr is true) */
+    int eval_ret_idx; /* variable containing the return value of the eval, -1 if none */
+    int this_var_idx; /* variable containg the 'this' value, -1 if none */
+    int new_target_var_idx; /* variable containg the 'new.target' value, -1 if none */
+    int this_active_func_var_idx; /* variable containg the 'this.active_func' value, -1 if none */
+    int home_object_var_idx;
+    BOOL need_home_object;
+
+    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_first;    /* index into vd->vars of first lexically scoped variable */
+    int scope_size;     /* allocated size of fd->scopes array */
+    int scope_count;    /* number of entries used in the fd->scopes array */
+    JSVarScope *scopes;
+    JSVarScope def_scope_array[4];
+    int body_scope; /* scope of the body of the function or eval */
+
+    int global_var_count;
+    int global_var_size;
+    JSGlobalVar *global_vars;
+
+    DynBuf byte_code;
+    int last_opcode_pos; /* -1 if no last opcode */
+    const uint8_t *last_opcode_source_ptr;
+    BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
+
+    LabelSlot *label_slots;
+    int label_size; /* allocated size for label_slots[] */
+    int label_count;
+    BlockEnv *top_break; /* break/continue label stack */
+
+    /* constant pool (strings, functions, numbers) */
+    JSValue *cpool;
+    int cpool_count;
+    int cpool_size;
+
+    /* list of variables in the closure */
+    int closure_var_count;
+    int closure_var_size;
+    JSClosureVar *closure_var;
+
+    JumpSlot *jump_slots;
+    int jump_size;
+    int jump_count;
+
+    LineNumberSlot *line_number_slots;
+    int line_number_size;
+    int line_number_count;
+    int line_number_last;
+    int line_number_last_pc;
+
+    /* pc2line table */
+    BOOL strip_debug : 1; /* strip all debug info (implies strip_source = TRUE) */
+    BOOL strip_source : 1; /* strip only source code */
+    JSAtom filename;
+    uint32_t source_pos; /* pointer in the eval() source */
+    GetLineColCache *get_line_col_cache; /* XXX: could remove to save memory */
+    DynBuf pc2line;
+
+    char *source;  /* raw source, utf-8 encoded */
+    int source_len;
+
+    JSModuleDef *module; /* != NULL when parsing a module */
+    BOOL has_await; /* TRUE if await is used (used in module eval) */
+} JSFunctionDef
+
+/// Line number here: 554
+enum {
+    /* XXX: add more variable kinds here instead of using bit fields */
+    JS_VAR_NORMAL,
+    JS_VAR_FUNCTION_DECL, /* lexical var with function declaration */
+    JS_VAR_NEW_FUNCTION_DECL, /* lexical var with async/generator
+                                 function declaration */
+    JS_VAR_CATCH,
+    JS_VAR_FUNCTION_NAME, /* function expression name */
+    JS_VAR_PRIVATE_FIELD,
+    JS_VAR_PRIVATE_METHOD,
+    JS_VAR_PRIVATE_GETTER,
+    JS_VAR_PRIVATE_SETTER, /* must come after JS_VAR_PRIVATE_GETTER */
+    JS_VAR_PRIVATE_GETTER_SETTER, /* must come after JS_VAR_PRIVATE_SETTER */
+}
+
+/// Line number here: 544
+typedef struct JSClosureVar {
+    uint8_t is_local : 1;
+    uint8_t is_arg : 1;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* 8 bits available */
+    uint16_t var_idx; /* is_local = TRUE: index to a normal variable of the
+                    parent function. otherwise: index to a closure
+                    variable of the parent function */
+    JSAtom var_name;
+} JSClosureVar
+
+/// Line number here: 32047
+static int resolve_scope_private_field1(JSContext *ctx,
+                                        BOOL *pis_ref, int *pvar_kind,
+                                        JSFunctionDef *s,
+                                        JSAtom var_name, int scope_level)
+{
+    int idx, var_kind;
+    JSFunctionDef *fd;
+    BOOL is_ref;
+
+    fd = s;
+    is_ref = FALSE;
+    for(;;) {
+        idx = find_private_class_field_all(ctx, fd, var_name, scope_level);
+        if (idx >= 0) {
+            var_kind = fd->vars[idx].var_kind;
+            if (is_ref) {
+                idx = get_closure_var(ctx, s, fd, FALSE, idx, var_name,
+                                      TRUE, TRUE, JS_VAR_NORMAL);
+                if (idx < 0)
+                    return -1;
+            }
+            break;
+        }
+        scope_level = fd->parent_scope_level;
+        if (!fd->parent) {
+            if (fd->is_eval) {
+                /* closure of the eval function (top level) */
+                for (idx = 0; idx < fd->closure_var_count; idx++) {
+                    JSClosureVar *cv = &fd->closure_var[idx];
+                    if (cv->var_name == var_name) {
+                        var_kind = cv->var_kind;
+                        is_ref = TRUE;
+                        if (fd != s) {
+                            idx = get_closure_var2(ctx, s, fd,
+                                                   FALSE,
+                                                   cv->is_arg, idx,
+                                                   cv->var_name, cv->is_const,
+                                                   cv->is_lexical,
+                                                   cv->var_kind);
+                            if (idx < 0)
+                                return -1;
+                        }
+                        goto done;
+                    }
+                }
+            }
+            /* XXX: no line number info */
+            JS_ThrowSyntaxErrorAtom(ctx, "undefined private field '%s'",
+                                    var_name);
+            return -1;
+        } else {
+            fd = fd->parent;
+        }
+        is_ref = TRUE;
+    }
+ done:
+    *pis_ref = is_ref;
+    *pvar_kind = var_kind;
+    return idx;
+}
+
+/// Line number here: 20574
+typedef struct JSGlobalVar {
+    int cpool_idx; /* if >= 0, index in the constant pool for hoisted
+                      function defintion*/
+    uint8_t force_init : 1; /* force initialization to undefined */
+    uint8_t is_lexical : 1; /* global let/const definition */
+    uint8_t is_const   : 1; /* const definition */
+    int scope_level;    /* scope of definition */
+    JSAtom var_name;  /* variable name */
+} JSGlobalVar
+
+/// Line number here: 34570
+static int add_module_variables(JSContext *ctx, JSFunctionDef *fd)
+{
+    int i, idx;
+    JSModuleDef *m = fd->module;
+    JSExportEntry *me;
+    JSGlobalVar *hf;
+
+    /* The imported global variables were added as closure variables
+       in js_parse_import(). We add here the module global
+       variables. */
+
+    for(i = 0; i < fd->global_var_count; i++) {
+        hf = &fd->global_vars[i];
+        if (add_closure_var(ctx, fd, TRUE, FALSE, i, hf->var_name, hf->is_const,
+                            hf->is_lexical, FALSE) < 0)
+            return -1;
+    }
+
+    /* resolve the variable names of the local exports */
+    for(i = 0; i < m->export_entries_count; i++) {
+        me = &m->export_entries[i];
+        if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
+            idx = find_closure_var(ctx, fd, me->local_name);
+            if (idx < 0) {
+                JS_ThrowSyntaxErrorAtom(ctx, "exported variable '%s' does not exist",
+                                        me->local_name);
+                return -1;
+            }
+            me->u.local.var_idx = idx;
+        }
+    }
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)" -> "JS_AtomGetStrRT(JSRuntime *, char *, int, JSAtom)";
+"JS_ThrowSyntaxErrorVarRedeclaration(JSContext *, JSAtom)";
+"JS_ThrowSyntaxErrorVarRedeclaration(JSContext *, JSAtom)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "memset(void *, int, size_t)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"resolve_scope_private_field1(JSContext *, BOOL *, int *, JSFunctionDef *, JSAtom, int)";
+"resolve_scope_private_field1(JSContext *, BOOL *, int *, JSFunctionDef *, JSAtom, int)" -> "find_private_class_field_all(JSContext *, JSFunctionDef *, JSAtom, int)";
+"resolve_scope_private_field1(JSContext *, BOOL *, int *, JSFunctionDef *, JSAtom, int)" -> "get_closure_var(JSContext *, JSFunctionDef *, JSFunctionDef *, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)";
+"resolve_scope_private_field1(JSContext *, BOOL *, int *, JSFunctionDef *, JSAtom, int)" -> "get_closure_var2(JSContext *, JSFunctionDef *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)";
+"resolve_scope_private_field1(JSContext *, BOOL *, int *, JSFunctionDef *, JSAtom, int)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_module_variables(JSContext *, JSFunctionDef *)";
+"add_module_variables(JSContext *, JSFunctionDef *)" -> "add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)";
+"add_module_variables(JSContext *, JSFunctionDef *)" -> "find_closure_var(JSContext *, JSFunctionDef *, JSAtom)";
+"add_module_variables(JSContext *, JSFunctionDef *)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+}

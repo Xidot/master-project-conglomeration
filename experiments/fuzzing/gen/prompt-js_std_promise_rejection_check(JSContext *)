@@ -1,0 +1,219 @@
+Target function: "js_std_promise_rejection_check(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 142
+typedef struct {
+    struct list_head link;
+    JSValue promise;
+    JSValue reason;
+} JSRejectedPromiseEntry
+
+/* check if there are pending promise rejections. It must be done
+   asynchrously in case a rejected promise is handled later. Currently
+   we do it once the application is about to sleep. It could be done
+   more often if needed. */
+/// Line number here: 4213
+static void js_std_promise_rejection_check(JSContext *ctx)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    struct list_head *el;
+
+    if (unlikely(!list_empty(&ts->rejected_promise_list))) {
+        list_for_each(el, &ts->rejected_promise_list) {
+            JSRejectedPromiseEntry *rp = list_entry(el, JSRejectedPromiseEntry, link);
+            fprintf(stderr, "Possibly unhandled promise rejection: ");
+            js_std_dump_error1(ctx, rp->reason);
+        }
+        exit(1);
+    }
+}
+
+/// Line number here: 4150
+static void js_std_dump_error1(JSContext *ctx, JSValueConst exception_val)
+{
+    JS_PrintValue(ctx, js_print_value_write, stderr, exception_val, NULL);
+    fputc('\n', stderr);
+}
+
+/* main loop which calls the user JS callbacks */
+/// Line number here: 4230
+void js_std_loop(JSContext *ctx)
+{
+    int err;
+
+    for(;;) {
+        /* execute the pending jobs */
+        for(;;) {
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err <= 0) {
+                if (err < 0)
+                    js_std_dump_error(ctx);
+                break;
+            }
+        }
+
+        js_std_promise_rejection_check(ctx);
+        
+        if (!os_poll_func || os_poll_func(ctx))
+            break;
+    }
+}
+
+/* Wait for a promise and execute pending jobs while waiting for
+   it. Return the promise result or JS_EXCEPTION in case of promise
+   rejection. */
+/// Line number here: 4255
+JSValue js_std_await(JSContext *ctx, JSValue obj)
+{
+    JSValue ret;
+    int state;
+
+    for(;;) {
+        state = JS_PromiseState(ctx, obj);
+        if (state == JS_PROMISE_FULFILLED) {
+            ret = JS_PromiseResult(ctx, obj);
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_REJECTED) {
+            ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_PENDING) {
+            int err;
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err < 0) {
+                js_std_dump_error(ctx);
+            }
+            if (err == 0) {
+                js_std_promise_rejection_check(ctx);
+
+                if (os_poll_func)
+                    os_poll_func(ctx);
+            }
+        } else {
+            /* not a promise */
+            ret = obj;
+            break;
+        }
+    }
+    return ret;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 79
+static inline int list_empty(struct list_head *el)
+{
+    return el->next == el;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 2315
+JSRuntime *JS_GetRuntime(JSContext *ctx)
+{
+    return ctx->rt;
+}
+
+/// Line number here: 1637
+void *JS_GetRuntimeOpaque(JSRuntime *rt)
+{
+    return rt->user_opaque;
+}
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /usr/include/stdio.h
+
+/// Line number here: 356
+extern int fprintf (FILE *__restrict __stream,
+		    const char *__restrict __format, ...) __nonnull ((1))
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 755
+extern void exit (int __status) __THROW __attribute__ ((__noreturn__))
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_promise_rejection_check(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_std_promise_rejection_check(JSContext *)" -> "__builtin_expect(long, long)";
+"js_std_promise_rejection_check(JSContext *)" -> "list_empty(struct list_head *)";
+"js_std_promise_rejection_check(JSContext *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_promise_rejection_check(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_promise_rejection_check(JSContext *)" -> "exit(int)";
+"js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "fputc(int, FILE *)";
+"js_std_loop(JSContext *)";
+"js_std_loop(JSContext *)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_loop(JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"js_std_loop(JSContext *)" -> "js_std_dump_error(JSContext *)";
+"js_std_loop(JSContext *)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_loop(JSContext *)" -> "os_poll_func";
+"js_std_await(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseState(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseResult(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_Throw(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_await(JSContext *, JSValue)" -> "JS_GetRuntime(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_dump_error(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "os_poll_func";
+}

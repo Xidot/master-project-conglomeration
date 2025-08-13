@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10209,6 +10209,8 @@
+     obj1 = JS_ToObject(ctx, obj);
+     if (JS_IsException(obj1))
+         return -1;
++    if (JS_VALUE_GET_TAG(obj1) != JS_TAG_OBJECT)
++        return JS_ThrowTypeError(ctx, "cannot convert to object");
+     p = JS_VALUE_GET_OBJ(obj1);
+     res = delete_property(ctx, p, prop);
+     JS_FreeValue(ctx, obj1);
+@@ -10216,6 +10218,8 @@
+         return res;
+     if ((flags & JS_PROP_THROW) ||
+         ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
++        if (res < 0)
++            return res; // preserve original error
+         JS_ThrowTypeError(ctx, "could not delete property");
+         return -1;
+     }

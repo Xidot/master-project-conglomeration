@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19668,6 +19668,9 @@
+ static void async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+ {
+     if (--s->header.ref_count == 0) {
++        if (rt->gc_phase == JS_GC_PHASE_DECREF) {
++            funlogline();
++        }
+         if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
+             list_del(&s->header.link);
+             list_add(&s->header.link, &rt->gc_zero_ref_count_list);

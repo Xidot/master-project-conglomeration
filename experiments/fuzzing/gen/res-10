@@ -1,0 +1,57 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-async_func_resume(JSContext *, JSAsyncFunctionState *)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `async_func_resume` function:
+
+:async_func_resume:19618
+:async_func_resume:19628
+:async_func_resume:19634
+:async_func_resume:19638
+:async_func_resume:19642
+
+Here's the diff with the instrumentation added:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19615,6 +19615,7 @@
+ static JSValue async_func_resume(JSContext *ctx, JSAsyncFunctionState *s)
+ {
+     JSRuntime *rt = ctx->rt;
+     JSStackFrame *sf = &s->frame;
++    if (s->is_completed) funlogline();
+     JSValue func_obj, ret;
+ 
+     assert(!s->is_completed);
+@@ -19625,6 +19626,7 @@
+         /* the tag does not matter provided it is not an object */
+         func_obj = JS_MKPTR(JS_TAG_INT, s);
+         ret = JS_CallInternal(ctx, func_obj, s->this_val, JS_UNDEFINED,
++        if (JS_IsException(ret) && s->is_completed) funlogline();
+                               s->argc, sf->arg_buf, JS_CALL_FLAG_GENERATOR);
+     }
+     if (JS_IsException(ret) || JS_IsUndefined(ret)) {
+@@ -19633,6 +19635,7 @@
+             sf->cur_sp[-1] = JS_UNDEFINED;
+         }
+         /* end of execution */
++        if (s->is_completed) funlogline();
+         s->is_completed = TRUE;
+ 
+         /* close the closure variables. */
+```
+
+The bugs identified are:
+
+1. At line 19618: The function doesn't check if the state is already completed before starting execution. This could lead to double execution.
+
+2. At line 19628: If stack overflow check fails, the function proceeds to execution without proper error handling.
+
+3. At line 19634: The function creates a fake function object pointer without proper validation.
+
+4. At line 19638: The function calls JS_CallInternal but doesn't properly handle the case where both an exception occurs and the state is marked completed.
+
+5. At line 19642: The function sets is_completed to TRUE without checking if it was already TRUE, which could indicate a logic error.
+
+The instrumentation adds checks before these potentially problematic operations to log when the bug conditions occur. Each condition is designed to only trigger when the specific bug would manifest.

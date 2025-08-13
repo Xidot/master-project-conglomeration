@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29991,6 +29991,8 @@
+ static int js_execute_async_module(JSContext *ctx, JSModuleDef *m)
+ {
+     JSValue promise, m_obj;
+     JSValue resolve_funcs[2], ret_val;
++    if (m->status != JS_MODULE_STATUS_LINKED)
++        funlogline();
+ #ifdef DUMP_MODULE_EXEC
+     js_dump_module(ctx, __func__, m);
+ #endif
+@@ -30000,6 +30002,8 @@
+     m_obj = JS_NewModuleValue(ctx, m);
+     resolve_funcs[0] = JS_NewCFunctionData(ctx, js_async_module_execution_fulfilled, 0, 0, 1, (JSValueConst *)&m_obj);
+     resolve_funcs[1] = JS_NewCFunctionData(ctx, js_async_module_execution_rejected, 0, 0, 1, (JSValueConst *)&m_obj);
++    if (JS_IsException(resolve_funcs[0]) || JS_IsException(resolve_funcs[1]))
++        funlogline();
+     ret_val = js_promise_then(ctx, promise, 2, (JSValueConst *)resolve_funcs);
+     JS_FreeValue(ctx, ret_val);
+     JS_FreeValue(ctx, m_obj);

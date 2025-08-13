@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-lre_is_space_non_ascii(uint32_t)
+-------------------------
+Based on the provided code, here's the analysis:
+
+:libunicode.c:lre_is_space_non_ascii:1907
+
+---
+
+The logical bug is in the comparison logic where it checks `if (c < high)` after checking `if (c < low)`. This means if `c` is exactly equal to `high`, it will fall through to the next iteration or return FALSE, which might not be the intended behavior for boundary cases.
+
+Here's the diff to add the check:
+
+```diff
+--- a/libunicode.c
++++ b/libunicode.c
+@@ -1904,6 +1904,8 @@
+         uint32_t low = char_range_s[i];
+         uint32_t high = char_range_s[i + 1];
+         if (c < low)
+             return FALSE;
++        if (c == high)
++            funlogline();
+         if (c < high)
+             return TRUE;
+     }
+```
+
+The bug occurs when `c` equals `high` - in this case, the function will continue to the next iteration or return FALSE when it might actually be a space character (depending on how `char_range_s` is defined). The added condition catches this case.

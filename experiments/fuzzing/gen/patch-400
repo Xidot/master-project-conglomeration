@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1415,6 +1415,9 @@
+ 
+ size_t js_malloc_usable_size(JSContext *ctx, const void *ptr)
+ {
++    if (ptr == NULL) {
++        funlogline();
++    }
+     return js_malloc_usable_size_rt(ctx->rt, ptr);
+ }
+ 
+@@ -4120,6 +4123,9 @@
+             return FALSE;
+         size1 = js_malloc_usable_size(ctx, p1);
+         if (p1->is_wide_char) {
++            if (size1 < sizeof(*p1)) {
++                funlogline();
++            }
+             if (size1 >= sizeof(*p1) + ((p1->len + p2->len) << 1)) {
+                 if (p2->is_wide_char) {
+                     memcpy(p1->u.str16 + p1->len, p2->u.str16, p2->len << 1);
+@@ -4135,6 +4141,9 @@
+                 }
+             }
+         } else if (!p2->is_wide_char) {
++            if (size1 < sizeof(*p1)) {
++                funlogline();
++            }
+             if (size1 >= sizeof(*p1) + p1->len + p2->len + 1) {
+                 memcpy(p1->u.str8 + p1->len, p2->u.str8, p2->len);
+                 p1->len += p2->len;

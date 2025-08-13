@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38009,6 +38009,9 @@
+ {
+     JSAtom atom;
+     int len;
++    
++    if (name == NULL)
++        funlogline();
+ 
+     if (*name == '[') {
+         name++;
+@@ -38016,6 +38019,8 @@
+         /* We assume 8 bit non null strings, which is the case for these
+            symbols */
+         for(atom = JS_ATOM_Symbol_toPrimitive; atom < JS_ATOM_END; atom++) {
++            if (ctx->rt->atom_array[atom] == NULL)
++                funlogline();
+             JSAtomStruct *p = ctx->rt->atom_array[atom];
+             JSString *str = p;
+             if (str->len == len && !memcmp(str->u.str8, name, len))

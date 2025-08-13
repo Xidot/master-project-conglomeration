@@ -1,0 +1,99 @@
+Target function: "is_ascii_ident(const JSString *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 13166
+static BOOL is_ascii_ident(const JSString *p)
+{
+    int i, c;
+
+    if (p->len == 0)
+        return FALSE;
+    for(i = 0; i < p->len; i++) {
+        c = string_get(p, i);
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c == '_' || c == '$') || (c >= '0' && c <= '9' && i > 0)))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/// Line number here: 1476
+static inline int string_get(const JSString *p, int idx) {
+    return p->is_wide_char ? p->u.str16[idx] : p->u.str8[idx];
+}
+
+/// Line number here: 13046
+typedef struct {
+    JSRuntime *rt;
+    JSContext *ctx; /* may be NULL */
+    JSPrintValueOptions options;
+    JSPrintValueWrite *write_func;
+    void *write_opaque;
+    int level;
+    JSObject *print_stack[JS_PRINT_MAX_DEPTH]; /* level values */
+} JSPrintValueState
+
+/// Line number here: 13181
+static void js_print_atom(JSPrintValueState *s, JSAtom atom)
+{
+    int i;
+    if (__JS_AtomIsTaggedInt(atom)) {
+        js_printf(s, "%u", __JS_AtomToUInt32(atom));
+    } else if (atom == JS_ATOM_NULL) {
+        js_puts(s, "<null>");
+    } else {
+        assert(atom < s->rt->atom_size);
+        JSString *p;
+        p = s->rt->atom_array[atom];
+        if (is_ascii_ident(p)) {
+            for(i = 0; i < p->len; i++) {
+                js_putc(s, string_get(p, i));
+            }
+        } else {
+            js_putc(s, '"');
+            for(i = 0; i < p->len; i++) {
+                js_dump_char(s, string_get(p, i), '\"');
+            }
+            js_putc(s, '"');
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+
+
+----- Callgraph:
+strict digraph G {
+"is_ascii_ident(const JSString *)";
+"is_ascii_ident(const JSString *)" -> "string_get(const JSString *, int)";
+"js_print_atom(JSPrintValueState *, JSAtom)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "js_printf(JSPrintValueState *, const char *, ...)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "__JS_AtomToUInt32(JSAtom)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "js_puts(JSPrintValueState *, const char *)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "is_ascii_ident(const JSString *)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "js_putc(JSPrintValueState *, char)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "string_get(const JSString *, int)";
+"js_print_atom(JSPrintValueState *, JSAtom)" -> "js_dump_char(JSPrintValueState *, int, int)";
+}

@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15527,6 +15527,9 @@
+     tag = JS_VALUE_GET_TAG(obj);
+     if (tag != JS_TAG_OBJECT && tag != JS_TAG_NULL && tag != JS_TAG_UNDEFINED) {
+         obj = JS_ToObjectFree(ctx, obj);
++        if (JS_IsException(obj)) {
++            funlogline();
++        }
+     }
+ 
+     it = js_malloc(ctx, sizeof(*it));
+@@ -15591,6 +15594,9 @@
+ static __exception int js_for_in_start(JSContext *ctx, JSValue *sp)
+ {
+     sp[-1] = build_for_in_iterator(ctx, sp[-1]);
++    if (JS_VALUE_GET_TAG(sp[-1]) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     if (JS_IsException(sp[-1]))
+         return -1;
+     return 0;

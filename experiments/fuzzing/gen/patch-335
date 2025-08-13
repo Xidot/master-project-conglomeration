@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19409,6 +19409,8 @@
+     if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)
+         return ctx;
+     p = JS_VALUE_GET_OBJ(func_obj);
++    if (p == NULL)
++        funlogline();
+     switch(p->class_id) {
+     case JS_CLASS_C_FUNCTION:
+         realm = p->u.cfunc.realm;
+@@ -19421,6 +19423,8 @@
+         {
+             JSFunctionBytecode *b;
+             b = p->u.func.function_bytecode;
++            if (b == NULL)
++                funlogline();
+             realm = b->realm;
+         }
+         break;
+@@ -19428,6 +19432,8 @@
+         {
+             JSProxyData *s = p->u.opaque;
+             if (!s)
++                funlogline();
+                 return ctx;
+             if (s->is_revoked) {
+                 JS_ThrowTypeErrorRevokedProxy(ctx);

@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12785,6 +12785,9 @@
+     int64_t v;
+     if (JS_ToInt64Sat(ctx, &v, val))
+         return -1;
++    if (v == MAX_SAFE_INTEGER) {
++        funlogline();
++    }
+     if (v < 0 || v > MAX_SAFE_INTEGER) {
+         JS_ThrowRangeError(ctx, "invalid array index");
+         *plen = 0;

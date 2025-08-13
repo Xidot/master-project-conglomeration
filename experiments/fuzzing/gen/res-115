@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_shape_hash(uint32_t, int)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the target function `get_shape_hash`:
+
+:quickjs.c:4615
+
+---
+
+The logical bug in `get_shape_hash` is that it doesn't handle the case where `hash_bits` is 0 or greater than 32. This could lead to undefined behavior when shifting a 32-bit integer by 32 or more positions.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4614,6 +4614,9 @@
+ /* truncate the shape hash to 'hash_bits' bits */
+ static uint32_t get_shape_hash(uint32_t h, int hash_bits)
+ {
++    if (hash_bits <= 0 || hash_bits > 32) {
++        funlogline();
++    }
+     return h >> (32 - hash_bits);
+ }
+```
+
+The fix adds a check for invalid `hash_bits` values before performing the shift operation. While the shift operation itself might be technically defined in C for some cases (implementation-defined behavior for shifts >= width), it's likely not the intended behavior in this context.

@@ -1,0 +1,381 @@
+Target function: "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* return NULL in case of exception (e.g. module could not be loaded) */
+/// Line number here: 28596
+static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
+                                                    const char *base_cname,
+                                                    const char *cname1,
+                                                    JSValueConst attributes)
+{
+    JSRuntime *rt = ctx->rt;
+    JSModuleDef *m;
+    char *cname;
+    JSAtom module_name;
+
+    if (!rt->module_normalize_func) {
+        cname = js_default_module_normalize_name(ctx, base_cname, cname1);
+    } else {
+        cname = rt->module_normalize_func(ctx, base_cname, cname1,
+                                          rt->module_loader_opaque);
+    }
+    if (!cname)
+        return NULL;
+
+    module_name = JS_NewAtom(ctx, cname);
+    if (module_name == JS_ATOM_NULL) {
+        js_free(ctx, cname);
+        return NULL;
+    }
+
+    /* first look at the loaded modules */
+    m = js_find_loaded_module(ctx, module_name);
+    if (m) {
+        js_free(ctx, cname);
+        JS_FreeAtom(ctx, module_name);
+        return m;
+    }
+
+    JS_FreeAtom(ctx, module_name);
+
+    /* load the module */
+    if (!rt->u.module_loader_func) {
+        /* XXX: use a syntax error ? */
+        JS_ThrowReferenceError(ctx, "could not load module '%s'",
+                               cname);
+        js_free(ctx, cname);
+        return NULL;
+    }
+    if (rt->module_loader_has_attr) {
+        m = rt->u.module_loader_func2(ctx, cname, rt->module_loader_opaque, attributes);
+    } else {
+        m = rt->u.module_loader_func(ctx, cname, rt->module_loader_opaque);
+    }
+    js_free(ctx, cname);
+    return m;
+}
+
+/* default module filename normalizer */
+/// Line number here: 28522
+static char *js_default_module_normalize_name(JSContext *ctx,
+                                              const char *base_name,
+                                              const char *name)
+{
+    char *filename, *p;
+    const char *r;
+    int cap;
+    int len;
+
+    if (name[0] != '.') {
+        /* if no initial dot, the module name is not modified */
+        return js_strdup(ctx, name);
+    }
+
+    p = strrchr(base_name, '/');
+    if (p)
+        len = p - base_name;
+    else
+        len = 0;
+
+    cap = len + strlen(name) + 1 + 1;
+    filename = js_malloc(ctx, cap);
+    if (!filename)
+        return NULL;
+    memcpy(filename, base_name, len);
+    filename[len] = '\0';
+
+    /* we only normalize the leading '..' or '.' */
+    r = name;
+    for(;;) {
+        if (r[0] == '.' && r[1] == '/') {
+            r += 2;
+        } else if (r[0] == '.' && r[1] == '.' && r[2] == '/') {
+            /* remove the last path element of filename, except if "."
+               or ".." */
+            if (filename[0] == '\0')
+                break;
+            p = strrchr(filename, '/');
+            if (!p)
+                p = filename;
+            else
+                p++;
+            if (!strcmp(p, ".") || !strcmp(p, ".."))
+                break;
+            if (p > filename)
+                p--;
+            *p = '\0';
+            r += 3;
+        } else {
+            break;
+        }
+    }
+    if (filename[0] != '\0')
+        pstrcat(filename, cap, "/");
+    pstrcat(filename, cap, r);
+    //    printf("normalize: %s %s -> %s\n", base_name, name, filename);
+    return filename;
+}
+
+/// Line number here: 2956
+JSAtom JS_NewAtom(JSContext *ctx, const char *str)
+{
+    return JS_NewAtomLen(ctx, str, strlen(str));
+}
+
+/// Line number here: 1385
+void js_free(JSContext *ctx, void *ptr)
+{
+    js_free_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 28581
+static JSModuleDef *js_find_loaded_module(JSContext *ctx, JSAtom name)
+{
+    struct list_head *el;
+    JSModuleDef *m;
+
+    /* first look at the loaded modules */
+    list_for_each(el, &ctx->loaded_modules) {
+        m = list_entry(el, JSModuleDef, link);
+        if (m->module_name == name)
+            return m;
+    }
+    return NULL;
+}
+
+/// Line number here: 3203
+void JS_FreeAtom(JSContext *ctx, JSAtom v)
+{
+    if (!__JS_AtomIsConst(v))
+        __JS_FreeAtom(ctx->rt, v);
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7112
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowReferenceError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_REFERENCE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 28648
+static JSModuleDef *js_host_resolve_imported_module_atom(JSContext *ctx,
+                                                         JSAtom base_module_name,
+                                                         JSAtom module_name1,
+                                                         JSValueConst attributes)
+{
+    const char *base_cname, *cname;
+    JSModuleDef *m;
+
+    base_cname = JS_AtomToCString(ctx, base_module_name);
+    if (!base_cname)
+        return NULL;
+    cname = JS_AtomToCString(ctx, module_name1);
+    if (!cname) {
+        JS_FreeCString(ctx, base_cname);
+        return NULL;
+    }
+    m = js_host_resolve_imported_module(ctx, base_cname, cname, attributes);
+    JS_FreeCString(ctx, base_cname);
+    JS_FreeCString(ctx, cname);
+    return m;
+}
+
+/// Line number here: 2181
+enum JSFreeModuleEnum {
+    JS_FREE_MODULE_ALL,
+    JS_FREE_MODULE_NOT_RESOLVED,
+}
+
+/// Line number here: 29602
+static void JS_LoadModuleInternal(JSContext *ctx, const char *basename,
+                                  const char *filename,
+                                  JSValueConst *resolving_funcs,
+                                  JSValueConst attributes)
+{
+    JSValue evaluate_promise;
+    JSModuleDef *m;
+    JSValue ret, err, func_obj, evaluate_resolving_funcs[2];
+    JSValueConst func_data[3];
+
+    m = js_host_resolve_imported_module(ctx, basename, filename, attributes);
+    if (!m)
+        goto fail;
+
+    if (js_resolve_module(ctx, m) < 0) {
+        js_free_modules(ctx, JS_FREE_MODULE_NOT_RESOLVED);
+        goto fail;
+    }
+
+    /* Evaluate the module code */
+    func_obj = JS_NewModuleValue(ctx, m);
+    evaluate_promise = JS_EvalFunction(ctx, func_obj);
+    if (JS_IsException(evaluate_promise)) {
+    fail:
+        err = JS_GetException(ctx);
+        ret = JS_Call(ctx, resolving_funcs[1], JS_UNDEFINED,
+                      1, (JSValueConst *)&err);
+        JS_FreeValue(ctx, ret); /* XXX: what to do if exception ? */
+        JS_FreeValue(ctx, err);
+        return;
+    }
+
+    func_obj = JS_NewModuleValue(ctx, m);
+    func_data[0] = resolving_funcs[0];
+    func_data[1] = resolving_funcs[1];
+    func_data[2] = func_obj;
+    evaluate_resolving_funcs[0] = JS_NewCFunctionData(ctx, js_load_module_fulfilled, 0, 0, 3, func_data);
+    evaluate_resolving_funcs[1] = JS_NewCFunctionData(ctx, js_load_module_rejected, 0, 0, 3, func_data);
+    JS_FreeValue(ctx, func_obj);
+    ret = js_promise_then(ctx, evaluate_promise, 2, (JSValueConst *)evaluate_resolving_funcs);
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, evaluate_resolving_funcs[0]);
+    JS_FreeValue(ctx, evaluate_resolving_funcs[1]);
+    JS_FreeValue(ctx, evaluate_promise);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::module_normalize_func";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_free(JSContext *, void *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_find_loaded_module(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func2";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "js_strdup(JSContext *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strrchr(const char *, int)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strlen(const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "js_malloc(JSContext *, size_t)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strcmp(const char *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "pstrcat(char *, int, const char *)";
+"JS_NewAtom(JSContext *, const char *)";
+"JS_NewAtom(JSContext *, const char *)" -> "JS_NewAtomLen(JSContext *, const char *, size_t)";
+"JS_NewAtom(JSContext *, const char *)" -> "strlen(const char *)";
+"js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_FreeAtom(JSContext *, JSAtom)";
+"JS_FreeAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"JS_FreeAtom(JSContext *, JSAtom)" -> "__JS_FreeAtom(JSRuntime *, uint32_t)";
+"JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"JS_ThrowReferenceError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowReferenceError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowReferenceError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_free_modules(JSContext *, JSFreeModuleEnum)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_NewModuleValue(JSContext *, JSModuleDef *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_EvalFunction(JSContext *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_GetException(JSContext *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_promise_then(JSContext *, JSValue, int, JSValue *)";
+}

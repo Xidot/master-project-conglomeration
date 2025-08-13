@@ -1,0 +1,23 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_new_shape(JSContext *, JSObject *)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the target function `js_new_shape`:
+
+:js_new_shape:4714
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4714,6 +4714,9 @@
+ static JSShape *js_new_shape(JSContext *ctx, JSObject *proto)
+ {
++    if (proto && proto->header.ref_count <= 0) {
++        funlogline();
++    }
+     return js_new_shape2(ctx, proto, JS_PROP_INITIAL_HASH_SIZE,
+                          JS_PROP_INITIAL_SIZE);
+ }
+```
+
+The reasoning is that the function doesn't validate the proto object's refcount before using it, which could lead to issues if the proto object is being freed or has an invalid refcount. The added check will detect when proto exists but has an invalid refcount.

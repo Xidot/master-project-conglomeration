@@ -1,0 +1,34 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14700,6 +14700,9 @@
+             if (tag2 == JS_TAG_FLOAT64) {
+                 d2 = JS_VALUE_GET_FLOAT64(op2);
+             } else {
+                 d2 = JS_VALUE_GET_INT(op2);
++                if (JS_VALUE_GET_TAG(op1) == JS_TAG_FLOAT64 && isnan(d1)) {
++                    funlogline();
++                }
+             }
+             switch(op) {
+             case OP_lt:
+@@ -14720,6 +14723,9 @@
+               tag_is_string(tag2)))) {
+             if (tag_is_string(tag1)) {
+                 op1 = JS_StringToBigInt(ctx, op1);
++                if (!(JS_VALUE_GET_TAG(op1) == JS_TAG_BIG_INT || JS_VALUE_GET_TAG(op1) == JS_TAG_SHORT_BIG_INT)) {
++                    funlogline();
++                }
+                 if (JS_VALUE_GET_TAG(op1) != JS_TAG_BIG_INT &&
+                     JS_VALUE_GET_TAG(op1) != JS_TAG_SHORT_BIG_INT)
+                     goto invalid_bigint_string;
+@@ -14756,6 +14762,9 @@
+             if (tag2 == JS_TAG_FLOAT64) {
+                 d2 = JS_VALUE_GET_FLOAT64(op2);
+             } else {
+                 d2 = JS_VALUE_GET_INT(op2);
++                if ((int64_t)d1 != d1 || (int64_t)d2 != d2) {
++                    funlogline();
++                }
+             }
+             switch(op) {
+             case OP_lt:

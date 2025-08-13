@@ -1,0 +1,356 @@
+Target function: "JS_NewSymbol(JSContext *, JSString *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* 'p' is freed */
+/// Line number here: 2996
+static JSValue JS_NewSymbol(JSContext *ctx, JSString *p, int atom_type)
+{
+    JSRuntime *rt = ctx->rt;
+    JSAtom atom;
+    atom = __JS_NewAtom(rt, p, atom_type);
+    if (atom == JS_ATOM_NULL)
+        return JS_ThrowOutOfMemory(ctx);
+    return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* string case (internal). Return JS_ATOM_NULL if error. 'str' is
+   freed. */
+/// Line number here: 2658
+static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+    int len;
+
+#if 0
+    printf("__JS_NewAtom: ");  JS_DumpString(rt, str); printf("\n");
+#endif
+    if (atom_type < JS_ATOM_TYPE_SYMBOL) {
+        /* str is not NULL */
+        if (str->atom_type == atom_type) {
+            /* str is the atom, return its index */
+            i = js_get_atom_index(rt, str);
+            /* reduce string refcount and increase atom's unless constant */
+            if (__JS_AtomIsConst(i))
+                str->header.ref_count--;
+            return i;
+        }
+        /* try and locate an already registered atom */
+        len = str->len;
+        h = hash_string(str, atom_type);
+        h &= JS_ATOM_HASH_MASK;
+        h1 = h & (rt->atom_hash_size - 1);
+        i = rt->atom_hash[h1];
+        while (i != 0) {
+            p = rt->atom_array[i];
+            if (p->hash == h &&
+                p->atom_type == atom_type &&
+                p->len == len &&
+                js_string_memcmp(p, 0, str, 0, len) == 0) {
+                if (!__JS_AtomIsConst(i))
+                    p->header.ref_count++;
+                goto done;
+            }
+            i = p->hash_next;
+        }
+    } else {
+        h1 = 0; /* avoid warning */
+        if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+            h = 0;
+        } else {
+            h = JS_ATOM_HASH_PRIVATE;
+            atom_type = JS_ATOM_TYPE_SYMBOL;
+        }
+    }
+
+    if (rt->atom_free_index == 0) {
+        /* allow new atom entries */
+        uint32_t new_size, start;
+        JSAtomStruct **new_array;
+
+        /* alloc new with size progression 3/2:
+           4 6 9 13 19 28 42 63 94 141 211 316 474 711 1066 1599 2398 3597 5395 8092
+           preallocating space for predefined atoms (at least 195).
+         */
+        new_size = max_int(211, rt->atom_size * 3 / 2);
+        if (new_size > JS_ATOM_MAX)
+            goto fail;
+        /* XXX: should use realloc2 to use slack space */
+        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        if (!new_array)
+            goto fail;
+        /* Note: the atom 0 is not used */
+        start = rt->atom_size;
+        if (start == 0) {
+            /* JS_ATOM_NULL entry */
+            p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+            if (!p) {
+                js_free_rt(rt, new_array);
+                goto fail;
+            }
+            p->header.ref_count = 1;  /* not refcounted */
+            p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            new_array[0] = p;
+            rt->atom_count++;
+            start = 1;
+        }
+        rt->atom_size = new_size;
+        rt->atom_array = new_array;
+        rt->atom_free_index = start;
+        for(i = start; i < new_size; i++) {
+            uint32_t next;
+            if (i == (new_size - 1))
+                next = 0;
+            else
+                next = i + 1;
+            rt->atom_array[i] = atom_set_free(next);
+        }
+    }
+
+    if (str) {
+        if (str->atom_type == 0) {
+            p = str;
+            p->atom_type = atom_type;
+        } else {
+            p = js_malloc_rt(rt, sizeof(JSString) +
+                             (str->len << str->is_wide_char) +
+                             1 - str->is_wide_char);
+            if (unlikely(!p))
+                goto fail;
+            p->header.ref_count = 1;
+            p->is_wide_char = str->is_wide_char;
+            p->len = str->len;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            memcpy(p->u.str8, str->u.str8, (str->len << str->is_wide_char) +
+                   1 - str->is_wide_char);
+            js_free_string(rt, str);
+        }
+    } else {
+        p = js_malloc_rt(rt, sizeof(JSAtomStruct)); /* empty wide string */
+        if (!p)
+            return JS_ATOM_NULL;
+        p->header.ref_count = 1;
+        p->is_wide_char = 1;    /* Hack to represent NULL as a JSString */
+        p->len = 0;
+#ifdef DUMP_LEAKS
+        list_add_tail(&p->link, &rt->string_list);
+#endif
+    }
+
+    /* use an already free entry */
+    i = rt->atom_free_index;
+    rt->atom_free_index = atom_get_free(rt->atom_array[i]);
+    rt->atom_array[i] = p;
+
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+
+    rt->atom_count++;
+
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+        if (unlikely(rt->atom_count >= rt->atom_count_resize))
+            JS_ResizeAtomHash(rt, rt->atom_hash_size * 2);
+    }
+
+    //    JS_DumpAtoms(rt);
+    return i;
+
+ fail:
+    i = JS_ATOM_NULL;
+ done:
+    if (str)
+        js_free_string(rt, str);
+    return i;
+}
+
+/// Line number here: 7145
+JSValue JS_ThrowOutOfMemory(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    if (!rt->in_out_of_memory) {
+        rt->in_out_of_memory = TRUE;
+        JS_ThrowInternalError(ctx, "out of memory");
+        rt->in_out_of_memory = FALSE;
+    }
+    return JS_EXCEPTION;
+}
+
+/* descr must be a non-numeric string atom */
+/// Line number here: 3007
+static JSValue JS_NewSymbolFromAtom(JSContext *ctx, JSAtom descr,
+                                    int atom_type)
+{
+    JSRuntime *rt = ctx->rt;
+    JSString *p;
+
+    assert(!__JS_AtomIsTaggedInt(descr));
+    assert(descr < rt->atom_size);
+    p = rt->atom_array[descr];
+    JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+    return JS_NewSymbol(ctx, p, atom_type);
+}
+
+/* Symbol */
+/// Line number here: 48116
+static JSValue js_symbol_constructor(JSContext *ctx, JSValueConst new_target,
+                                     int argc, JSValueConst *argv)
+{
+    JSValue str;
+    JSString *p;
+
+    if (!JS_IsUndefined(new_target))
+        return JS_ThrowTypeError(ctx, "not a constructor");
+    if (argc == 0 || JS_IsUndefined(argv[0])) {
+        p = NULL;
+    } else {
+        str = JS_ToString(ctx, argv[0]);
+        if (JS_IsException(str))
+            return JS_EXCEPTION;
+        p = JS_VALUE_GET_STRING(str);
+    }
+    return JS_NewSymbol(ctx, p, JS_ATOM_TYPE_SYMBOL);
+}
+
+/// Line number here: 48196
+static JSValue js_symbol_for(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSValue str;
+
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        return JS_EXCEPTION;
+    return JS_NewSymbol(ctx, JS_VALUE_GET_STRING(str), JS_ATOM_TYPE_GLOBAL_SYMBOL);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewSymbol(JSContext *, JSString *, int)";
+"JS_NewSymbol(JSContext *, JSString *, int)" -> "__JS_NewAtom(JSRuntime *, JSString *, int)";
+"JS_NewSymbol(JSContext *, JSString *, int)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__JS_AtomIsConst(JSAtom)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "hash_string(const JSString *, uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "max_int(int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_set_free(uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__builtin_expect(long, long)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_string(JSRuntime *, JSString *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_get_free(const JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "JS_ResizeAtomHash(JSRuntime *, int)";
+"JS_ThrowOutOfMemory(JSContext *)";
+"JS_ThrowOutOfMemory(JSContext *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_NewSymbolFromAtom(JSContext *, JSAtom, int)";
+"JS_NewSymbolFromAtom(JSContext *, JSAtom, int)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"JS_NewSymbolFromAtom(JSContext *, JSAtom, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_NewSymbolFromAtom(JSContext *, JSAtom, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_NewSymbolFromAtom(JSContext *, JSAtom, int)" -> "JS_NewSymbol(JSContext *, JSString *, int)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_symbol_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_NewSymbol(JSContext *, JSString *, int)";
+"js_symbol_for(JSContext *, JSValue, int, JSValue *)";
+"js_symbol_for(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_symbol_for(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_symbol_for(JSContext *, JSValue, int, JSValue *)" -> "JS_NewSymbol(JSContext *, JSString *, int)";
+}

@@ -1,0 +1,201 @@
+Target function: "__JS_FindAtom(JSRuntime *, const char *, size_t, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 545
+typedef struct JSClassDef {
+    const char *class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+    /* if call != NULL, the object is a function. If (flags &
+       JS_CALL_FLAG_CONSTRUCTOR) != 0, the function is called as a
+       constructor. In this case, 'this_val' is new.target. A
+       constructor call only happens if the object constructor bit is
+       set (see JS_SetConstructorBit()). */
+    JSClassCall *call;
+    /* XXX: suppress this indirection ? It is here only to save memory
+       because only a few classes need these methods */
+    JSClassExoticMethods *exotic;
+} JSClassDef
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* Warning: str must be ASCII only */
+/// Line number here: 2827
+static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
+                            int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+
+    h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
+    h &= JS_ATOM_HASH_MASK;
+    h1 = h & (rt->atom_hash_size - 1);
+    i = rt->atom_hash[h1];
+    while (i != 0) {
+        p = rt->atom_array[i];
+        if (p->hash == h &&
+            p->atom_type == JS_ATOM_TYPE_STRING &&
+            p->len == len &&
+            p->is_wide_char == 0 &&
+            memcmp(p->u.str8, str, len) == 0) {
+            if (!__JS_AtomIsConst(i))
+                p->header.ref_count++;
+            return i;
+        }
+        i = p->hash_next;
+    }
+    return JS_ATOM_NULL;
+}
+
+/* XXX: could use faster version ? */
+/// Line number here: 2421
+static inline uint32_t hash_string8(const uint8_t *str, size_t len, uint32_t h)
+{
+    size_t i;
+
+    for(i = 0; i < len; i++)
+        h = h * 263 + str[i];
+    return h;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 2356
+static inline BOOL __JS_AtomIsConst(JSAtom v)
+{
+#if defined(DUMP_LEAKS) && DUMP_LEAKS > 1
+        return (int32_t)v <= 0;
+#else
+        return (int32_t)v < JS_ATOM_END;
+#endif
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* str is UTF-8 encoded */
+/// Line number here: 2939
+JSAtom JS_NewAtomLen(JSContext *ctx, const char *str, size_t len)
+{
+    JSValue val;
+
+    if (len == 0 ||
+        (!is_digit(*str) &&
+         count_ascii((const uint8_t *)str, len) == len)) {
+        JSAtom atom = __JS_FindAtom(ctx->rt, str, len, JS_ATOM_TYPE_STRING);
+        if (atom)
+            return atom;
+    }
+    val = JS_NewStringLen(ctx, str, len);
+    if (JS_IsException(val))
+        return JS_ATOM_NULL;
+    return JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(val));
+}
+
+/// Line number here: 3385
+int JS_NewClass(JSRuntime *rt, JSClassID class_id, const JSClassDef *class_def)
+{
+    int ret, len;
+    JSAtom name;
+
+    len = strlen(class_def->class_name);
+    name = __JS_FindAtom(rt, class_def->class_name, len, JS_ATOM_TYPE_STRING);
+    if (name == JS_ATOM_NULL) {
+        name = __JS_NewAtomInit(rt, class_def->class_name, len, JS_ATOM_TYPE_STRING);
+        if (name == JS_ATOM_NULL)
+            return -1;
+    }
+    ret = JS_NewClass1(rt, class_id, class_def, name);
+    JS_FreeAtomRT(rt, name);
+    return ret;
+}
+
+---- File: /usr/include/string.h
+
+/// Line number here: 63
+extern int memcmp (const void *__s1, const void *__s2, size_t __n)
+     __THROW __attribute_pure__ __nonnull ((1, 2))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "memcmp(const void *, const void *, size_t)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "__JS_AtomIsConst(JSAtom)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "is_digit(int)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "count_ascii(const uint8_t *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "__JS_FindAtom(JSRuntime *, const char *, size_t, int)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_IsException(JSValue)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)" -> "strlen(const char *)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)" -> "__JS_FindAtom(JSRuntime *, const char *, size_t, int)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)" -> "__JS_NewAtomInit(JSRuntime *, const char *, int, int)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)" -> "JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)";
+"JS_NewClass(JSRuntime *, JSClassID, const JSClassDef *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+}

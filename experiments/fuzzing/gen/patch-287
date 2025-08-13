@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35715,6 +35715,9 @@
+     } else if (tag == JS_TAG_MODULE) {
+         JSModuleDef *m;
+         m = JS_VALUE_GET_PTR(fun_obj);
++        if (m->header.ref_count < 2) {
++            funlogline();
++        }
+         /* the module refcount should be >= 2 */
+         JS_FreeValue(ctx, fun_obj);
+         if (js_create_module_function(ctx, m) < 0)

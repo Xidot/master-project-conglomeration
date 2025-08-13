@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16508,6 +16508,8 @@
+     list_for_each_safe(el, el1, &sf->var_ref_list) {
+         var_ref = list_entry(el, JSVarRef, var_ref_link);
+         /* no need to unlink var_ref->var_ref_link as the list is never used afterwards */
++        if (!var_ref->pvalue)
++            funlogline();
+         if (var_ref->async_func)
+             async_func_free(rt, var_ref->async_func);
+         var_ref->value = JS_DupValueRT(rt, *var_ref->pvalue);
+@@ -16515,6 +16517,8 @@
+         /* the reference is no longer to a local variable */
+         var_ref->is_detached = TRUE;
+     }
++    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES)
++        funlogline();
+ }
+ 
+ static void async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)

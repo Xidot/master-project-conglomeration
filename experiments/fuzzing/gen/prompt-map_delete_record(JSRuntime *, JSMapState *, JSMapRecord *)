@@ -1,0 +1,388 @@
+Target function: "map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1017
+typedef struct JSMapState {
+    BOOL is_weak; /* TRUE if WeakSet/WeakMap */
+    struct list_head records; /* list of JSMapRecord.link */
+    uint32_t record_count;
+    JSMapRecord **hash_table;
+    int hash_bits;
+    uint32_t hash_size; /* = 2 ^ hash_bits */
+    uint32_t record_count_threshold; /* count at which a hash table
+                                        resize is needed */
+    JSWeakRefHeader weakref_header; /* only used if is_weak = TRUE */
+} JSMapState
+
+/// Line number here: 1005
+typedef struct JSMapRecord {
+    int ref_count; /* used during enumeration to avoid freeing the record */
+    BOOL empty : 8; /* TRUE if the record is deleted */
+    struct list_head link;
+    struct JSMapRecord *hash_next;
+    JSValue key;
+    JSValue value;
+} JSMapRecord
+
+/* warning: the record must be removed from the hash table before */
+/// Line number here: 48585
+static void map_delete_record(JSRuntime *rt, JSMapState *s, JSMapRecord *mr)
+{
+    if (mr->empty)
+        return;
+    
+    if (s->is_weak) {
+        js_weakref_free(rt, mr->key);
+    } else {
+        JS_FreeValueRT(rt, mr->key);
+    }
+    JS_FreeValueRT(rt, mr->value);
+    if (--mr->ref_count == 0) {
+        list_del(&mr->link);
+        js_free_rt(rt, mr);
+    } else {
+        /* keep a zombie record for iterators */
+        mr->empty = TRUE;
+        mr->key = JS_UNDEFINED;
+        mr->value = JS_UNDEFINED;
+    }
+    s->record_count--;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* 'val' can be JS_UNDEFINED */
+/// Line number here: 48258
+static void js_weakref_free(JSRuntime *rt, JSValue val)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT) {
+        JSObject *p = JS_VALUE_GET_OBJ(val);
+        assert(p->weakref_count >= 1);
+        p->weakref_count--;
+        /* 'mark' is tested to avoid freeing the object structure when
+           it is about to be freed in a cycle or in
+           free_zero_refcount() */
+        if (p->weakref_count == 0 && p->header.ref_count == 0 &&
+            p->header.mark == 0) {
+            js_free_rt(rt, p);
+        }
+    } else if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
+        JSString *p = JS_VALUE_GET_STRING(val);
+        assert(p->hash >= 1);
+        p->hash--;
+        if (p->hash == 0 && p->header.ref_count == 0) {
+            /* can remove the dummy structure */
+            js_free_rt(rt, p);
+        }
+    }
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+/// Line number here: 367
+typedef struct {
+    struct list_head link;
+    JSWeakRefHeaderTypeEnum weakref_type;
+} JSWeakRefHeader
+
+/// Line number here: 48618
+static void map_delete_weakrefs(JSRuntime *rt, JSWeakRefHeader *wh)
+{
+    JSMapState *s = container_of(wh, JSMapState, weakref_header);
+    struct list_head *el, *el1;
+    JSMapRecord *mr1, **pmr;
+    uint32_t h;
+
+    list_for_each_safe(el, el1, &s->records) {
+        JSMapRecord *mr = list_entry(el, JSMapRecord, link);
+        if (!js_weakref_is_live(mr->key)) {
+
+            /* even if key is not live it can be hashed as a pointer */
+            h = map_hash_key(mr->key, s->hash_bits);
+            pmr = &s->hash_table[h];
+            for(;;) {
+                mr1 = *pmr;
+                /* the entry may already be removed from the hash
+                   table if the map was resized */
+                if (mr1 == NULL)
+                    goto done; 
+                if (mr1 == mr)
+                    break;
+                pmr = &mr1->hash_next;
+            }
+            /* remove from the hash table */
+            *pmr = mr1->hash_next;
+        done:
+            map_delete_record(rt, s, mr);
+        }
+    }
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 48709
+static JSValue js_map_delete(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv, int magic)
+{
+    JSMapState *s = JS_GetOpaque2(ctx, this_val, JS_CLASS_MAP + magic);
+    JSMapRecord *mr, **pmr;
+    JSValueConst key;
+    uint32_t h;
+
+    if (!s)
+        return JS_EXCEPTION;
+    key = map_normalize_key(ctx, argv[0]);
+    
+    h = map_hash_key(key, s->hash_bits);
+    pmr = &s->hash_table[h];
+    for(;;) {
+        mr = *pmr;
+        if (mr == NULL)
+            return JS_FALSE;
+        if (mr->empty || (s->is_weak && !js_weakref_is_live(mr->key))) {
+            /* not valid */
+        } else {
+            if (js_same_value_zero(ctx, mr->key, key))
+                break;
+        }
+        pmr = &mr->hash_next;
+    }
+
+    /* remove from the hash table */
+    *pmr = mr->hash_next;
+    
+    map_delete_record(ctx->rt, s, mr);
+    return JS_TRUE;
+}
+
+/// Line number here: 48743
+static JSValue js_map_clear(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv, int magic)
+{
+    JSMapState *s = JS_GetOpaque2(ctx, this_val, JS_CLASS_MAP + magic);
+    struct list_head *el, *el1;
+    JSMapRecord *mr;
+
+    if (!s)
+        return JS_EXCEPTION;
+
+    /* remove from the hash table */
+    memset(s->hash_table, 0, sizeof(s->hash_table[0]) * s->hash_size);
+    
+    list_for_each_safe(el, el1, &s->records) {
+        mr = list_entry(el, JSMapRecord, link);
+        map_delete_record(ctx->rt, s, mr);
+    }
+    return JS_UNDEFINED;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 68
+static inline void list_del(struct list_head *el)
+{
+    struct list_head *prev, *next;
+    prev = el->prev;
+    next = el->next;
+    prev->next = next;
+    next->prev = prev;
+    el->prev = NULL; /* fail safe */
+    el->next = NULL; /* fail safe */
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)";
+"map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)" -> "js_weakref_free(JSRuntime *, JSValue)";
+"map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)" -> "list_del(struct list_head *)";
+"map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_weakref_free(JSRuntime *, JSValue)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+"map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)";
+"map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)" -> "js_weakref_is_live(JSValue)";
+"map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)" -> "map_hash_key(JSValue, int)";
+"map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)" -> "map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOpaque2(JSContext *, JSValue, JSClassID)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "map_normalize_key(JSContext *, JSValue)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "map_hash_key(JSValue, int)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "js_weakref_is_live(JSValue)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "js_same_value_zero(JSContext *, JSValue, JSValue)";
+"js_map_delete(JSContext *, JSValue, int, JSValue *, int)" -> "map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)";
+"js_map_clear(JSContext *, JSValue, int, JSValue *, int)";
+"js_map_clear(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOpaque2(JSContext *, JSValue, JSClassID)";
+"js_map_clear(JSContext *, JSValue, int, JSValue *, int)" -> "memset(void *, int, size_t)";
+"js_map_clear(JSContext *, JSValue, int, JSValue *, int)" -> "map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)";
+}

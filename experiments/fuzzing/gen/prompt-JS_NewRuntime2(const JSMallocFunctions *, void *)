@@ -1,0 +1,597 @@
+Target function: "JS_NewRuntime2(const JSMallocFunctions *, void *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 366
+typedef struct JSMallocFunctions {
+    void *(*js_malloc)(JSMallocState *s, size_t size);
+    void (*js_free)(JSMallocState *s, void *ptr);
+    void *(*js_realloc)(JSMallocState *s, void *ptr, size_t size);
+    size_t (*js_malloc_usable_size)(const void *ptr);
+} JSMallocFunctions
+
+/// Line number here: 359
+typedef struct JSMallocState {
+    size_t malloc_count;
+    size_t malloc_size;
+    size_t malloc_limit;
+    void *opaque; /* user opaque */
+} JSMallocState
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 545
+typedef struct JSClassDef {
+    const char *class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+    /* if call != NULL, the object is a function. If (flags &
+       JS_CALL_FLAG_CONSTRUCTOR) != 0, the function is called as a
+       constructor. In this case, 'this_val' is new.target. A
+       constructor call only happens if the object constructor bit is
+       set (see JS_SetConstructorBit()). */
+    JSClassCall *call;
+    /* XXX: suppress this indirection ? It is here only to save memory
+       because only a few classes need these methods */
+    JSClassExoticMethods *exotic;
+} JSClassDef
+
+/// Line number here: 55
+typedef struct JSClass JSClass
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1576
+JSRuntime *JS_NewRuntime2(const JSMallocFunctions *mf, void *opaque)
+{
+    JSRuntime *rt;
+    JSMallocState ms;
+
+    memset(&ms, 0, sizeof(ms));
+    ms.opaque = opaque;
+    ms.malloc_limit = -1;
+
+    rt = mf->js_malloc(&ms, sizeof(JSRuntime));
+    if (!rt)
+        return NULL;
+    memset(rt, 0, sizeof(*rt));
+    rt->mf = *mf;
+    if (!rt->mf.js_malloc_usable_size) {
+        /* use dummy function if none provided */
+        rt->mf.js_malloc_usable_size = js_malloc_usable_size_unknown;
+    }
+    rt->malloc_state = ms;
+    rt->malloc_gc_threshold = 256 * 1024;
+
+    init_list_head(&rt->context_list);
+    init_list_head(&rt->gc_obj_list);
+    init_list_head(&rt->gc_zero_ref_count_list);
+    rt->gc_phase = JS_GC_PHASE_NONE;
+    init_list_head(&rt->weakref_list);
+
+#ifdef DUMP_LEAKS
+    init_list_head(&rt->string_list);
+#endif
+    init_list_head(&rt->job_list);
+
+    if (JS_InitAtoms(rt))
+        goto fail;
+
+    /* create the object, array and function classes */
+    if (init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT,
+                         countof(js_std_class_def)) < 0)
+        goto fail;
+    rt->class_array[JS_CLASS_ARGUMENTS].exotic = &js_arguments_exotic_methods;
+    rt->class_array[JS_CLASS_STRING].exotic = &js_string_exotic_methods;
+    rt->class_array[JS_CLASS_MODULE_NS].exotic = &js_module_ns_exotic_methods;
+
+    rt->class_array[JS_CLASS_C_FUNCTION].call = js_call_c_function;
+    rt->class_array[JS_CLASS_C_FUNCTION_DATA].call = js_c_function_data_call;
+    rt->class_array[JS_CLASS_BOUND_FUNCTION].call = js_call_bound_function;
+    rt->class_array[JS_CLASS_GENERATOR_FUNCTION].call = js_generator_function_call;
+    if (init_shape_hash(rt))
+        goto fail;
+
+    rt->stack_size = JS_DEFAULT_STACK_SIZE;
+    JS_UpdateStackTop(rt);
+
+    rt->current_exception = JS_UNINITIALIZED;
+
+    return rt;
+ fail:
+    JS_FreeRuntime(rt);
+    return NULL;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 2557
+static int JS_InitAtoms(JSRuntime *rt)
+{
+    int i, len, atom_type;
+    const char *p;
+
+    rt->atom_hash_size = 0;
+    rt->atom_hash = NULL;
+    rt->atom_count = 0;
+    rt->atom_size = 0;
+    rt->atom_free_index = 0;
+    if (JS_ResizeAtomHash(rt, 256))     /* there are at least 195 predefined atoms */
+        return -1;
+
+    p = js_atom_init;
+    for(i = 1; i < JS_ATOM_END; i++) {
+        if (i == JS_ATOM_Private_brand)
+            atom_type = JS_ATOM_TYPE_PRIVATE;
+        else if (i >= JS_ATOM_Symbol_toPrimitive)
+            atom_type = JS_ATOM_TYPE_SYMBOL;
+        else
+            atom_type = JS_ATOM_TYPE_STRING;
+        len = strlen(p);
+        if (__JS_NewAtomInit(rt, p, len, atom_type) == JS_ATOM_NULL)
+            return -1;
+        p = p + len + 1;
+    }
+    return 0;
+}
+
+/// Line number here: 1484
+typedef struct JSClassShortDef {
+    JSAtom class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+} JSClassShortDef
+
+/// Line number here: 1533
+static int init_class_range(JSRuntime *rt, JSClassShortDef const *tab,
+                            int start, int count)
+{
+    JSClassDef cm_s, *cm = &cm_s;
+    int i, class_id;
+
+    for(i = 0; i < count; i++) {
+        class_id = i + start;
+        memset(cm, 0, sizeof(*cm));
+        cm->finalizer = tab[i].finalizer;
+        cm->gc_mark = tab[i].gc_mark;
+        if (JS_NewClass1(rt, class_id, cm, tab[i].class_name) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 4596
+static int init_shape_hash(JSRuntime *rt)
+{
+    rt->shape_hash_bits = 4;   /* 16 shapes */
+    rt->shape_hash_size = 1 << rt->shape_hash_bits;
+    rt->shape_hash_count = 0;
+    rt->shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+                                   rt->shape_hash_size);
+    if (!rt->shape_hash)
+        return -1;
+    return 0;
+}
+
+/* should be called when changing thread to update the stack top value
+   used to check stack overflow. */
+/// Line number here: 2335
+void JS_UpdateStackTop(JSRuntime *rt)
+{
+    rt->stack_top = js_get_stack_pointer();
+    update_stack_limit(rt);
+}
+
+/// Line number here: 864
+typedef struct JSJobEntry {
+    struct list_head link;
+    JSContext *realm;
+    JSJobFunc *job_func;
+    int argc;
+    JSValue argv[0];
+} JSJobEntry
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 1907
+void JS_FreeRuntime(JSRuntime *rt)
+{
+    struct list_head *el, *el1;
+    int i;
+
+    JS_FreeValueRT(rt, rt->current_exception);
+
+    list_for_each_safe(el, el1, &rt->job_list) {
+        JSJobEntry *e = list_entry(el, JSJobEntry, link);
+        for(i = 0; i < e->argc; i++)
+            JS_FreeValueRT(rt, e->argv[i]);
+        JS_FreeContext(e->realm);
+        js_free_rt(rt, e);
+    }
+    init_list_head(&rt->job_list);
+
+    /* don't remove the weak objects to avoid create new jobs with
+       FinalizationRegistry */
+    JS_RunGCInternal(rt, FALSE);
+
+#ifdef DUMP_LEAKS
+    /* leaking objects */
+    {
+        BOOL header_done;
+        JSGCObjectHeader *p;
+        int count;
+
+        /* remove the internal refcounts to display only the object
+           referenced externally */
+        list_for_each(el, &rt->gc_obj_list) {
+            p = list_entry(el, JSGCObjectHeader, link);
+            p->mark = 0;
+        }
+        gc_decref(rt);
+
+        header_done = FALSE;
+        list_for_each(el, &rt->gc_obj_list) {
+            p = list_entry(el, JSGCObjectHeader, link);
+            if (p->ref_count != 0) {
+                if (!header_done) {
+                    printf("Object leaks:\n");
+                    JS_DumpObjectHeader(rt);
+                    header_done = TRUE;
+                }
+                JS_DumpGCObject(rt, p);
+            }
+        }
+
+        count = 0;
+        list_for_each(el, &rt->gc_obj_list) {
+            p = list_entry(el, JSGCObjectHeader, link);
+            if (p->ref_count == 0) {
+                count++;
+            }
+        }
+        if (count != 0)
+            printf("Secondary object leaks: %d\n", count);
+    }
+#endif
+    assert(list_empty(&rt->gc_obj_list));
+    assert(list_empty(&rt->weakref_list));
+
+    /* free the classes */
+    for(i = 0; i < rt->class_count; i++) {
+        JSClass *cl = &rt->class_array[i];
+        if (cl->class_id != 0) {
+            JS_FreeAtomRT(rt, cl->class_name);
+        }
+    }
+    js_free_rt(rt, rt->class_array);
+
+#ifdef DUMP_LEAKS
+    /* only the atoms defined in JS_InitAtoms() should be left */
+    {
+        BOOL header_done = FALSE;
+
+        for(i = 0; i < rt->atom_size; i++) {
+            JSAtomStruct *p = rt->atom_array[i];
+            if (!atom_is_free(p) /* && p->str*/) {
+                if (i >= JS_ATOM_END || p->header.ref_count != 1) {
+                    if (!header_done) {
+                        header_done = TRUE;
+                        if (rt->rt_info) {
+                            printf("%s:1: atom leakage:", rt->rt_info);
+                        } else {
+                            printf("Atom leaks:\n"
+                                   "    %6s %6s %s\n",
+                                   "ID", "REFCNT", "NAME");
+                        }
+                    }
+                    if (rt->rt_info) {
+                        printf(" ");
+                    } else {
+                        printf("    %6u %6u ", i, p->header.ref_count);
+                    }
+                    switch (p->atom_type) {
+                    case JS_ATOM_TYPE_STRING:
+                        JS_DumpString(rt, p);
+                        break;
+                    case JS_ATOM_TYPE_GLOBAL_SYMBOL:
+                        printf("Symbol.for(");
+                        JS_DumpString(rt, p);
+                        printf(")");
+                        break;
+                    case JS_ATOM_TYPE_SYMBOL:
+                        if (p->hash != JS_ATOM_HASH_PRIVATE) {
+                            printf("Symbol(");
+                            JS_DumpString(rt, p);
+                            printf(")");
+                        } else {
+                            printf("Private(");
+                            JS_DumpString(rt, p);
+                            printf(")");
+                        }
+                        break;
+                    }
+                    if (rt->rt_info) {
+                        printf(":%u", p->header.ref_count);
+                    } else {
+                        printf("\n");
+                    }
+                }
+            }
+        }
+        if (rt->rt_info && header_done)
+            printf("\n");
+    }
+#endif
+
+    /* free the atoms */
+    for(i = 0; i < rt->atom_size; i++) {
+        JSAtomStruct *p = rt->atom_array[i];
+        if (!atom_is_free(p)) {
+#ifdef DUMP_LEAKS
+            list_del(&p->link);
+#endif
+            js_free_rt(rt, p);
+        }
+    }
+    js_free_rt(rt, rt->atom_array);
+    js_free_rt(rt, rt->atom_hash);
+    js_free_rt(rt, rt->shape_hash);
+#ifdef DUMP_LEAKS
+    if (!list_empty(&rt->string_list)) {
+        if (rt->rt_info) {
+            printf("%s:1: string leakage:", rt->rt_info);
+        } else {
+            printf("String leaks:\n"
+                   "    %6s %s\n",
+                   "REFCNT", "VALUE");
+        }
+        list_for_each_safe(el, el1, &rt->string_list) {
+            JSString *str = list_entry(el, JSString, link);
+            if (rt->rt_info) {
+                printf(" ");
+            } else {
+                printf("    %6u ", str->header.ref_count);
+            }
+            JS_DumpString(rt, str);
+            if (rt->rt_info) {
+                printf(":%u", str->header.ref_count);
+            } else {
+                printf("\n");
+            }
+            list_del(&str->link);
+            js_free_rt(rt, str);
+        }
+        if (rt->rt_info)
+            printf("\n");
+    }
+    {
+        JSMallocState *s = &rt->malloc_state;
+        if (s->malloc_count > 1) {
+            if (rt->rt_info)
+                printf("%s:1: ", rt->rt_info);
+            printf("Memory leak: %"PRIu64" bytes lost in %"PRIu64" block%s\n",
+                   (uint64_t)(s->malloc_size - sizeof(JSRuntime)),
+                   (uint64_t)(s->malloc_count - 1), &"s"[s->malloc_count == 2]);
+        }
+    }
+#endif
+
+    {
+        JSMallocState ms = rt->malloc_state;
+        rt->mf.js_free(&ms, rt);
+    }
+}
+
+/// Line number here: 1727
+JSRuntime *JS_NewRuntime(void)
+{
+    return JS_NewRuntime2(&def_malloc_funcs, NULL);
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 40
+static inline void init_list_head(struct list_head *head)
+{
+    head->prev = head;
+    head->next = head;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewRuntime2(const JSMallocFunctions *, void *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "memset(void *, int, size_t)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JSMallocFunctions::js_malloc";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_list_head(struct list_head *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_InitAtoms(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "init_shape_hash(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_UpdateStackTop(JSRuntime *)";
+"JS_NewRuntime2(const JSMallocFunctions *, void *)" -> "JS_FreeRuntime(JSRuntime *)";
+"JS_InitAtoms(JSRuntime *)";
+"JS_InitAtoms(JSRuntime *)" -> "JS_ResizeAtomHash(JSRuntime *, int)";
+"JS_InitAtoms(JSRuntime *)" -> "strlen(const char *)";
+"JS_InitAtoms(JSRuntime *)" -> "__JS_NewAtomInit(JSRuntime *, const char *, int, int)";
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)";
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)" -> "memset(void *, int, size_t)";
+"init_class_range(JSRuntime *, const JSClassShortDef *, int, int)" -> "JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)";
+"init_shape_hash(JSRuntime *)";
+"init_shape_hash(JSRuntime *)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"JS_UpdateStackTop(JSRuntime *)";
+"JS_UpdateStackTop(JSRuntime *)" -> "js_get_stack_pointer()";
+"JS_UpdateStackTop(JSRuntime *)" -> "update_stack_limit(JSRuntime *)";
+"JS_FreeRuntime(JSRuntime *)";
+"JS_FreeRuntime(JSRuntime *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeRuntime(JSRuntime *)" -> "JS_FreeContext(JSContext *)";
+"JS_FreeRuntime(JSRuntime *)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_FreeRuntime(JSRuntime *)" -> "init_list_head(struct list_head *)";
+"JS_FreeRuntime(JSRuntime *)" -> "JS_RunGCInternal(JSRuntime *, BOOL)";
+"JS_FreeRuntime(JSRuntime *)" -> "list_empty(struct list_head *)";
+"JS_FreeRuntime(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_FreeRuntime(JSRuntime *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"JS_FreeRuntime(JSRuntime *)" -> "atom_is_free(const JSAtomStruct *)";
+"JS_FreeRuntime(JSRuntime *)" -> "JSMallocFunctions::js_free";
+"JS_NewRuntime()";
+"JS_NewRuntime()" -> "JS_NewRuntime2(const JSMallocFunctions *, void *)";
+}

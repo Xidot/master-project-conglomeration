@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1573,6 +1573,9 @@
+     JSRuntime *rt;
+     JSMallocState ms;
+ 
++    if (!mf || !mf->js_malloc)
++        funlogline();
++
+     memset(&ms, 0, sizeof(ms));
+     ms.opaque = opaque;
+     ms.malloc_limit = -1;
+@@ -1598,6 +1601,9 @@
+     if (JS_InitAtoms(rt))
+         goto fail;
+ 
++    if (countof(js_std_class_def) <= 0)
++        funlogline();
++
+     /* create the object, array and function classes */
+     if (init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT,
+                          countof(js_std_class_def)) < 0)
+@@ -1601,6 +1607,7 @@
+     /* create the object, array and function classes */
+     if (init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT,
+                          countof(js_std_class_def)) < 0)
++        funlogline();
+         goto fail;
+     rt->class_array[JS_CLASS_ARGUMENTS].exotic = &js_arguments_exotic_methods;
+     rt->class_array[JS_CLASS_STRING].exotic = &js_string_exotic_methods;

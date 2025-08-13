@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11151,6 +11151,9 @@
+ static JSBigInt *js_bigint_mul(JSContext *ctx, const JSBigInt *a,
+                                const JSBigInt *b)
+ {
++    if (!a || !b)
++        funlogline();
++
+     JSBigInt *r;
+     
+     r = js_bigint_new(ctx, a->len + b->len);
+@@ -11153,9 +11156,15 @@
+     /* correct the result if negative operands (no overflow is
+        possible) */
+     if (js_bigint_sign(a))
++        if (a->len > r->len)
++            funlogline();
+         mp_sub(r->tab + a->len, r->tab + a->len, b->tab, b->len, 0);
++
+     if (js_bigint_sign(b))
++        if (b->len > r->len)
++            funlogline();
+         mp_sub(r->tab + b->len, r->tab + b->len, a->tab, a->len, 0);
++
+     return js_bigint_normalize(ctx, r);
+ }

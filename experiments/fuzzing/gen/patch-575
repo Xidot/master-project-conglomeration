@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39317,6 +39317,8 @@
+ {
+     JSValue ctor, species;
+ 
++    if (JS_IsException(defaultConstructor))
++        funlogline();
+     if (!JS_IsObject(obj))
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+     ctor = JS_GetProperty(ctx, obj, JS_ATOM_constructor);
+@@ -39325,6 +39327,8 @@
+     if (JS_IsUndefined(ctor))
+         return JS_DupValue(ctx, defaultConstructor);
+     if (!JS_IsObject(ctor)) {
++        if (JS_IsNull(ctor))
++            funlogline();
+         JS_FreeValue(ctx, ctor);
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+     }
+@@ -39333,6 +39337,8 @@
+     if (JS_IsException(species))
+         return species;
+     if (JS_IsUndefined(species) || JS_IsNull(species))
++        if (JS_IsNull(defaultConstructor))
++            funlogline();
+         return JS_DupValue(ctx, defaultConstructor);
+     if (!JS_IsConstructor(ctx, species)) {
+         JS_FreeValue(ctx, species);

@@ -1,0 +1,40 @@
+Target function: "JS_SetMaxStackSize(JSRuntime *, size_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* use 0 to disable maximum stack size check */
+/// Line number here: 2329
+void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size)
+{
+    rt->stack_size = stack_size;
+    update_stack_limit(rt);
+}
+
+/// Line number here: 2320
+static void update_stack_limit(JSRuntime *rt)
+{
+    if (rt->stack_size == 0) {
+        rt->stack_limit = 0; /* no limit */
+    } else {
+        rt->stack_limit = rt->stack_top - rt->stack_size;
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_SetMaxStackSize(JSRuntime *, size_t)";
+"JS_SetMaxStackSize(JSRuntime *, size_t)" -> "update_stack_limit(JSRuntime *)";
+}

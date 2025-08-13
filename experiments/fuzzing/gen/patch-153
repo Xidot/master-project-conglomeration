@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -44276,6 +44276,9 @@
+ 
+ void JS_AddIntrinsicStringNormalize(JSContext *ctx)
+ {
++    if (JS_CLASS_STRING >= JS_CLASS_INIT_COUNT) {
++        funlogline();
++    }
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_STRING], js_string_proto_normalize,
+                               countof(js_string_proto_normalize));
+ }
+@@ -38148,6 +38151,9 @@
+ int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
+                                const JSCFunctionListEntry *tab, int len)
+ {
+     int i, ret;
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+ 
+     for (i = 0; i < len; i++) {
+         const JSCFunctionListEntry *e = &tab[i];

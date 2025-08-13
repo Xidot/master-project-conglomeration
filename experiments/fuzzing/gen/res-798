@@ -1,0 +1,62 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-unicode_to_utf8(uint8_t *, unsigned int)
+-------------------------
+Based on the code provided, here are the potential logical bugs:
+
+:unicode_to_utf8:207
+:unicode_to_utf8:216
+:unicode_to_utf8:219
+:unicode_to_utf8:222
+:unicode_to_utf8:225
+
+---
+
+The main logical issues in this function are:
+
+1. The function doesn't validate the input pointer `buf` is not NULL before writing to it
+2. The function doesn't properly handle the case where `c` is exactly 0x80000000 (would fall through to invalid encoding)
+3. The nested if-else structure makes it hard to verify all boundary conditions are properly handled
+4. The function claims to handle up to 31 bits but actually checks up to 0x80000000 (31 bits + 1)
+5. The return value of 0 is ambiguous - could mean either error or empty string
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/cutils.c
++++ b/cutils.c
+@@ -204,6 +204,8 @@
+ int unicode_to_utf8(uint8_t *buf, unsigned int c)
+ {
+     uint8_t *q = buf;
++    if (buf == NULL)
++        funlogline();
+ 
+     if (c < 0x80) {
+         *q++ = c;
+@@ -216,6 +218,8 @@
+             } else {
+                 if (c < 0x00200000) {
+                     *q++ = (c >> 18) | 0xf0;
++                    if (c == 0x10000)
++                        funlogline();
+                 } else {
+                     if (c < 0x04000000) {
+                         *q++ = (c >> 24) | 0xf8;
+@@ -223,6 +227,8 @@
+                         *q++ = (c >> 30) | 0xfc;
+                         *q++ = ((c >> 24) & 0x3f) | 0x80;
+                     } else {
++                        if (c == 0x80000000)
++                            funlogline();
+                         return 0;
+                     }
+                     *q++ = ((c >> 18) & 0x3f) | 0x80;
+```
+
+The instrumentation focuses on:
+1. NULL pointer check
+2. Boundary condition at exactly 0x10000
+3. Special case of 0x80000000 which is technically invalid per the function's stated limits
+
+Note that some of these might be false positives depending on the intended behavior, but represent edge cases that should be explicitly handled.

@@ -1,0 +1,43 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11171,6 +11171,9 @@
+ static JSBigInt *js_bigint_divrem(JSContext *ctx, const JSBigInt *a,
+                                   const JSBigInt *b, BOOL is_rem)
+ {
++    if (!a) {
++        funlogline();
++    }
+     JSBigInt *r, *q;
+     js_limb_t *tabb, h;
+     int na, nb, a_sign, b_sign, shift;
+@@ -11200,6 +11203,9 @@
+     }
+     /* normalize */
+     while (na > 1 && r->tab[na - 1] == 0)
++        if (na <= 1) {
++            funlogline();
++        }
+         na--;
+ 
+     tabb = js_malloc(ctx, nb * sizeof(tabb[0]));
+@@ -11235,6 +11241,9 @@
+     /* normalize 'b' */
+     shift = js_limb_clz(tabb[nb - 1]);
+     if (shift != 0) {
++        if (shift >= JS_LIMB_BITS) {
++            funlogline();
++        }
+         mp_shl(tabb, tabb, nb, shift);
+         h = mp_shl(r->tab, r->tab, na, shift);
+         if (h != 0)
+@@ -11259,6 +11268,9 @@
+     if (is_rem) {
+         js_free(ctx, q);
+         if (shift != 0)
+             mp_shr(r->tab, r->tab, nb, shift, 0);
++        else if (a_sign) {
++            funlogline();
++        }
+         r->tab[nb++] = 0;
+         if (a_sign)
+             mp_neg(r->tab, r->tab, nb);

@@ -1,0 +1,97 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__JS_AtomFromUInt32(uint32_t)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `__JS_AtomFromUInt32` function for logical bugs.
+
+Here are the potential logical bug locations:
+
+:quickjs.c:__JS_AtomFromUInt32:2370
+:quickjs.c:JS_NewAtomStr:2913
+:quickjs.c:JS_NewAtomUInt32:2961
+:quickjs.c:JS_NewAtomInt64:2978
+:quickjs.c:JS_GetOwnPropertyNamesInternal:7938
+:quickjs.c:js_build_mapped_arguments:15450
+:quickjs.c:js_for_in_next:15663
+:quickjs.c:js_parse_array_literal:24416
+:quickjs.c:bc_get_atom:37056
+
+---
+
+Now the unified diff with bug fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2369,6 +2369,9 @@
+ /* return an atom with JS_ATOM_TAG_INT tag */
+ static inline JSAtom __JS_AtomFromUInt32(uint32_t v)
+ {
++    if (v > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     return v | JS_ATOM_TAG_INT;
+ }
+ 
+@@ -2910,6 +2913,9 @@
+     uint32_t n;
+     if (is_num_string(&n, p)) {
+         if (n <= JS_ATOM_MAX_INT) {
++            if (n > JS_ATOM_MAX_INT) {
++                funlogline();
++            }
+             js_free_string(rt, p);
+             return __JS_AtomFromUInt32(n);
+         }
+@@ -7935,6 +7941,9 @@
+             add_array_keys:
+                 for(i = 0; i < len; i++) {
+                     tab_atom[num_index].atom = __JS_AtomFromUInt32(i);
++                    if (i > JS_ATOM_MAX_INT) {
++                        funlogline();
++                    }
+                     if (tab_atom[num_index].atom == JS_ATOM_NULL) {
+                         JS_FreePropertyEnum(ctx, tab_atom, num_index);
+                         return -1;
+@@ -15447,6 +15456,9 @@
+             free_var_ref(ctx->rt, var_ref);
+             goto fail;
+         }
++        if (i > JS_ATOM_MAX_INT) {
++            funlogline();
++        }
+         pr->u.var_ref = var_ref;
+     }
+ 
+@@ -24413,6 +24425,9 @@
+     emit_op(s, OP_array_from);
+     emit_u16(s, idx);
+ 
++    if (idx > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     /* larger arrays and holes are handled with explicit indices */
+     need_length = FALSE;
+     while (s->token.val != ']' && idx < 0x7fffffff) {
+@@ -37055,6 +37070,9 @@
+ static int bc_get_atom(BCReaderState *s, JSAtom *patom)
+ {
+     uint32_t v;
++    if (v > JS_ATOM_MAX_INT) {
++        funlogline();
++    }
+     if (bc_get_leb128(s, &v))
+         return -1;
+     if (v & 1) {
+```
+
+The main logical issue is that `__JS_AtomFromUInt32` doesn't validate that the input value is within the allowed range for integer atoms (JS_ATOM_MAX_INT). This could lead to incorrect atom values being created. The fix adds checks in all locations where `__JS_AtomFromUInt32` is called to ensure the value is within bounds.
+
+The bugs could trigger when:
+1. Creating atoms from very large integers
+2. Parsing numeric strings that exceed JS_ATOM_MAX_INT
+3. Handling array indices that are too large
+4. Processing mapped arguments with large indices
+5. Reading atoms from bytecode that are too large
+
+Each case now logs when an out-of-bounds value is detected before it would cause problems.

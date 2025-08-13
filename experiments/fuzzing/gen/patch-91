@@ -1,0 +1,13 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -1993,6 +1993,9 @@
+ static void free_rw_handler(JSRuntime *rt, JSOSRWHandler *rh)
+ {
+     int i;
+     list_del(&rh->link);
++    if (rh->rw_func[0].tag == JS_TAG_UNINITIALIZED || rh->rw_func[1].tag == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     for(i = 0; i < 2; i++) {
+         JS_FreeValueRT(rt, rh->rw_func[i]);
+     }

@@ -1,0 +1,602 @@
+Target function: "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 571
+static js_force_inline JSValue JS_NewInt64(JSContext *ctx, int64_t val)
+{
+    JSValue v;
+    if (val == (int32_t)val) {
+        v = JS_NewInt32(ctx, val);
+    } else {
+        v = __JS_NewFloat64(ctx, val);
+    }
+    return v;
+}
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 481
+typedef struct JSPropertyDescriptor {
+    int flags;
+    JSValue value;
+    JSValue getter;
+    JSValue setter;
+} JSPropertyDescriptor
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 9899
+static int JS_CreateDataPropertyUint32(JSContext *ctx, JSValueConst this_obj,
+                                       int64_t idx, JSValue val, int flags)
+{
+    return JS_DefinePropertyValueValue(ctx, this_obj, JS_NewInt64(ctx, idx),
+                                       val, flags | JS_PROP_CONFIGURABLE |
+                                       JS_PROP_ENUMERABLE | JS_PROP_WRITABLE);
+}
+
+/// Line number here: 9840
+int JS_DefinePropertyValueValue(JSContext *ctx, JSValueConst this_obj,
+                                JSValue prop, JSValue val, int flags)
+{
+    JSAtom atom;
+    int ret;
+    atom = JS_ValueToAtom(ctx, prop);
+    JS_FreeValue(ctx, prop);
+    if (unlikely(atom == JS_ATOM_NULL)) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    ret = JS_DefinePropertyValue(ctx, this_obj, atom, val, flags);
+    JS_FreeAtom(ctx, atom);
+    return ret;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 659
+enum JSIteratorKindEnum {
+    JS_ITERATOR_KIND_KEY,
+    JS_ITERATOR_KIND_VALUE,
+    JS_ITERATOR_KIND_KEY_AND_VALUE,
+}
+
+/// Line number here: 38764
+static JSValue JS_GetOwnPropertyNames2(JSContext *ctx, JSValueConst obj1,
+                                       int flags, int kind)
+{
+    JSValue obj, r, val, key, value;
+    JSObject *p;
+    JSPropertyEnum *atoms;
+    uint32_t len, i, j;
+
+    r = JS_UNDEFINED;
+    val = JS_UNDEFINED;
+    obj = JS_ToObject(ctx, obj1);
+    if (JS_IsException(obj))
+        return JS_EXCEPTION;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (JS_GetOwnPropertyNamesInternal(ctx, &atoms, &len, p, flags & ~JS_GPN_ENUM_ONLY))
+        goto exception;
+    r = JS_NewArray(ctx);
+    if (JS_IsException(r))
+        goto exception;
+    for(j = i = 0; i < len; i++) {
+        JSAtom atom = atoms[i].atom;
+        if (flags & JS_GPN_ENUM_ONLY) {
+            JSPropertyDescriptor desc;
+            int res;
+
+            /* Check if property is still enumerable */
+            res = JS_GetOwnPropertyInternal(ctx, &desc, p, atom);
+            if (res < 0)
+                goto exception;
+            if (!res)
+                continue;
+            js_free_desc(ctx, &desc);
+            if (!(desc.flags & JS_PROP_ENUMERABLE))
+                continue;
+        }
+        switch(kind) {
+        default:
+        case JS_ITERATOR_KIND_KEY:
+            val = JS_AtomToValue(ctx, atom);
+            if (JS_IsException(val))
+                goto exception;
+            break;
+        case JS_ITERATOR_KIND_VALUE:
+            val = JS_GetProperty(ctx, obj, atom);
+            if (JS_IsException(val))
+                goto exception;
+            break;
+        case JS_ITERATOR_KIND_KEY_AND_VALUE:
+            val = JS_NewArray(ctx);
+            if (JS_IsException(val))
+                goto exception;
+            key = JS_AtomToValue(ctx, atom);
+            if (JS_IsException(key))
+                goto exception1;
+            if (JS_CreateDataPropertyUint32(ctx, val, 0, key, JS_PROP_THROW) < 0)
+                goto exception1;
+            value = JS_GetProperty(ctx, obj, atom);
+            if (JS_IsException(value))
+                goto exception1;
+            if (JS_CreateDataPropertyUint32(ctx, val, 1, value, JS_PROP_THROW) < 0)
+                goto exception1;
+            break;
+        }
+        if (JS_CreateDataPropertyUint32(ctx, r, j++, val, 0) < 0)
+            goto exception;
+    }
+    goto done;
+
+exception1:
+    JS_FreeValue(ctx, val);
+exception:
+    JS_FreeValue(ctx, r);
+    r = JS_EXCEPTION;
+done:
+    JS_FreePropertyEnum(ctx, atoms, len);
+    JS_FreeValue(ctx, obj);
+    return r;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 40293
+static JSValue js_array_of(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    JSValue obj, args[1];
+    int i;
+
+    if (JS_IsConstructor(ctx, this_val)) {
+        args[0] = JS_NewInt32(ctx, argc);
+        obj = JS_CallConstructor(ctx, this_val, 1, (JSValueConst *)args);
+    } else {
+        obj = JS_NewArray(ctx);
+    }
+    if (JS_IsException(obj))
+        return JS_EXCEPTION;
+    for(i = 0; i < argc; i++) {
+        if (JS_CreateDataPropertyUint32(ctx, obj, i, JS_DupValue(ctx, argv[i]),
+                                        JS_PROP_THROW) < 0) {
+            goto fail;
+        }
+    }
+    if (JS_SetProperty(ctx, obj, JS_ATOM_length, JS_NewUint32(ctx, argc)) < 0) {
+    fail:
+        JS_FreeValue(ctx, obj);
+        return JS_EXCEPTION;
+    }
+    return obj;
+}
+
+/// Line number here: 41378
+static JSValue js_array_slice(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv, int splice)
+{
+    JSValue obj, arr, val, len_val;
+    int64_t len, start, k, final, n, count, del_count, new_len;
+    int kPresent;
+    JSValue *arrp;
+    uint32_t count32, i, item_count;
+
+    arr = JS_UNDEFINED;
+    obj = JS_ToObject(ctx, this_val);
+    if (js_get_length64(ctx, &len, obj))
+        goto exception;
+
+    if (JS_ToInt64Clamp(ctx, &start, argv[0], 0, len, len))
+        goto exception;
+
+    if (splice) {
+        if (argc == 0) {
+            item_count = 0;
+            del_count = 0;
+        } else
+        if (argc == 1) {
+            item_count = 0;
+            del_count = len - start;
+        } else {
+            item_count = argc - 2;
+            if (JS_ToInt64Clamp(ctx, &del_count, argv[1], 0, len - start, 0))
+                goto exception;
+        }
+        if (len + item_count - del_count > MAX_SAFE_INTEGER) {
+            JS_ThrowTypeError(ctx, "Array loo long");
+            goto exception;
+        }
+        count = del_count;
+    } else {
+        item_count = 0; /* avoid warning */
+        final = len;
+        if (!JS_IsUndefined(argv[1])) {
+            if (JS_ToInt64Clamp(ctx, &final, argv[1], 0, len, len))
+                goto exception;
+        }
+        count = max_int64(final - start, 0);
+    }
+    len_val = JS_NewInt64(ctx, count);
+    arr = JS_ArraySpeciesCreate(ctx, obj, len_val);
+    JS_FreeValue(ctx, len_val);
+    if (JS_IsException(arr))
+        goto exception;
+
+    k = start;
+    final = start + count;
+    n = 0;
+    /* The fast array test on arr ensures that
+       JS_CreateDataPropertyUint32() won't modify obj in case arr is
+       an exotic object */
+    /* Special case fast arrays */
+    if (js_get_fast_array(ctx, obj, &arrp, &count32) &&
+        js_is_fast_array(ctx, arr)) {
+        /* XXX: should share code with fast array constructor */
+        for (; k < final && k < count32; k++, n++) {
+            if (JS_CreateDataPropertyUint32(ctx, arr, n, JS_DupValue(ctx, arrp[k]), JS_PROP_THROW) < 0)
+                goto exception;
+        }
+    }
+    /* Copy the remaining elements if any (handle case of inherited properties) */
+    for (; k < final; k++, n++) {
+        kPresent = JS_TryGetPropertyInt64(ctx, obj, k, &val);
+        if (kPresent < 0)
+            goto exception;
+        if (kPresent) {
+            if (JS_CreateDataPropertyUint32(ctx, arr, n, val, JS_PROP_THROW) < 0)
+                goto exception;
+        }
+    }
+    if (JS_SetProperty(ctx, arr, JS_ATOM_length, JS_NewInt64(ctx, n)) < 0)
+        goto exception;
+
+    if (splice) {
+        new_len = len + item_count - del_count;
+        if (item_count != del_count) {
+            if (JS_CopySubArray(ctx, obj, start + item_count,
+                                start + del_count, len - (start + del_count),
+                                item_count <= del_count ? +1 : -1) < 0)
+                goto exception;
+
+            for (k = len; k-- > new_len; ) {
+                if (JS_DeletePropertyInt64(ctx, obj, k, JS_PROP_THROW) < 0)
+                    goto exception;
+            }
+        }
+        for (i = 0; i < item_count; i++) {
+            if (JS_SetPropertyInt64(ctx, obj, start + i, JS_DupValue(ctx, argv[i + 2])) < 0)
+                goto exception;
+        }
+        if (JS_SetProperty(ctx, obj, JS_ATOM_length, JS_NewInt64(ctx, new_len)) < 0)
+            goto exception;
+    }
+    JS_FreeValue(ctx, obj);
+    return arr;
+
+ exception:
+    JS_FreeValue(ctx, obj);
+    JS_FreeValue(ctx, arr);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 41962
+static JSValue js_create_array(JSContext *ctx, int len, JSValueConst *tab)
+{
+    JSValue obj;
+    int i;
+
+    obj = JS_NewArray(ctx);
+    if (JS_IsException(obj))
+        return JS_EXCEPTION;
+    for(i = 0; i < len; i++) {
+        if (JS_CreateDataPropertyUint32(ctx, obj, i, JS_DupValue(ctx, tab[i]), 0) < 0) {
+            JS_FreeValue(ctx, obj);
+            return JS_EXCEPTION;
+        }
+    }
+    return obj;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 43428
+static JSValue js_string_split(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    // split(sep, limit)
+    JSValueConst O = this_val, separator = argv[0], limit = argv[1];
+    JSValueConst args[2];
+    JSValue S, A, R, T;
+    uint32_t lim, lengthA;
+    int64_t p, q, s, r, e;
+    JSString *sp, *rp;
+
+    if (JS_IsUndefined(O) || JS_IsNull(O))
+        return JS_ThrowTypeError(ctx, "cannot convert to object");
+
+    S = JS_UNDEFINED;
+    A = JS_UNDEFINED;
+    R = JS_UNDEFINED;
+
+    if (!JS_IsUndefined(separator) && !JS_IsNull(separator)) {
+        JSValue splitter;
+        splitter = JS_GetProperty(ctx, separator, JS_ATOM_Symbol_split);
+        if (JS_IsException(splitter))
+            return JS_EXCEPTION;
+        if (!JS_IsUndefined(splitter) && !JS_IsNull(splitter)) {
+            args[0] = O;
+            args[1] = limit;
+            return JS_CallFree(ctx, splitter, separator, 2, args);
+        }
+    }
+    S = JS_ToString(ctx, O);
+    if (JS_IsException(S))
+        goto exception;
+    A = JS_NewArray(ctx);
+    if (JS_IsException(A))
+        goto exception;
+    lengthA = 0;
+    if (JS_IsUndefined(limit)) {
+        lim = 0xffffffff;
+    } else {
+        if (JS_ToUint32(ctx, &lim, limit) < 0)
+            goto exception;
+    }
+    sp = JS_VALUE_GET_STRING(S);
+    s = sp->len;
+    R = JS_ToString(ctx, separator);
+    if (JS_IsException(R))
+        goto exception;
+    rp = JS_VALUE_GET_STRING(R);
+    r = rp->len;
+    p = 0;
+    if (lim == 0)
+        goto done;
+    if (JS_IsUndefined(separator))
+        goto add_tail;
+    if (s == 0) {
+        if (r != 0)
+            goto add_tail;
+        goto done;
+    }
+    q = p;
+    for (q = p; (q += !r) <= s - r - !r; q = p = e + r) {
+        e = string_indexof(sp, rp, q);
+        if (e < 0)
+            break;
+        T = js_sub_string(ctx, sp, p, e);
+        if (JS_IsException(T))
+            goto exception;
+        if (JS_CreateDataPropertyUint32(ctx, A, lengthA++, T, 0) < 0)
+            goto exception;
+        if (lengthA == lim)
+            goto done;
+    }
+add_tail:
+    T = js_sub_string(ctx, sp, p, s);
+    if (JS_IsException(T))
+        goto exception;
+    if (JS_CreateDataPropertyUint32(ctx, A, lengthA++, T,0 ) < 0)
+        goto exception;
+done:
+    JS_FreeValue(ctx, S);
+    JS_FreeValue(ctx, R);
+    return A;
+
+exception:
+    JS_FreeValue(ctx, A);
+    JS_FreeValue(ctx, S);
+    JS_FreeValue(ctx, R);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 54551
+static JSValue js_array_from_iterator(JSContext *ctx, uint32_t *plen,
+                                      JSValueConst obj, JSValueConst method)
+{
+    JSValue arr, iter, next_method = JS_UNDEFINED, val;
+    BOOL done;
+    uint32_t k;
+
+    *plen = 0;
+    arr = JS_NewArray(ctx);
+    if (JS_IsException(arr))
+        return arr;
+    iter = JS_GetIterator2(ctx, obj, method);
+    if (JS_IsException(iter))
+        goto fail;
+    next_method = JS_GetProperty(ctx, iter, JS_ATOM_next);
+    if (JS_IsException(next_method))
+        goto fail;
+    k = 0;
+    for(;;) {
+        val = JS_IteratorNext(ctx, iter, next_method, 0, NULL, &done);
+        if (JS_IsException(val))
+            goto fail;
+        if (done)
+            break;
+        if (JS_CreateDataPropertyUint32(ctx, arr, k, val, JS_PROP_THROW) < 0)
+            goto fail;
+        k++;
+    }
+    JS_FreeValue(ctx, next_method);
+    JS_FreeValue(ctx, iter);
+    *plen = k;
+    return arr;
+ fail:
+    JS_FreeValue(ctx, next_method);
+    JS_FreeValue(ctx, iter);
+    JS_FreeValue(ctx, arr);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)" -> "JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)";
+"JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)" -> "JS_ValueToAtom(JSContext *, JSValue)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)" -> "__builtin_expect(long, long)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_DefinePropertyValueValue(JSContext *, JSValue, JSValue, JSValue, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_NewInt64(JSContext *, int64_t)";
+"JS_NewInt64(JSContext *, int64_t)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_NewInt64(JSContext *, int64_t)" -> "__JS_NewFloat64(JSContext *, double)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_ToObject(JSContext *, JSValue)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_IsException(JSValue)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_NewArray(JSContext *)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_AtomToValue(JSContext *, JSAtom)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetOwnPropertyNames2(JSContext *, JSValue, int, int)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_IsConstructor(JSContext *, JSValue)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"js_array_of(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToInt64Clamp(JSContext *, int64_t *, JSValue, int64_t, int64_t, int64_t)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsUndefined(JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "max_int64(int64_t, int64_t)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ArraySpeciesCreate(JSContext *, JSValue, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "js_get_fast_array(JSContext *, JSValue, JSValue **, uint32_t *)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "js_is_fast_array(JSContext *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_TryGetPropertyInt64(JSContext *, JSValue, int64_t, JSValue *)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_CopySubArray(JSContext *, JSValue, int64_t, int64_t, int64_t, int)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DeletePropertyInt64(JSContext *, JSValue, int64_t, int)";
+"js_array_slice(JSContext *, JSValue, int, JSValue *, int)" -> "JS_SetPropertyInt64(JSContext *, JSValue, int64_t, JSValue)";
+"js_create_array(JSContext *, int, JSValue *)";
+"js_create_array(JSContext *, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_create_array(JSContext *, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_create_array(JSContext *, int, JSValue *)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_create_array(JSContext *, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_create_array(JSContext *, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "string_indexof(JSString *, JSString *, int)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "js_sub_string(JSContext *, JSString *, int, int)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_string_split(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_NewArray(JSContext *)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_GetIterator2(JSContext *, JSValue, JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

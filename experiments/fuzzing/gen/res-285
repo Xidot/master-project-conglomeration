@@ -1,0 +1,49 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_error_toString(JSContext *, JSValue, int, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_error_toString` function:
+
+:js_error_toString:40012
+:js_error_toString:40028
+:js_error_toString:40038
+
+---
+
+Reasons:
+1. Line 40012: Missing check for JS_IsException after JS_GetProperty call for 'name'
+2. Line 40028: Missing check for JS_IsException after JS_GetProperty call for 'message' 
+3. Line 40038: Potential memory leak if JS_ConcatString3 fails but name isn't freed
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -40012,6 +40012,8 @@
+     if (!JS_IsObject(this_val))
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+     name = JS_GetProperty(ctx, this_val, JS_ATOM_name);
++    if (JS_IsException(name))
++        return JS_EXCEPTION;
+     if (JS_IsUndefined(name))
+         name = JS_AtomToString(ctx, JS_ATOM_Error);
+     else
+@@ -40021,6 +40023,8 @@
+ 
+     msg = JS_GetProperty(ctx, this_val, JS_ATOM_message);
+     if (JS_IsUndefined(msg))
++        if (JS_IsException(msg))
++            return JS_EXCEPTION;
+         msg = JS_AtomToString(ctx, JS_ATOM_empty_string);
+     else
+         msg = JS_ToStringFree(ctx, msg);
+@@ -40030,6 +40034,8 @@
+     }
+     if (!JS_IsEmptyString(name) && !JS_IsEmptyString(msg))
+         name = JS_ConcatString3(ctx, "", name, ": ");
++    if (JS_IsException(name))
++        return JS_EXCEPTION;
+     return JS_ConcatString(ctx, name, msg);
+ }
+```

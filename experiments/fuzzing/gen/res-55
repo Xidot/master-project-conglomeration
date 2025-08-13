@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-count_ascii(const uint8_t *, size_t)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs in the `count_ascii` function:
+
+:count_ascii:2938
+
+---
+
+The issue is in the `count_ascii` function where it checks for ASCII characters (those < 128). The function returns the count of consecutive ASCII characters from the start of the buffer, but there's no protection against buffer overflow if `len` is incorrect or if the buffer isn't properly null-terminated. While buffer overflows are excluded from our analysis, the logical error is that the function assumes the input is valid UTF-8 but doesn't verify this.
+
+Here's the diff to instrument this:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2935,6 +2935,8 @@
+ {
+     const uint8_t *p, *p_end;
+     p = buf;
++    if (len == 0)
++        funlogline();
+     p_end = buf + len;
+     while (p < p_end && *p < 128)
+         p++;
+```
+
+The instrumentation checks for the edge case where len=0, which while not strictly a bug, is worth logging since it's an edge case that could lead to logical errors in calling functions. The main logical assumption (that the input is valid UTF-8) can't be easily checked with a simple predicate, so we just instrument the edge case.
+
+Note that the function is used in contexts where the input is expected to be valid UTF-8 (like in `JS_NewStringLen`), but it doesn't actually verify this - it just counts ASCII characters until it finds a non-ASCII one or reaches the end. This could lead to logical errors in calling functions that make assumptions about the return value.

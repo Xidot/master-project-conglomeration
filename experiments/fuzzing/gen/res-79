@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-find_own_property1(JSObject *, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `find_own_property1` function:
+
+:quickjs.c:find_own_property1:5514
+:quickjs.c:find_own_property1:5519
+
+---
+
+1. Line 5514: The function doesn't check if `sh->prop_hash_mask` is 0, which could lead to division by zero when calculating the hash index.
+
+2. Line 5519: The function doesn't validate if `h` is within bounds of the property array before accessing `prop[h - 1]`, which could lead to out-of-bounds access.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5514,6 +5514,9 @@
+     intptr_t h;
+     sh = p->shape;
+     h = (uintptr_t)atom & sh->prop_hash_mask;
++    if (sh->prop_hash_mask == 0) {
++        funlogline();
++    }
+     h = prop_hash_end(sh)[-h - 1];
+     prop = get_shape_prop(sh);
+     while (h) {
+@@ -5521,6 +5524,9 @@
+         if (likely(pr->atom == atom)) {
+             return pr;
+         }
++        if (h >= sh->prop_count) {
++            funlogline();
++        }
+         h = pr->hash_next;
+     }
+     return NULL;
+```
+
+The first check ensures we don't have a potential division by zero issue with the hash mask, and the second check ensures we don't access properties beyond the allocated array bounds.

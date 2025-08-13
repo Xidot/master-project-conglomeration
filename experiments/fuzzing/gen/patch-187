@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3081,6 +3081,8 @@
+         p = rt->atom_array[atom];
+         if (p->atom_type == JS_ATOM_TYPE_STRING) {
+             goto ret_string;
+         } else if (force_string) {
++            if (JS_ATOM_empty_string >= rt->atom_size)
++                funlogline();
+             if (p->len == 0 && p->is_wide_char != 0) {
+                 /* no description string */
+                 p = rt->atom_array[JS_ATOM_empty_string];
+@@ -3088,6 +3090,8 @@
+         ret_string:
+             return JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+         } else {
++            if (p->atom_type != JS_ATOM_TYPE_SYMBOL && p->atom_type != JS_ATOM_TYPE_GLOBAL_SYMBOL)
++                funlogline();
+             return JS_DupValue(ctx, JS_MKPTR(JS_TAG_SYMBOL, p));
+         }
+     }

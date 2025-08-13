@@ -1,0 +1,35 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16082,6 +16082,7 @@
+     uint32_t i, count32, pos;
+ 
+     if (JS_VALUE_GET_TAG(sp[-2]) != JS_TAG_INT) {
++        funlogline();
+         JS_ThrowInternalError(ctx, "invalid index for append");
+         return -1;
+     }
+@@ -16102,6 +16103,7 @@
+     is_array_iterator = JS_IsCFunction(ctx, iterator,
+                                        (JSCFunction *)js_create_array_iterator,
+                                        JS_ITERATOR_KIND_VALUE);
++    if (is_array_iterator < 0) funlogline();
+     JS_FreeValue(ctx, iterator);
+ 
+     enumobj = JS_GetIterator(ctx, sp[-1], FALSE);
+@@ -16122,6 +16124,7 @@
+         if (js_get_length32(ctx, &len, sp[-1]))
+             goto exception;
+         /* if len > count32, the elements >= count32 might be read in
+            the prototypes and might have side effects */
++        if (len != count32 && len > count32) funlogline();
+         if (len != count32)
+             goto general_case;
+         /* Handle fast arrays explicitly */
+@@ -16142,6 +16145,7 @@
+                 goto exception;
+             }
+             if (done) {
++                if (!JS_IsUndefined(value)) funlogline();
+                 /* value is JS_UNDEFINED */
+                 break;
+             }

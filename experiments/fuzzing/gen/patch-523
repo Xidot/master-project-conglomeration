@@ -1,0 +1,98 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37788,6 +37788,7 @@
+     JSValue obj = JS_UNDEFINED;
+ 
+     if (js_check_stack_overflow(ctx->rt, 0))
++        funlogline();
+         return JS_ThrowStackOverflow(ctx);
+ 
+     if (bc_get_u8(s, &tag))
+@@ -37804,6 +37805,7 @@
+         obj = JS_NewBool(ctx, tag - BC_TAG_BOOL_FALSE);
+         break;
+     case BC_TAG_INT32:
++        funlogline();
+         {
+             int32_t val;
+             if (bc_get_sleb128(s, &val))
+@@ -37811,6 +37813,7 @@
+             bc_read_trace(s, "%d\n", val);
+             obj = JS_NewInt32(ctx, val);
+         }
++        funlogline();
+         break;
+     case BC_TAG_FLOAT64:
+         {
+@@ -37819,6 +37822,7 @@
+                 return JS_EXCEPTION;
+             bc_read_trace(s, "%g\n", u.d);
+             obj = __JS_NewFloat64(ctx, u.d);
++            funlogline();
+         }
+         break;
+     case BC_TAG_STRING:
+@@ -37827,6 +37831,7 @@
+             p = JS_ReadString(s);
+             if (!p)
+                 return JS_EXCEPTION;
++            funlogline();
+             obj = JS_MKPTR(JS_TAG_STRING, p);
+         }
+         break;
+@@ -37834,6 +37839,7 @@
+         if (!s->allow_bytecode)
+             goto invalid_tag;
+         obj = JS_ReadFunctionTag(s);
++        funlogline();
+         break;
+     case BC_TAG_MODULE:
+         if (!s->allow_bytecode)
+@@ -37841,6 +37847,7 @@
+         obj = JS_ReadModule(s);
+         break;
+     case BC_TAG_OBJECT:
++        funlogline();
+         obj = JS_ReadObjectTag(s);
+         break;
+     case BC_TAG_ARRAY:
+@@ -37848,6 +37855,7 @@
+         obj = JS_ReadArray(s, tag);
+         break;
+     case BC_TAG_TYPED_ARRAY:
++        funlogline();
+         obj = JS_ReadTypedArray(s);
+         break;
+     case BC_TAG_ARRAY_BUFFER:
+@@ -37855,6 +37863,7 @@
+         break;
+     case BC_TAG_SHARED_ARRAY_BUFFER:
+         if (!s->allow_sab || !ctx->rt->sab_funcs.sab_dup)
++            funlogline();
+             goto invalid_tag;
+         obj = JS_ReadSharedArrayBuffer(s);
+         break;
+@@ -37862,6 +37871,7 @@
+         obj = JS_ReadDate(s);
+         break;
+     case BC_TAG_OBJECT_VALUE:
++        funlogline();
+         obj = JS_ReadObjectValue(s);
+         break;
+     case BC_TAG_BIG_INT:
+@@ -37869,6 +37879,7 @@
+         break;
+     case BC_TAG_OBJECT_REFERENCE:
+         {
++            funlogline();
+             uint32_t val;
+             if (!s->allow_reference)
+                 return JS_ThrowSyntaxError(ctx, "object references are not allowed");
+@@ -37876,6 +37887,7 @@
+                 return JS_EXCEPTION;
+             bc_read_trace(s, "%u\n", val);
+             if (val >= s->objects_count) {
++                funlogline();
+                 return JS_ThrowSyntaxError(ctx, "invalid object reference (%u >= %u)",
+                                            val, s->objects_count);
+             }

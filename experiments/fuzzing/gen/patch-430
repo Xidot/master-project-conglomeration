@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2125,6 +2125,9 @@
+ 
+     ctx = JS_NewContextRaw(rt);
+     if (!ctx)
+         return NULL;
++    if (!ctx) {
++        funlogline();
++    }
+ 
+     JS_AddIntrinsicBaseObjects(ctx);
+     JS_AddIntrinsicDate(ctx);
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2095,6 +2095,9 @@
+     ctx->header.ref_count = 1;
+     add_gc_object(rt, &ctx->header, JS_GC_OBJ_TYPE_JS_CONTEXT);
+ 
++    if (rt->class_count <= 0) {
++        funlogline();
++    }
+     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
+                                     rt->class_count);
+     if (!ctx->class_proto) {

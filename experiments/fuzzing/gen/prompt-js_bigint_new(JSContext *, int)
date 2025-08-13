@@ -1,0 +1,1048 @@
+Target function: "js_bigint_new(JSContext *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 10880
+static JSBigInt *js_bigint_new(JSContext *ctx, int len)
+{
+    JSBigInt *r;
+    if (len > JS_BIGINT_MAX_SIZE) {
+        JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+        return NULL;
+    }
+    r = js_malloc(ctx, sizeof(JSBigInt) + len * sizeof(js_limb_t));
+    if (!r)
+        return NULL;
+    r->header.ref_count = 1;
+    r->len = len;
+    return r;
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7123
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowRangeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_RANGE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1362
+void *js_malloc(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_malloc_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 10950
+static JSBigInt *js_bigint_new_si(JSContext *ctx, js_slimb_t a)
+{
+    JSBigInt *r;
+    r = js_bigint_new(ctx, 1);
+    if (!r)
+        return NULL;
+    r->tab[0] = a;
+    return r;
+}
+
+/// Line number here: 10979
+static JSBigInt *js_bigint_new_ui64(JSContext *ctx, uint64_t a)
+{
+    if (a <= INT64_MAX) {
+        return js_bigint_new_si64(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, (65 + JS_LIMB_BITS - 1) / JS_LIMB_BITS);
+        if (!r)
+            return NULL;
+#if JS_LIMB_BITS == 64
+        r->tab[0] = a;
+        r->tab[1] = 0;
+#else
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        r->tab[2] = 0;
+#endif
+        return r;
+    }
+}
+
+/// Line number here: 406
+typedef int128_t js_sdlimb_t
+
+/// Line number here: 11000
+static JSBigInt *js_bigint_new_di(JSContext *ctx, js_sdlimb_t a)
+{
+    JSBigInt *r;
+    if (a == (js_slimb_t)a) {
+        r = js_bigint_new(ctx, 1);
+        if (!r)
+            return NULL;
+        r->tab[0] = a;
+    } else {
+        r = js_bigint_new(ctx, 2);
+        if (!r)
+            return NULL;
+        r->tab[0] = a;
+        r->tab[1] = a >> JS_LIMB_BITS;
+    }
+    return r;
+}
+
+/* return NULL in case of error. Compute a + b (b_neg = 0) or a - b
+   (b_neg = 1) */
+/* XXX: optimize */
+/// Line number here: 11102
+static JSBigInt *js_bigint_add(JSContext *ctx, const JSBigInt *a,
+                               const JSBigInt *b, int b_neg)
+{
+    JSBigInt *r;
+    int n1, n2, i;
+    js_limb_t carry, op1, op2, a_sign, b_sign;
+    
+    n2 = max_int(a->len, b->len);
+    n1 = min_int(a->len, b->len);
+    r = js_bigint_new(ctx, n2);
+    if (!r)
+        return NULL;
+    /* XXX: optimize */
+    /* common part */
+    carry = b_neg;
+    for(i = 0; i < n1; i++) {
+        op1 = a->tab[i];
+        op2 = b->tab[i] ^ (-b_neg);
+        ADDC(r->tab[i], carry, op1, op2, carry);
+    }
+    a_sign = -js_bigint_sign(a);
+    b_sign = (-js_bigint_sign(b)) ^ (-b_neg);
+    /* part with sign extension of one operand  */
+    if (a->len > b->len) {
+        for(i = n1; i < n2; i++) {
+            op1 = a->tab[i];
+            ADDC(r->tab[i], carry, op1, b_sign, carry);
+        }
+    } else if (a->len < b->len) {
+        for(i = n1; i < n2; i++) {
+            op2 = b->tab[i] ^ (-b_neg);
+            ADDC(r->tab[i], carry, a_sign, op2, carry);
+        }
+    }
+
+    /* part with sign extension for both operands. Extend the result
+       if necessary */
+    return js_bigint_extend(ctx, r, a_sign + b_sign + carry);
+}
+
+/// Line number here: 11151
+static JSBigInt *js_bigint_mul(JSContext *ctx, const JSBigInt *a,
+                               const JSBigInt *b)
+{
+    JSBigInt *r;
+    
+    r = js_bigint_new(ctx, a->len + b->len);
+    if (!r)
+        return NULL;
+    mp_mul_basecase(r->tab, a->tab, a->len, b->tab, b->len);
+    /* correct the result if negative operands (no overflow is
+       possible) */
+    if (js_bigint_sign(a))
+        mp_sub(r->tab + a->len, r->tab + a->len, b->tab, b->len, 0);
+    if (js_bigint_sign(b))
+        mp_sub(r->tab + b->len, r->tab + b->len, a->tab, a->len, 0);
+    return js_bigint_normalize(ctx, r);
+}
+
+/* return the division or the remainder. 'b' must be != 0. return NULL
+   in case of exception (division by zero or memory error) */
+/// Line number here: 11171
+static JSBigInt *js_bigint_divrem(JSContext *ctx, const JSBigInt *a,
+                                  const JSBigInt *b, BOOL is_rem)
+{
+    JSBigInt *r, *q;
+    js_limb_t *tabb, h;
+    int na, nb, a_sign, b_sign, shift;
+    
+    if (b->len == 1 && b->tab[0] == 0) {
+        JS_ThrowRangeError(ctx, "BigInt division by zero");
+        return NULL;
+    }
+    
+    a_sign = js_bigint_sign(a);
+    b_sign = js_bigint_sign(b);
+    na = a->len;
+    nb = b->len;
+
+    r = js_bigint_new(ctx, na + 2); 
+    if (!r)
+        return NULL;
+    if (a_sign) {
+        mp_neg(r->tab, a->tab, na);
+    } else {
+        memcpy(r->tab, a->tab, na * sizeof(a->tab[0]));
+    }
+    /* normalize */
+    while (na > 1 && r->tab[na - 1] == 0)
+        na--;
+
+    tabb = js_malloc(ctx, nb * sizeof(tabb[0]));
+    if (!tabb) {
+        js_free(ctx, r);
+        return NULL;
+    }
+    if (b_sign) {
+        mp_neg(tabb, b->tab, nb);
+    } else {
+        memcpy(tabb, b->tab, nb * sizeof(tabb[0]));
+    }
+    /* normalize */
+    while (nb > 1 && tabb[nb - 1] == 0)
+        nb--;
+
+    /* trivial case if 'a' is small */
+    if (na < nb) {
+        js_free(ctx, r);
+        js_free(ctx, tabb);
+        if (is_rem) {
+            /* r = a */
+            r = js_bigint_new(ctx, a->len);
+            if (!r)
+                return NULL;
+            memcpy(r->tab, a->tab, a->len * sizeof(a->tab[0])); 
+            return r;
+        } else {
+            /* q = 0 */
+            return js_bigint_new_si(ctx, 0);
+        }
+    }
+
+    /* normalize 'b' */
+    shift = js_limb_clz(tabb[nb - 1]);
+    if (shift != 0) {
+        mp_shl(tabb, tabb, nb, shift);
+        h = mp_shl(r->tab, r->tab, na, shift);
+        if (h != 0)
+            r->tab[na++] = h;
+    }
+
+    q = js_bigint_new(ctx, na - nb + 2); /* one more limb for the sign */
+    if (!q) {
+        js_free(ctx, r);
+        js_free(ctx, tabb);
+        return NULL;
+    }
+
+    //    js_bigint_dump1(ctx, "a", r->tab, na);
+    //    js_bigint_dump1(ctx, "b", tabb, nb);
+    mp_divnorm(q->tab, r->tab, na, tabb, nb);
+    js_free(ctx, tabb);
+
+    if (is_rem) {
+        js_free(ctx, q);
+        if (shift != 0)
+            mp_shr(r->tab, r->tab, nb, shift, 0);
+        r->tab[nb++] = 0;
+        if (a_sign)
+            mp_neg(r->tab, r->tab, nb);
+        r = js_bigint_normalize1(ctx, r, nb);
+        return r;
+    } else {
+        js_free(ctx, r);
+        q->tab[na - nb + 1] = 0;
+        if (a_sign ^ b_sign) {
+            mp_neg(q->tab, q->tab, q->len);
+        }
+        q = js_bigint_normalize(ctx, q);
+        return q;
+    }
+}
+
+/// Line number here: 230
+typedef enum OPCodeEnum OPCodeEnum
+
+/* and, or, xor */
+/// Line number here: 11273
+static JSBigInt *js_bigint_logic(JSContext *ctx, const JSBigInt *a,
+                                 const JSBigInt *b, OPCodeEnum op)
+{
+    JSBigInt *r;
+    js_limb_t b_sign;
+    int a_len, b_len, i;
+
+    if (a->len < b->len) {
+        const JSBigInt *tmp;
+        tmp = a;
+        a = b;
+        b = tmp;
+    }
+    /* a_len >= b_len */
+    a_len = a->len;
+    b_len = b->len;
+    b_sign = -js_bigint_sign(b);
+
+    r = js_bigint_new(ctx, a_len);
+    if (!r)
+        return NULL;
+    switch(op) {
+    case OP_or:
+        for(i = 0; i < b_len; i++) {
+            r->tab[i] = a->tab[i] | b->tab[i];
+        }
+        for(i = b_len; i < a_len; i++) {
+            r->tab[i] = a->tab[i] | b_sign;
+        }
+        break;
+    case OP_and:
+        for(i = 0; i < b_len; i++) {
+            r->tab[i] = a->tab[i] & b->tab[i];
+        }
+        for(i = b_len; i < a_len; i++) {
+            r->tab[i] = a->tab[i] & b_sign;
+        }
+        break;
+    case OP_xor:
+        for(i = 0; i < b_len; i++) {
+            r->tab[i] = a->tab[i] ^ b->tab[i];
+        }
+        for(i = b_len; i < a_len; i++) {
+            r->tab[i] = a->tab[i] ^ b_sign;
+        }
+        break;
+    default:
+        abort();
+    }
+    return js_bigint_normalize(ctx, r);
+}
+
+/// Line number here: 11325
+static JSBigInt *js_bigint_not(JSContext *ctx, const JSBigInt *a)
+{
+    JSBigInt *r;
+    int i;
+    
+    r = js_bigint_new(ctx, a->len);
+    if (!r)
+        return NULL;
+    for(i = 0; i < a->len; i++) {
+        r->tab[i] = ~a->tab[i];
+    }
+    /* no normalization is needed */
+    return r;
+}
+
+/// Line number here: 11340
+static JSBigInt *js_bigint_shl(JSContext *ctx, const JSBigInt *a,
+                               unsigned int shift1)
+{
+    int d, i, shift;
+    JSBigInt *r;
+    js_limb_t l;
+
+    if (a->len == 1 && a->tab[0] == 0)
+        return js_bigint_new_si(ctx, 0); /* zero case */
+    d = shift1 / JS_LIMB_BITS;
+    shift = shift1 % JS_LIMB_BITS;
+    r = js_bigint_new(ctx, a->len + d);
+    if (!r)
+        return NULL;
+    for(i = 0; i < d; i++)
+        r->tab[i] = 0;
+    if (shift == 0) {
+        for(i = 0; i < a->len; i++) {
+            r->tab[i + d] = a->tab[i];
+        }
+    } else {
+        l = mp_shl(r->tab + d, a->tab, a->len, shift);
+        if (js_bigint_sign(a))
+            l |= (js_limb_t)(-1) << shift;
+        r = js_bigint_extend(ctx, r, l);
+    }
+    return r;
+}
+
+/// Line number here: 11369
+static JSBigInt *js_bigint_shr(JSContext *ctx, const JSBigInt *a,
+                               unsigned int shift1)
+{
+    int d, i, shift, a_sign, n1;
+    JSBigInt *r;
+
+    d = shift1 / JS_LIMB_BITS;
+    shift = shift1 % JS_LIMB_BITS;
+    a_sign = js_bigint_sign(a);
+    if (d >= a->len)
+        return js_bigint_new_si(ctx, -a_sign);
+    n1 = a->len - d;
+    r = js_bigint_new(ctx, n1);
+    if (!r)
+        return NULL;
+    if (shift == 0) {
+        for(i = 0; i < n1; i++) {
+            r->tab[i] = a->tab[i + d];
+        }
+        /* no normalization is needed */
+    } else {
+        mp_shr(r->tab, a->tab + d, n1, shift, -a_sign);
+        r = js_bigint_normalize(ctx, r);
+    }
+    return r;
+}
+
+/// Line number here: 11396
+static JSBigInt *js_bigint_pow(JSContext *ctx, const JSBigInt *a, JSBigInt *b)
+{
+    uint32_t e;
+    int n_bits, i;
+    JSBigInt *r, *r1;
+    
+    /* b must be >= 0 */
+    if (js_bigint_sign(b)) {
+        JS_ThrowRangeError(ctx, "BigInt negative exponent");
+        return NULL;
+    }
+    if (b->len == 1 && b->tab[0] == 0) {
+        /* a^0 = 1 */
+        return js_bigint_new_si(ctx, 1);
+    } else if (a->len == 1) {
+        js_limb_t v;
+        BOOL is_neg;
+
+        v = a->tab[0];
+        if (v <= 1)
+            return js_bigint_new_si(ctx, v);
+        else if (v == -1)
+            return js_bigint_new_si(ctx, 1 - 2 * (b->tab[0] & 1));
+        is_neg = (js_slimb_t)v < 0;
+        if (is_neg)
+            v = -v;
+        if ((v & (v - 1)) == 0) {
+            uint64_t e1;
+            int n;
+            /* v = 2^n */
+            n = JS_LIMB_BITS - 1 - js_limb_clz(v);
+            if (b->len > 1)
+                goto overflow;
+            if (b->tab[0] > INT32_MAX)
+                goto overflow;
+            e = b->tab[0];
+            e1 = (uint64_t)e * n;
+            if (e1 > JS_BIGINT_MAX_SIZE * JS_LIMB_BITS)
+                goto overflow;
+            e = e1;
+            if (is_neg)
+                is_neg = b->tab[0] & 1;
+            r = js_bigint_new(ctx,
+                              (e + JS_LIMB_BITS + 1 - is_neg) / JS_LIMB_BITS);
+            if (!r)
+                return NULL;
+            memset(r->tab, 0, sizeof(r->tab[0]) * r->len);
+            r->tab[e / JS_LIMB_BITS] =
+                (js_limb_t)(1 - 2 * is_neg) << (e % JS_LIMB_BITS);
+            return r;
+        }
+    }
+    if (b->len > 1)
+        goto overflow;
+    if (b->tab[0] > INT32_MAX)
+        goto overflow;
+    e = b->tab[0];
+    n_bits = 32 - clz32(e);
+
+    r = js_bigint_new(ctx, a->len);
+    if (!r)
+        return NULL;
+    memcpy(r->tab, a->tab, a->len * sizeof(a->tab[0]));
+    for(i = n_bits - 2; i >= 0; i--) {
+        r1 = js_bigint_mul(ctx, r, r);
+        if (!r1)
+            return NULL;
+        js_free(ctx, r);
+        r = r1;
+        if ((e >> i) & 1) {
+            r1 = js_bigint_mul(ctx, r, a);
+            if (!r1)
+                return NULL;
+            js_free(ctx, r);
+            r = r1;
+        }
+    }
+    return r;
+ overflow:
+    JS_ThrowRangeError(ctx, "BigInt is too large");
+    return NULL;
+}
+
+/* syntax: [-]digits in base radix. Return NULL if memory error. radix
+   = 10, 2, 8 or 16. */
+/// Line number here: 11743
+static JSBigInt *js_bigint_from_string(JSContext *ctx,
+                                       const char *str, int radix)
+{
+    const char *p = str;
+    int is_neg, n_digits, n_limbs, len, log2_radix, n_bits, i;
+    JSBigInt *r;
+    js_limb_t v, c, h;
+    
+    is_neg = 0;
+    if (*p == '-') {
+        is_neg = 1;
+        p++;
+    }
+    while (*p == '0')
+        p++;
+    n_digits = strlen(p);
+    log2_radix = 32 - clz32(radix - 1); /* ceil(log2(radix)) */
+    /* compute the maximum number of limbs */
+    /* XXX: overflow */
+    if (radix == 10) {
+        n_bits = (n_digits * 27 + 7) / 8; /* >= ceil(n_digits * log2(10)) */
+    } else {
+        n_bits = n_digits * log2_radix;
+    }
+    /* we add one extra bit for the sign */
+    n_limbs = max_int(1, n_bits / JS_LIMB_BITS + 1);
+    r = js_bigint_new(ctx, n_limbs);
+    if (!r)
+        return NULL;
+    if (radix == 10) {
+        int digits_per_limb = JS_LIMB_DIGITS;
+        len = 1;
+        r->tab[0] = 0;
+        for(;;) {
+            /* XXX: slow */
+            v = 0;
+            for(i = 0; i < digits_per_limb; i++) {
+                c = to_digit(*p);
+                if (c >= radix)
+                    break;
+                p++;
+                v = v * 10 + c;
+            }
+            if (i == 0)
+                break;
+            if (len == 1 && r->tab[0] == 0) {
+                r->tab[0] = v;
+            } else {
+                h = mp_mul1(r->tab, r->tab, len, js_pow_dec[i], v);
+                if (h != 0) {
+                    r->tab[len++] = h;
+                }
+            }
+        }
+        /* add one extra limb to have the correct sign*/
+        if ((r->tab[len - 1] >> (JS_LIMB_BITS - 1)) != 0)
+            r->tab[len++] = 0;
+        r->len = len;
+    } else {
+        unsigned int bit_pos, shift, pos;
+        
+        /* power of two base: no multiplication is needed */
+        r->len = n_limbs;
+        memset(r->tab, 0, sizeof(r->tab[0]) * n_limbs);
+        for(i = 0; i < n_digits; i++) {
+            c = to_digit(p[n_digits - 1 - i]);
+            assert(c < radix);
+            bit_pos = i * log2_radix;
+            shift = bit_pos & (JS_LIMB_BITS - 1);
+            pos = bit_pos / JS_LIMB_BITS;
+            r->tab[pos] |= c << shift;
+            /* if log2_radix does not divide JS_LIMB_BITS, needed an
+               additional op */
+            if (shift + log2_radix > JS_LIMB_BITS) {
+                r->tab[pos + 1] |= c >> (JS_LIMB_BITS - shift);
+            }
+        }
+    }
+    r = js_bigint_normalize(ctx, r);
+    /* XXX: could do it in place */
+    if (is_neg) {
+        JSBigInt *r1;
+        r1 = js_bigint_neg(ctx, r);
+        js_free(ctx, r);
+        r = r1;
+    }
+    return r;
+}
+
+/// Line number here: 11914
+static JSValue js_bigint_to_string1(JSContext *ctx, JSValueConst val, int radix)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
+        char buf[66];
+        int len;
+        len = i64toa_radix(buf, JS_VALUE_GET_SHORT_BIG_INT(val), radix);
+        return js_new_string8_len(ctx, buf, len);
+    } else {
+        JSBigInt *r, *tmp = NULL;
+        char *buf, *q, *buf_end;
+        int is_neg, n_bits, log2_radix, n_digits;
+        BOOL is_binary_radix;
+        JSValue res;
+        
+        assert(JS_VALUE_GET_TAG(val) == JS_TAG_BIG_INT);
+        r = JS_VALUE_GET_PTR(val);
+        if (r->len == 1 && r->tab[0] == 0) {
+            /* '0' case */
+            return js_new_string8_len(ctx, "0", 1);
+        }
+        is_binary_radix = ((radix & (radix - 1)) == 0);
+        is_neg = js_bigint_sign(r);
+        if (is_neg) {
+            tmp = js_bigint_neg(ctx, r);
+            if (!tmp)
+                return JS_EXCEPTION;
+            r = tmp;
+        } else if (!is_binary_radix) {
+            /* need to modify 'r' */
+            tmp = js_bigint_new(ctx, r->len);
+            if (!tmp)
+                return JS_EXCEPTION;
+            memcpy(tmp->tab, r->tab, r->len * sizeof(r->tab[0]));
+            r = tmp;
+        }
+        log2_radix = 31 - clz32(radix); /* floor(log2(radix)) */
+        n_bits = r->len * JS_LIMB_BITS - js_limb_safe_clz(r->tab[r->len - 1]);
+        /* n_digits is exact only if radix is a power of
+           two. Otherwise it is >= the exact number of digits */
+        n_digits = (n_bits + log2_radix - 1) / log2_radix;
+        /* XXX: could directly build the JSString */
+        buf = js_malloc(ctx, n_digits + is_neg + 1);
+        if (!buf) {
+            js_free(ctx, tmp);
+            return JS_EXCEPTION;
+        }
+        q = buf + n_digits + is_neg + 1;
+        *--q = '\0';
+        buf_end = q;
+        if (!is_binary_radix) {
+            int len;
+            js_limb_t radix_base, v;
+            radix_base = radix_base_table[radix - 2];
+            len = r->len;
+            for(;;) {
+                /* remove leading zero limbs */
+                while (len > 1 && r->tab[len - 1] == 0)
+                    len--;
+                if (len == 1 && r->tab[0] < radix_base) {
+                    v = r->tab[0];
+                    if (v != 0) {
+                        q = js_u64toa(q, v, radix);
+                    }
+                    break;
+                } else {
+                    v = mp_div1(r->tab, r->tab, len, radix_base, 0);
+                    q = limb_to_a(q, v, radix, digits_per_limb_table[radix - 2]);
+                }
+            }
+        } else {
+            int i, shift;
+            unsigned int bit_pos, pos, c;
+
+            /* radix is a power of two */
+            for(i = 0; i < n_digits; i++) {
+                bit_pos = i * log2_radix;
+                pos = bit_pos / JS_LIMB_BITS;
+                shift = bit_pos % JS_LIMB_BITS;
+                if (likely((shift + log2_radix) <= JS_LIMB_BITS)) {
+                    c = r->tab[pos] >> shift;
+                } else {
+                    c = (r->tab[pos] >> shift) |
+                        (r->tab[pos + 1] << (JS_LIMB_BITS - shift));
+                }
+                c &= (radix - 1);
+                *--q = digits[c];
+            }
+        }
+        if (is_neg)
+            *--q = '-';
+        js_free(ctx, tmp);
+        res = js_new_string8_len(ctx, q, buf_end - q);
+        js_free(ctx, buf);
+        return res;
+    }
+}
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 37179
+static JSValue JS_ReadBigInt(BCReaderState *s)
+{
+    JSValue obj = JS_UNDEFINED;
+    uint32_t len, i, n;
+    JSBigInt *p;
+    js_limb_t v;
+    uint8_t v8;
+    
+    if (bc_get_leb128(s, &len))
+        goto fail;
+    bc_read_trace(s, "len=%" PRId64 "\n", (int64_t)len);
+    if (len == 0) {
+        /* zero case */
+        bc_read_trace(s, "}\n");
+        return __JS_NewShortBigInt(s->ctx, 0);
+    }
+    p = js_bigint_new(s->ctx, (len - 1) / (JS_LIMB_BITS / 8) + 1);
+    if (!p)
+        goto fail;
+    for(i = 0; i < len / (JS_LIMB_BITS / 8); i++) {
+#if JS_LIMB_BITS == 32
+        if (bc_get_u32(s, &v))
+            goto fail;
+#else
+        if (bc_get_u64(s, &v))
+            goto fail;
+#endif
+        p->tab[i] = v;
+    }
+    n = len % (JS_LIMB_BITS / 8);
+    if (n != 0) {
+        int shift;
+        v = 0;
+        for(i = 0; i < n; i++) {
+            if (bc_get_u8(s, &v8))
+                goto fail;
+            v |= (js_limb_t)v8 << (i * 8);
+        }
+        shift = JS_LIMB_BITS - n * 8;
+        /* extend the sign */
+        if (shift != 0) {
+            v = (js_slimb_t)(v << shift) >> shift;
+        }
+        p->tab[p->len - 1] = v;
+    }
+    bc_read_trace(s, "}\n");
+    return JS_CompactBigInt(s->ctx, p);
+ fail:
+    JS_FreeValue(s->ctx, obj);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 52164
+static JSValue js_bigint_asUintN(JSContext *ctx,
+                                  JSValueConst this_val,
+                                  int argc, JSValueConst *argv, int asIntN)
+{
+    uint64_t bits;
+    JSValue res, a;
+    
+    if (JS_ToIndex(ctx, &bits, argv[0]))
+        return JS_EXCEPTION;
+    a = JS_ToBigInt(ctx, argv[1]);
+    if (JS_IsException(a))
+        return JS_EXCEPTION;
+    if (bits == 0) {
+        JS_FreeValue(ctx, a);
+        res = __JS_NewShortBigInt(ctx, 0);
+    } else if (JS_VALUE_GET_TAG(a) == JS_TAG_SHORT_BIG_INT) {
+        /* fast case */
+        if (bits >= JS_SHORT_BIG_INT_BITS) {
+            res = a;
+        } else {
+            uint64_t v;
+            int shift;
+            shift = 64 - bits;
+            v = JS_VALUE_GET_SHORT_BIG_INT(a);
+            v = v << shift;
+            if (asIntN)
+                v = (int64_t)v >> shift;
+            else
+                v = v >> shift;
+            res = __JS_NewShortBigInt(ctx, v);
+        }
+    } else {
+        JSBigInt *r, *p = JS_VALUE_GET_PTR(a);
+        if (bits >= p->len * JS_LIMB_BITS) {
+            res = a;
+        } else {
+            int len, shift, i;
+            js_limb_t v;
+            len = (bits + JS_LIMB_BITS - 1) / JS_LIMB_BITS;
+            r = js_bigint_new(ctx, len);
+            if (!r) {
+                JS_FreeValue(ctx, a);
+                return JS_EXCEPTION;
+            }
+            r->len = len;
+            for(i = 0; i < len - 1; i++)
+                r->tab[i] = p->tab[i];
+            shift = (-bits) & (JS_LIMB_BITS - 1);
+            /* 0 <= shift <= JS_LIMB_BITS - 1 */
+            v = p->tab[len - 1] << shift;
+            if (asIntN)
+                v = (js_slimb_t)v >> shift;
+            else
+                v = v >> shift;
+            r->tab[len - 1] = v;
+            r = js_bigint_normalize(ctx, r);
+            JS_FreeValue(ctx, a);
+            res = JS_CompactBigInt(ctx, r);
+        }
+    }
+    return res;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_new(JSContext *, int)";
+"js_bigint_new(JSContext *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_new(JSContext *, int)" -> "js_malloc(JSContext *, size_t)";
+"JS_ThrowRangeError(JSContext *, const char *, ...)";
+"JS_ThrowRangeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowRangeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowRangeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"js_malloc(JSContext *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_malloc(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_new_si(JSContext *, js_slimb_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_new_ui64(JSContext *, uint64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_new_di(JSContext *, js_sdlimb_t)";
+"js_bigint_new_di(JSContext *, js_sdlimb_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "max_int(int, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "min_int(int, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)" -> "mp_mul_basecase(js_limb_t *, const js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)" -> "mp_sub(js_limb_t *, const js_limb_t *, const js_limb_t *, int, js_limb_t)";
+"js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_neg(js_limb_t *, const js_limb_t *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_malloc(JSContext *, size_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_free(JSContext *, void *)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_limb_clz(js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_shl(js_limb_t *, const js_limb_t *, int, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_shr(js_limb_t *, const js_limb_t *, int, int, js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_normalize1(JSContext *, JSBigInt *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)";
+"js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)" -> "abort()";
+"js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_not(JSContext *, const JSBigInt *)";
+"js_bigint_not(JSContext *, const JSBigInt *)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "mp_shl(js_limb_t *, const js_limb_t *, int, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "mp_shr(js_limb_t *, const js_limb_t *, int, int, js_limb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_limb_clz(js_limb_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "memset(void *, int, size_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "clz32(unsigned int)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_free(JSContext *, void *)";
+"js_bigint_from_string(JSContext *, const char *, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "strlen(const char *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "clz32(unsigned int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "max_int(int, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "to_digit(int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "mp_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "memset(void *, int, size_t)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_neg(JSContext *, const JSBigInt *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_free(JSContext *, void *)";
+"js_bigint_to_string1(JSContext *, JSValue, int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "i64toa_radix(char *, int64_t, unsigned int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_bigint_neg(JSContext *, const JSBigInt *)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "clz32(unsigned int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_limb_safe_clz(js_limb_t)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_malloc(JSContext *, size_t)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_free(JSContext *, void *)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "js_u64toa(char *, int64_t, unsigned int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "mp_div1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "limb_to_a(char *, js_limb_t, unsigned int, int)";
+"js_bigint_to_string1(JSContext *, JSValue, int)" -> "__builtin_expect(long, long)";
+"JS_ReadBigInt(BCReaderState *)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"JS_ReadBigInt(BCReaderState *)" -> "js_bigint_new(JSContext *, int)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_u64(BCReaderState *, uint64_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadBigInt(BCReaderState *)" -> "JS_CompactBigInt(JSContext *, JSBigInt *)";
+"JS_ReadBigInt(BCReaderState *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToBigInt(JSContext *, JSValue)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_asUintN(JSContext *, JSValue, int, JSValue *, int)" -> "JS_CompactBigInt(JSContext *, JSBigInt *)";
+}

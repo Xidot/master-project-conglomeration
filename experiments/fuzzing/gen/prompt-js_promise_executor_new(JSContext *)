@@ -1,0 +1,239 @@
+Target function: "js_promise_executor_new(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 352
+typedef JSValue JSCFunctionData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data)
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 49641
+static JSValue js_promise_executor_new(JSContext *ctx)
+{
+    JSValueConst func_data[2];
+
+    func_data[0] = JS_UNDEFINED;
+    func_data[1] = JS_UNDEFINED;
+    return JS_NewCFunctionData(ctx, js_promise_executor, 2,
+                               0, 2, func_data);
+}
+
+/// Line number here: 5396
+typedef struct JSCFunctionDataRecord {
+    JSCFunctionData *func;
+    uint8_t length;
+    uint8_t data_len;
+    uint16_t magic;
+    JSValue data[0];
+} JSCFunctionDataRecord
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 5446
+JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
+                            int length, int magic, int data_len,
+                            JSValueConst *data)
+{
+    JSCFunctionDataRecord *s;
+    JSValue func_obj;
+    int i;
+
+    func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                      JS_CLASS_C_FUNCTION_DATA);
+    if (JS_IsException(func_obj))
+        return func_obj;
+    s = js_malloc(ctx, sizeof(*s) + data_len * sizeof(JSValue));
+    if (!s) {
+        JS_FreeValue(ctx, func_obj);
+        return JS_EXCEPTION;
+    }
+    s->func = func;
+    s->length = length;
+    s->data_len = data_len;
+    s->magic = magic;
+    for(i = 0; i < data_len; i++)
+        s->data[i] = JS_DupValue(ctx, data[i]);
+    JS_SetOpaque(func_obj, s);
+    js_function_set_properties(ctx, func_obj,
+                               JS_ATOM_empty_string, length);
+    return func_obj;
+}
+
+/// Line number here: 49651
+static JSValue js_new_promise_capability(JSContext *ctx,
+                                         JSValue *resolving_funcs,
+                                         JSValueConst ctor)
+{
+    JSValue executor, result_promise;
+    JSCFunctionDataRecord *s;
+    int i;
+
+    executor = js_promise_executor_new(ctx);
+    if (JS_IsException(executor))
+        return executor;
+
+    if (JS_IsUndefined(ctor)) {
+        result_promise = js_promise_constructor(ctx, ctor, 1,
+                                                (JSValueConst *)&executor);
+    } else {
+        result_promise = JS_CallConstructor(ctx, ctor, 1,
+                                            (JSValueConst *)&executor);
+    }
+    if (JS_IsException(result_promise))
+        goto fail;
+    s = JS_GetOpaque(executor, JS_CLASS_C_FUNCTION_DATA);
+    for(i = 0; i < 2; i++) {
+        if (check_function(ctx, s->data[i]))
+            goto fail;
+    }
+    for(i = 0; i < 2; i++)
+        resolving_funcs[i] = JS_DupValue(ctx, s->data[i]);
+    JS_FreeValue(ctx, executor);
+    return result_promise;
+ fail:
+    JS_FreeValue(ctx, executor);
+    JS_FreeValue(ctx, result_promise);
+    return JS_EXCEPTION;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_promise_executor_new(JSContext *)";
+"js_promise_executor_new(JSContext *)" -> "JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "JS_IsException(JSValue)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "JS_SetOpaque(JSValue, void *)";
+"JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)" -> "js_function_set_properties(JSContext *, JSValue, JSAtom, int)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "js_promise_executor_new(JSContext *)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_IsException(JSValue)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "js_promise_constructor(JSContext *, JSValue, int, JSValue *)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "check_function(JSContext *, JSValue)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_new_promise_capability(JSContext *, JSValue *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

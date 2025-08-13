@@ -1,0 +1,210 @@
+Target function: "JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/* op1 must be a bigint or int. */
+/// Line number here: 14608
+static JSBigInt *JS_ToBigIntBuf(JSContext *ctx, JSBigIntBuf *buf1,
+                                JSValue op1)
+{
+    JSBigInt *p1;
+    
+    switch(JS_VALUE_GET_TAG(op1)) {
+    case JS_TAG_INT:
+        p1 = js_bigint_set_si(buf1, JS_VALUE_GET_INT(op1));
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+        p1 = js_bigint_set_short(buf1, op1);
+        break;
+    case JS_TAG_BIG_INT:
+        p1 = JS_VALUE_GET_PTR(op1);
+        break;
+    default:
+        abort();
+    }
+    return p1;
+}
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 10895
+static JSBigInt *js_bigint_set_si(JSBigIntBuf *buf, js_slimb_t a)
+{
+    JSBigInt *r = (JSBigInt *)buf->big_int_buf;
+    r->header.ref_count = 0; /* fail safe */
+    r->len = 1;
+    r->tab[0] = a;
+    return r;
+}
+
+/* val must be a short big int */
+/// Line number here: 10924
+static JSBigInt *js_bigint_set_short(JSBigIntBuf *buf, JSValueConst val)
+{
+    return js_bigint_set_si(buf, JS_VALUE_GET_SHORT_BIG_INT(val));
+}
+
+/// Line number here: 230
+typedef enum OPCodeEnum OPCodeEnum
+
+/* op1 and op2 must be numeric types and at least one must be a
+   bigint. No exception is generated. */
+/// Line number here: 14631
+static int js_compare_bigint(JSContext *ctx, OPCodeEnum op,
+                             JSValue op1, JSValue op2)
+{
+    int res, val, tag1, tag2;
+    JSBigIntBuf buf1, buf2;
+    JSBigInt *p1, *p2;
+    
+    tag1 = JS_VALUE_GET_NORM_TAG(op1);
+    tag2 = JS_VALUE_GET_NORM_TAG(op2);
+    if ((tag1 == JS_TAG_SHORT_BIG_INT || tag1 == JS_TAG_INT) &&
+        (tag2 == JS_TAG_SHORT_BIG_INT || tag2 == JS_TAG_INT)) {
+        /* fast path */
+        js_slimb_t v1, v2;
+        if (tag1 == JS_TAG_INT)
+            v1 = JS_VALUE_GET_INT(op1);
+        else
+            v1 = JS_VALUE_GET_SHORT_BIG_INT(op1);
+        if (tag2 == JS_TAG_INT)
+            v2 = JS_VALUE_GET_INT(op2);
+        else
+            v2 = JS_VALUE_GET_SHORT_BIG_INT(op2);
+        val = (v1 > v2) - (v1 < v2);
+    } else {
+        if (tag1 == JS_TAG_FLOAT64) {
+            p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
+            val = js_bigint_float64_cmp(ctx, p2, JS_VALUE_GET_FLOAT64(op1));
+            if (val == 2)
+                goto unordered;
+            val = -val;
+        } else if (tag2 == JS_TAG_FLOAT64) {
+            p1 = JS_ToBigIntBuf(ctx, &buf1, op1);
+            val = js_bigint_float64_cmp(ctx, p1, JS_VALUE_GET_FLOAT64(op2));
+            if (val == 2) {
+            unordered:
+                JS_FreeValue(ctx, op1);
+                JS_FreeValue(ctx, op2);
+                return FALSE;
+            }
+        } else {
+            p1 = JS_ToBigIntBuf(ctx, &buf1, op1);
+            p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
+            val = js_bigint_cmp(ctx, p1, p2);
+        }
+        JS_FreeValue(ctx, op1);
+        JS_FreeValue(ctx, op2);
+    }
+
+    switch(op) {
+    case OP_lt:
+        res = val < 0;
+        break;
+    case OP_lte:
+        res = val <= 0;
+        break;
+    case OP_gt:
+        res = val > 0;
+        break;
+    case OP_gte:
+        res = val >= 0;
+        break;
+    case OP_eq:
+        res = val == 0;
+        break;
+    default:
+        abort();
+    }
+    return res;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 729
+extern void abort (void) __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)";
+"JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)" -> "js_bigint_set_si(JSBigIntBuf *, js_slimb_t)";
+"JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+"JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)" -> "abort()";
+"js_bigint_set_short(JSBigIntBuf *, JSValue)";
+"js_bigint_set_short(JSBigIntBuf *, JSValue)" -> "js_bigint_set_si(JSBigIntBuf *, js_slimb_t)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "js_bigint_cmp(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "abort()";
+}

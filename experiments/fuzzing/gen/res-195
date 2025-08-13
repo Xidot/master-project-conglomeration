@@ -1,0 +1,65 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_divrem` function:
+
+:js_bigint_divrem:11171
+:js_bigint_divrem:11203
+:js_bigint_divrem:11238
+:js_bigint_divrem:11262
+
+---
+
+1. Line 11171: The function doesn't check if input 'a' is NULL before using it
+2. Line 11203: The normalization loop could potentially underflow 'na' to 0
+3. Line 11238: The function doesn't verify if the shift operation result is valid before using it
+4. Line 11262: The remainder calculation doesn't properly handle the case where shift is 0
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11171,6 +11171,9 @@
+ static JSBigInt *js_bigint_divrem(JSContext *ctx, const JSBigInt *a,
+                                   const JSBigInt *b, BOOL is_rem)
+ {
++    if (!a) {
++        funlogline();
++    }
+     JSBigInt *r, *q;
+     js_limb_t *tabb, h;
+     int na, nb, a_sign, b_sign, shift;
+@@ -11200,6 +11203,9 @@
+     }
+     /* normalize */
+     while (na > 1 && r->tab[na - 1] == 0)
++        if (na <= 1) {
++            funlogline();
++        }
+         na--;
+ 
+     tabb = js_malloc(ctx, nb * sizeof(tabb[0]));
+@@ -11235,6 +11241,9 @@
+     /* normalize 'b' */
+     shift = js_limb_clz(tabb[nb - 1]);
+     if (shift != 0) {
++        if (shift >= JS_LIMB_BITS) {
++            funlogline();
++        }
+         mp_shl(tabb, tabb, nb, shift);
+         h = mp_shl(r->tab, r->tab, na, shift);
+         if (h != 0)
+@@ -11259,6 +11268,9 @@
+     if (is_rem) {
+         js_free(ctx, q);
+         if (shift != 0)
+             mp_shr(r->tab, r->tab, nb, shift, 0);
++        else if (a_sign) {
++            funlogline();
++        }
+         r->tab[nb++] = 0;
+         if (a_sign)
+             mp_neg(r->tab, r->tab, nb);
+```

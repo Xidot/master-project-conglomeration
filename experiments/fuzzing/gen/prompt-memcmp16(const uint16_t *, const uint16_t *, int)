@@ -1,0 +1,55 @@
+Target function: "memcmp16(const uint16_t *, const uint16_t *, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 4034
+static int memcmp16(const uint16_t *src1, const uint16_t *src2, int len)
+{
+    int c, i;
+    for(i = 0; i < len; i++) {
+        c = src1[i] - src2[i];
+        if (c != 0)
+            return c;
+    }
+    return 0;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 4045
+static int js_string_memcmp(const JSString *p1, int pos1, const JSString *p2,
+                            int pos2, int len)
+{
+    int res;
+
+    if (likely(!p1->is_wide_char)) {
+        if (likely(!p2->is_wide_char))
+            res = memcmp(p1->u.str8 + pos1, p2->u.str8 + pos2, len);
+        else
+            res = -memcmp16_8(p2->u.str16 + pos2, p1->u.str8 + pos1, len);
+    } else {
+        if (!p2->is_wide_char)
+            res = memcmp16_8(p1->u.str16 + pos1, p2->u.str8 + pos2, len);
+        else
+            res = memcmp16(p1->u.str16 + pos1, p2->u.str16 + pos2, len);
+    }
+    return res;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+"js_string_memcmp(const JSString *, int, const JSString *, int, int)" -> "__builtin_expect(long, long)";
+"js_string_memcmp(const JSString *, int, const JSString *, int, int)" -> "memcmp(const void *, const void *, size_t)";
+"js_string_memcmp(const JSString *, int, const JSString *, int, int)" -> "memcmp16_8(const uint16_t *, const uint8_t *, int)";
+"js_string_memcmp(const JSString *, int, const JSString *, int, int)" -> "memcmp16(const uint16_t *, const uint16_t *, int)";
+}

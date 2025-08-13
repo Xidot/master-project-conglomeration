@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `get_exported_names` function:
+
+:get_exported_names:28880
+:get_exported_names:28929
+:get_exported_names:28939
+
+---
+
+1. Line 28880: The function doesn't check if `m` is NULL before using it, which could lead to a crash if called with NULL module.
+
+2. Line 28929: When adding a new exported name entry, it sets `en->u.me` to NULL for non-local exports, but doesn't properly handle the case where `me` might be NULL.
+
+3. Line 28939: The recursive call to `get_exported_names` doesn't check if `m1` is NULL after getting it from `m->req_module_entries`.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28877,6 +28877,9 @@
+                                           GetExportNamesState *s,
+                                           JSModuleDef *m, BOOL from_star)
+ {
++    if (unlikely(m == NULL)) {
++        funlogline();
++    }
+     ExportedNameEntry *en;
+     int i, j;
+ 
+@@ -28926,6 +28929,9 @@
+             en = &s->exported_names[s->exported_names_count++];
+             en->export_name = me->export_name;
+             /* avoid a second lookup for simple module exports */
++            if (unlikely(me == NULL)) {
++                funlogline();
++            }
+             if (from_star || me->export_type != JS_EXPORT_TYPE_LOCAL)
+                 en->u.me = NULL;
+             else
+@@ -28936,6 +28942,9 @@
+         }
+     }
+     for(i = 0; i < m->star_export_entries_count; i++) {
++        if (unlikely(m->req_module_entries == NULL)) {
++            funlogline();
++        }
+         JSStarExportEntry *se = &m->star_export_entries[i];
+         JSModuleDef *m1;
+         m1 = m->req_module_entries[se->req_module_idx].module;
+```
+
+The changes add NULL checks at critical points where the code could potentially crash if given invalid input. The `funlogline()` calls will help track when these edge cases occur.

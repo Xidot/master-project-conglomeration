@@ -1,0 +1,97 @@
+Target function: "js_bigint_new_si64(JSContext *, int64_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 10960
+static JSBigInt *js_bigint_new_si64(JSContext *ctx, int64_t a)
+{
+#if JS_LIMB_BITS == 64
+    return js_bigint_new_si(ctx, a);
+#else
+    if (a >= INT32_MIN && a <= INT32_MAX) {
+        return js_bigint_new_si(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, 2);
+        if (!r)
+            return NULL;
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        return r;
+    }
+#endif
+}
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 10950
+static JSBigInt *js_bigint_new_si(JSContext *ctx, js_slimb_t a)
+{
+    JSBigInt *r;
+    r = js_bigint_new(ctx, 1);
+    if (!r)
+        return NULL;
+    r->tab[0] = a;
+    return r;
+}
+
+/// Line number here: 10979
+static JSBigInt *js_bigint_new_ui64(JSContext *ctx, uint64_t a)
+{
+    if (a <= INT64_MAX) {
+        return js_bigint_new_si64(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, (65 + JS_LIMB_BITS - 1) / JS_LIMB_BITS);
+        if (!r)
+            return NULL;
+#if JS_LIMB_BITS == 64
+        r->tab[0] = a;
+        r->tab[1] = 0;
+#else
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        r->tab[2] = 0;
+#endif
+        return r;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_si64(JSContext *, int64_t)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_new_si(JSContext *, js_slimb_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_new_ui64(JSContext *, uint64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new(JSContext *, int)";
+}

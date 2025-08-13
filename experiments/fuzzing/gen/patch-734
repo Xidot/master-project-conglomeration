@@ -1,0 +1,29 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -889,6 +889,8 @@
+     int e_offset, d, n, n0;
+ 
+     e_offset = -f * radix_shift;
++    if (f != 0 && e_offset / radix_shift != -f)
++        funlogline();
+     if (radix1 != 1) {
+         d = digits_per_limb_table[radix1 - 2];
+         if (f >= 0) {
+@@ -913,6 +915,8 @@
+             f = -f;
+             l = (f + d - 1) / d; /* high bound for the number of limbs (XXX: make it better) */
+             e_offset += l * LIMB_BITS;
++            if (a->len > 1 && a->tab[a->len - 1] == 0)
++                funlogline();
+             if (!is_int) {
+                 /* at least 'e' bits are needed in the final result for rounding */
+                 extra_bits = max_int(e - mpb_floor_log2(a), 0);
+@@ -944,6 +948,8 @@
+                 f -= n;
+             }
+             /* if the remainder is non zero, use it for rounding */
++            if (rem != 0 && (a->tab[0] & 1)
++                funlogline();
+             a->tab[0] |= (rem != 0);
+         }
+     }

@@ -1,0 +1,411 @@
+Target function: "hash_string(const JSString *, uint32_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 2440
+static uint32_t hash_string(const JSString *str, uint32_t h)
+{
+    if (str->is_wide_char)
+        h = hash_string16(str->u.str16, str->len, h);
+    else
+        h = hash_string8(str->u.str8, str->len, h);
+    return h;
+}
+
+/// Line number here: 2430
+static inline uint32_t hash_string16(const uint16_t *str,
+                                     size_t len, uint32_t h)
+{
+    size_t i;
+
+    for(i = 0; i < len; i++)
+        h = h * 263 + str[i];
+    return h;
+}
+
+/* XXX: could use faster version ? */
+/// Line number here: 2421
+static inline uint32_t hash_string8(const uint8_t *str, size_t len, uint32_t h)
+{
+    size_t i;
+
+    for(i = 0; i < len; i++)
+        h = h * 263 + str[i];
+    return h;
+}
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 2449
+static uint32_t hash_string_rope(JSValueConst val, uint32_t h)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+        return hash_string(JS_VALUE_GET_STRING(val), h);
+    } else {
+        JSStringRope *r = JS_VALUE_GET_STRING_ROPE(val);
+        h = hash_string_rope(r->left, h);
+        return hash_string_rope(r->right, h);
+    }
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* string case (internal). Return JS_ATOM_NULL if error. 'str' is
+   freed. */
+/// Line number here: 2658
+static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+    int len;
+
+#if 0
+    printf("__JS_NewAtom: ");  JS_DumpString(rt, str); printf("\n");
+#endif
+    if (atom_type < JS_ATOM_TYPE_SYMBOL) {
+        /* str is not NULL */
+        if (str->atom_type == atom_type) {
+            /* str is the atom, return its index */
+            i = js_get_atom_index(rt, str);
+            /* reduce string refcount and increase atom's unless constant */
+            if (__JS_AtomIsConst(i))
+                str->header.ref_count--;
+            return i;
+        }
+        /* try and locate an already registered atom */
+        len = str->len;
+        h = hash_string(str, atom_type);
+        h &= JS_ATOM_HASH_MASK;
+        h1 = h & (rt->atom_hash_size - 1);
+        i = rt->atom_hash[h1];
+        while (i != 0) {
+            p = rt->atom_array[i];
+            if (p->hash == h &&
+                p->atom_type == atom_type &&
+                p->len == len &&
+                js_string_memcmp(p, 0, str, 0, len) == 0) {
+                if (!__JS_AtomIsConst(i))
+                    p->header.ref_count++;
+                goto done;
+            }
+            i = p->hash_next;
+        }
+    } else {
+        h1 = 0; /* avoid warning */
+        if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+            h = 0;
+        } else {
+            h = JS_ATOM_HASH_PRIVATE;
+            atom_type = JS_ATOM_TYPE_SYMBOL;
+        }
+    }
+
+    if (rt->atom_free_index == 0) {
+        /* allow new atom entries */
+        uint32_t new_size, start;
+        JSAtomStruct **new_array;
+
+        /* alloc new with size progression 3/2:
+           4 6 9 13 19 28 42 63 94 141 211 316 474 711 1066 1599 2398 3597 5395 8092
+           preallocating space for predefined atoms (at least 195).
+         */
+        new_size = max_int(211, rt->atom_size * 3 / 2);
+        if (new_size > JS_ATOM_MAX)
+            goto fail;
+        /* XXX: should use realloc2 to use slack space */
+        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        if (!new_array)
+            goto fail;
+        /* Note: the atom 0 is not used */
+        start = rt->atom_size;
+        if (start == 0) {
+            /* JS_ATOM_NULL entry */
+            p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+            if (!p) {
+                js_free_rt(rt, new_array);
+                goto fail;
+            }
+            p->header.ref_count = 1;  /* not refcounted */
+            p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            new_array[0] = p;
+            rt->atom_count++;
+            start = 1;
+        }
+        rt->atom_size = new_size;
+        rt->atom_array = new_array;
+        rt->atom_free_index = start;
+        for(i = start; i < new_size; i++) {
+            uint32_t next;
+            if (i == (new_size - 1))
+                next = 0;
+            else
+                next = i + 1;
+            rt->atom_array[i] = atom_set_free(next);
+        }
+    }
+
+    if (str) {
+        if (str->atom_type == 0) {
+            p = str;
+            p->atom_type = atom_type;
+        } else {
+            p = js_malloc_rt(rt, sizeof(JSString) +
+                             (str->len << str->is_wide_char) +
+                             1 - str->is_wide_char);
+            if (unlikely(!p))
+                goto fail;
+            p->header.ref_count = 1;
+            p->is_wide_char = str->is_wide_char;
+            p->len = str->len;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            memcpy(p->u.str8, str->u.str8, (str->len << str->is_wide_char) +
+                   1 - str->is_wide_char);
+            js_free_string(rt, str);
+        }
+    } else {
+        p = js_malloc_rt(rt, sizeof(JSAtomStruct)); /* empty wide string */
+        if (!p)
+            return JS_ATOM_NULL;
+        p->header.ref_count = 1;
+        p->is_wide_char = 1;    /* Hack to represent NULL as a JSString */
+        p->len = 0;
+#ifdef DUMP_LEAKS
+        list_add_tail(&p->link, &rt->string_list);
+#endif
+    }
+
+    /* use an already free entry */
+    i = rt->atom_free_index;
+    rt->atom_free_index = atom_get_free(rt->atom_array[i]);
+    rt->atom_array[i] = p;
+
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+
+    rt->atom_count++;
+
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+        if (unlikely(rt->atom_count >= rt->atom_count_resize))
+            JS_ResizeAtomHash(rt, rt->atom_hash_size * 2);
+    }
+
+    //    JS_DumpAtoms(rt);
+    return i;
+
+ fail:
+    i = JS_ATOM_NULL;
+ done:
+    if (str)
+        js_free_string(rt, str);
+    return i;
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/* XXX: better hash ? */
+/* precondition: 1 <= hash_bits <= 32 */
+/// Line number here: 48451
+static uint32_t map_hash_key(JSValueConst key, int hash_bits)
+{
+    uint32_t tag = JS_VALUE_GET_NORM_TAG(key);
+    uint32_t h;
+    double d;
+    JSBigInt *p;
+    JSBigIntBuf buf;
+    
+    switch(tag) {
+    case JS_TAG_BOOL:
+        h = map_hash32(JS_VALUE_GET_INT(key) ^ JS_TAG_BOOL, hash_bits);
+        break;
+    case JS_TAG_STRING:
+        h = map_hash32(hash_string(JS_VALUE_GET_STRING(key), 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_STRING_ROPE:
+        h = map_hash32(hash_string_rope(key, 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_OBJECT:
+    case JS_TAG_SYMBOL:
+        h = map_hash_pointer((uintptr_t)JS_VALUE_GET_PTR(key) ^ tag, hash_bits);
+        break;
+    case JS_TAG_INT:
+        d = JS_VALUE_GET_INT(key);
+        goto hash_float64;
+    case JS_TAG_FLOAT64:
+        d = JS_VALUE_GET_FLOAT64(key);
+        /* normalize the NaN */
+        if (isnan(d))
+            d = JS_FLOAT64_NAN;
+    hash_float64:
+        h = map_hash64(float64_as_uint64(d) ^ JS_TAG_FLOAT64, hash_bits);
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+        p = js_bigint_set_short(&buf, key);
+        goto hash_bigint;
+    case JS_TAG_BIG_INT:
+        p = JS_VALUE_GET_PTR(key);
+    hash_bigint:
+        {
+            int i;
+            h = 1;
+            for(i = p->len - 1; i >= 0; i--) {
+                h = h * 263 + p->tab[i];
+            }
+            /* the final step is necessary otherwise h mod n only
+               depends of p->tab[i] mod n */
+            h = map_hash32(h ^ JS_TAG_BIG_INT, hash_bits);
+        }
+        break;
+    default:
+        h = 0;
+        break;
+    }
+    return h;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"hash_string(const JSString *, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string16(const uint16_t *, size_t, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+"hash_string_rope(JSValue, uint32_t)";
+"hash_string_rope(JSValue, uint32_t)" -> "hash_string(const JSString *, uint32_t)";
+"hash_string_rope(JSValue, uint32_t)" -> "hash_string_rope(JSValue, uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__JS_AtomIsConst(JSAtom)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "hash_string(const JSString *, uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "max_int(int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_set_free(uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__builtin_expect(long, long)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_string(JSRuntime *, JSString *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_get_free(const JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "JS_ResizeAtomHash(JSRuntime *, int)";
+"map_hash_key(JSValue, int)";
+"map_hash_key(JSValue, int)" -> "map_hash32(uint32_t, int)";
+"map_hash_key(JSValue, int)" -> "hash_string(const JSString *, uint32_t)";
+"map_hash_key(JSValue, int)" -> "hash_string_rope(JSValue, uint32_t)";
+"map_hash_key(JSValue, int)" -> "map_hash_pointer(uintptr_t, int)";
+"map_hash_key(JSValue, int)" -> "__builtin_isnan()";
+"map_hash_key(JSValue, int)" -> "__builtin_nanf(const char *)";
+"map_hash_key(JSValue, int)" -> "map_hash64(uint64_t, int)";
+"map_hash_key(JSValue, int)" -> "float64_as_uint64(double)";
+"map_hash_key(JSValue, int)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+}

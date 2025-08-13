@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9310,6 +9310,9 @@
+                       const char *prop, JSValue val)
+ {
+     JSAtom atom;
+     int ret;
++    if (JS_VALUE_GET_TAG(this_obj) >= JS_TAG_FIRST) {
++        funlogline();
++    }
+     atom = JS_NewAtom(ctx, prop);
+     if (atom == JS_ATOM_NULL) {
+         JS_FreeValue(ctx, val);
+@@ -9316,6 +9319,9 @@
+         return -1;
+     }
+     ret = JS_SetPropertyInternal(ctx, this_obj, atom, val, this_obj, JS_PROP_THROW);
++    if (atom == JS_ATOM_NULL && JS_VALUE_HAS_REF_COUNT(val)) {
++        funlogline();
++    }
+     JS_FreeAtom(ctx, atom);
+     return ret;
+ }

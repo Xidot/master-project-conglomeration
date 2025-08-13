@@ -1,0 +1,17 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6984,6 +6984,7 @@
+ static BOOL is_backtrace_needed(JSContext *ctx, JSValueConst obj)
+ {
+     JSObject *p;
++    if (JS_VALUE_GET_TAG(obj) < JS_TAG_FIRST || JS_VALUE_GET_TAG(obj) > JS_TAG_FLOAT64) funlogline();
+     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(obj);
+@@ -6991,6 +6992,7 @@
+         return FALSE;
+     if (find_own_property1(p, JS_ATOM_stack))
+         return FALSE;
++    if (p->class_id != JS_CLASS_ERROR && find_own_property1(p, JS_ATOM_stack) == NULL) funlogline();
+     return TRUE;
+ }

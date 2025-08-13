@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15769,6 +15769,9 @@
+ {
+     JSValue method, ret, sync_iter;
+ 
++    if (JS_IsUndefined(obj) || JS_IsNull(obj))
++        return JS_ThrowTypeError(ctx, "value is not iterable");
++
+     if (is_async) {
+         method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_asyncIterator);
+         if (JS_IsException(method))
+@@ -15782,6 +15785,8 @@
+             sync_iter = JS_GetIterator2(ctx, obj, method);
+             JS_FreeValue(ctx, method);
+             if (JS_IsException(sync_iter))
++                if (!JS_IsObject(sync_iter))
++                    funlogline();
+                 return sync_iter;
+             ret = JS_CreateAsyncFromSyncIterator(ctx, sync_iter);
+             JS_FreeValue(ctx, sync_iter);
+@@ -15791,6 +15796,8 @@
+         method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_iterator);
+         if (JS_IsException(method))
+             return method;
++        if (!JS_IsObject(method))
++            funlogline();
+     }
+     if (!JS_IsFunction(ctx, method)) {
+         JS_FreeValue(ctx, method);

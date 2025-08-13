@@ -1,0 +1,730 @@
+Target function: "pow_ui(uint32_t, uint32_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* return a^b */
+/// Line number here: 241
+static uint64_t pow_ui(uint32_t a, uint32_t b)
+{
+    int i, n_bits;
+    uint64_t r;
+    if (b == 0)
+        return 1;
+    if (b == 1)
+        return a;
+#ifdef USE_POW5_TABLE
+    if ((a == 5 || a == 10) && b <= 17) {
+        r = pow5_table[b - 1];
+        if (b >= 14) {
+            r |= (uint64_t)pow5h_table[b - 14] << 32;
+        }
+        if (a == 10)
+            r <<= b;
+        return r;
+    }
+#endif
+    r = a;
+    n_bits = 32 - clz32(b);
+    for(i = n_bits - 2; i >= 0; i--) {
+        r *= r;
+        if ((b >> i) & 1)
+            r *= a;
+    }
+    return r;
+}
+
+/// Line number here: 270
+static uint32_t pow_ui_inv(uint32_t *pr_inv, int *pshift, uint32_t a, uint32_t b)
+{
+    uint32_t r_inv, r;
+    int shift;
+#ifdef USE_POW5_TABLE
+    if (a == 5 && b >= 1 && b <= 13) {
+        r = pow5_table[b - 1];
+        shift = clz32(r);
+        r <<= shift;
+        r_inv = pow5_inv_table[b - 1];
+    } else
+#endif
+    {
+        r = pow_ui(a, b);
+        shift = clz32(r);
+        r <<= shift;
+        r_inv = udiv1norm_init(r);
+    }
+    *pshift = shift;
+    *pr_inv = r_inv;
+    return r;
+}
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* return (a, e_offset) such that a = a * (radix1*2^radix_shift)^f *
+   2^-e_offset. 'f' can be negative. */
+/// Line number here: 892
+static int mul_pow(mpb_t *a, int radix1, int radix_shift, int f, BOOL is_int, int e)
+{
+    int e_offset, d, n, n0;
+
+    e_offset = -f * radix_shift;
+    if (radix1 != 1) {
+        d = digits_per_limb_table[radix1 - 2];
+        if (f >= 0) {
+            limb_t h, b;
+            
+            b = 0;
+            n0 = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui(radix1, n);
+                    n0 = n;
+                }
+                h = mp_mul1(a->tab, a->tab, a->len, b, 0);
+                if (h != 0) {
+                    a->tab[a->len++] = h;
+                }
+                f -= n;
+            }
+        } else {
+            int extra_bits, l, shift;
+            limb_t r, rem, b, b_inv;
+            
+            f = -f;
+            l = (f + d - 1) / d; /* high bound for the number of limbs (XXX: make it better) */
+            e_offset += l * LIMB_BITS;
+            if (!is_int) {
+                /* at least 'e' bits are needed in the final result for rounding */
+                extra_bits = max_int(e - mpb_floor_log2(a), 0);
+            } else {
+                /* at least two extra bits are needed in the final result
+                   for rounding */
+                extra_bits = max_int(2 + e - e_offset, 0);
+            }
+            e_offset += extra_bits;
+            mpb_shr_round(a, -(l * LIMB_BITS + extra_bits), JS_RNDZ);
+            
+            b = 0;
+            b_inv = 0;
+            shift = 0;
+            n0 = 0;
+            rem = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui_inv(&b_inv, &shift, radix1, n);
+                    n0 = n;
+                }
+                r = mp_div1norm(a->tab, a->tab, a->len, b, 0, b_inv, shift);
+                rem |= r;
+                mpb_renorm(a);
+                f -= n;
+            }
+            /* if the remainder is non zero, use it for rounding */
+            a->tab[0] |= (rem != 0);
+        }
+    }
+    return e_offset;
+}
+
+/* return the length */
+/// Line number here: 1107
+int js_dtoa(char *buf, double d, int radix, int n_digits, int flags,
+            JSDTOATempMem *tmp_mem)
+{
+    uint64_t a, m, *mptr = tmp_mem->mem;
+    int e, sgn, l, E, P, i, E_max, radix1, radix_shift;
+    char *q;
+    mpb_t *tmp1, *mant_max;
+    int fmt = flags & JS_DTOA_FORMAT_MASK;
+
+    tmp1 = dtoa_malloc(&mptr, sizeof(mpb_t) + sizeof(limb_t) * DBIGNUM_LEN_MAX);
+    mant_max = dtoa_malloc(&mptr, sizeof(mpb_t) + sizeof(limb_t) * MANT_LEN_MAX);
+    assert((mptr - tmp_mem->mem) <= sizeof(JSDTOATempMem) / sizeof(mptr[0]));
+
+    radix_shift = ctz32(radix);
+    radix1 = radix >> radix_shift;
+    a = float64_as_uint64(d);
+    sgn = a >> 63;
+    e = (a >> 52) & 0x7ff;
+    m = a & (((uint64_t)1 << 52) - 1);
+    q = buf;
+    if (e == 0x7ff) {
+        if (m == 0) {
+            if (sgn)
+                *q++ = '-';
+            memcpy(q, "Infinity", 8);
+            q += 8;
+        } else {
+            memcpy(q, "NaN", 3);
+            q += 3;
+        }
+        goto done;
+    } else if (e == 0) {
+        if (m == 0) {
+            tmp1->len = 1;
+            tmp1->tab[0] = 0;
+            E = 1;
+            if (fmt == JS_DTOA_FORMAT_FREE)
+                P = 1;
+            else if (fmt == JS_DTOA_FORMAT_FRAC)
+                P = n_digits + 1;
+            else
+                P = n_digits;
+            /* "-0" is displayed as "0" if JS_DTOA_MINUS_ZERO is not present */
+            if (sgn && (flags & JS_DTOA_MINUS_ZERO))
+                *q++ = '-';
+            goto output;
+        }
+        /* denormal number: convert to a normal number */
+        l = clz64(m) - 11;
+        e -= l - 1;
+        m <<= l;
+    } else {
+        m |= (uint64_t)1 << 52;
+    }
+    if (sgn)
+        *q++ = '-';
+    /* remove the bias */
+    e -= 1022;
+    /* d = 2^(e-53)*m */
+    //    printf("m=0x%016" PRIx64 " e=%d\n", m, e);
+#ifdef USE_FAST_INT
+    if (fmt == JS_DTOA_FORMAT_FREE &&
+        e >= 1 && e <= 53 &&
+        (m & (((uint64_t)1 << (53 - e)) - 1)) == 0 &&
+        (flags & JS_DTOA_EXP_MASK) != JS_DTOA_EXP_ENABLED) {
+        m >>= 53 - e;
+        /* 'm' is never zero */
+        q += u64toa_radix(q, m, radix);
+        goto done;
+    }
+#endif
+    
+    /* this choice of E implies F=round(x*B^(P-E) is such as: 
+       B^(P-1) <= F < 2.B^P. */
+    E = 1 + mul_log2_radix(e - 1, radix);
+    
+    if (fmt == JS_DTOA_FORMAT_FREE) {
+        int P_max, E0, e1, E_found, P_found;
+        uint64_t m1, mant_found, mant, mant_max1;
+        /* P_max is guarranteed to work by construction */
+        P_max = dtoa_max_digits_table[radix - 2];
+        E0 = E;
+        E_found = 0;
+        P_found = 0;
+        mant_found = 0;
+        /* find the minimum number of digits by successive tries */
+        P = P_max; /* P_max is guarateed to work */
+        for(;;) {
+            /* mant_max always fits on 64 bits */
+            mant_max1 = pow_ui(radix, P);
+            /* compute the mantissa in base B */
+            E = E0;
+            for(;;) {
+                /* XXX: add inexact flag */
+                mul_pow_round(tmp1, m, e - 53, radix1, radix_shift, P - E, JS_RNDN);
+                mant = mpb_get_u64(tmp1);
+                if (mant < mant_max1)
+                    break;
+                E++; /* at most one iteration is possible */
+            }
+            /* remove useless trailing zero digits */
+            while ((mant % radix) == 0) {
+                mant /= radix;
+                P--;
+            }
+            /* garanteed to work for P = P_max */
+            if (P_found == 0)
+                goto prec_found;
+            /* convert back to base 2 */
+            mpb_set_u64(tmp1, mant);
+            m1 = mul_pow_round_to_d(&e1, tmp1, radix1, radix_shift, E - P, JS_RNDN);
+            //            printf("P=%2d: m=0x%016" PRIx64 " e=%d m1=0x%016" PRIx64 " e1=%d\n", P, m, e, m1, e1);
+            /* Note: (m, e) is never zero here, so the exponent for m1
+               = 0 does not matter */
+            if (m1 == m && e1 == e) {
+            prec_found:
+                P_found = P;
+                E_found = E;
+                mant_found = mant;
+                if (P == 1)
+                    break;
+                P--; /* try lower exponent */
+            } else {
+                break;
+            }
+        }
+        P = P_found;
+        E = E_found;
+        mpb_set_u64(tmp1, mant_found);
+#ifdef JS_DTOA_DUMP_STATS
+        if (radix == 10) {
+            out_len_count[P - 1]++;
+        }
+#endif        
+    } else if (fmt == JS_DTOA_FORMAT_FRAC) {
+        int len;
+
+        assert(n_digits >= 0 && n_digits <= JS_DTOA_MAX_DIGITS);
+        /* P = max_int(E, 1) + n_digits; */
+        /* frac is rounded using RNDNA */
+        mul_pow_round(tmp1, m, e - 53, radix1, radix_shift, n_digits, JS_RNDNA);
+
+        /* we add one extra digit on the left and remove it if needed
+           to avoid testing if the result is < radix^P */
+        len = output_digits(q, tmp1, radix, max_int(E + 1, 1) + n_digits,
+                            max_int(E + 1, 1));
+        if (q[0] == '0' && len >= 2 && q[1] != '.') {
+            len--;
+            memmove(q, q + 1, len);
+        }
+        q += len;
+        goto done;
+    } else {
+        int pow_shift;
+        assert(n_digits >= 1 && n_digits <= JS_DTOA_MAX_DIGITS);
+        P = n_digits;
+        /* mant_max = radix^P */
+        mant_max->len = 1;
+        mant_max->tab[0] = 1;
+        pow_shift = mul_pow(mant_max, radix1, radix_shift, P, FALSE, 0);
+        mpb_shr_round(mant_max, pow_shift, JS_RNDZ);
+        
+        for(;;) {
+            /* fixed and frac are rounded using RNDNA */
+            mul_pow_round(tmp1, m, e - 53, radix1, radix_shift, P - E, JS_RNDNA);
+            if (mpb_cmp(tmp1, mant_max) < 0)
+                break;
+            E++; /* at most one iteration is possible */
+        }
+    }
+ output:
+    if (fmt == JS_DTOA_FORMAT_FIXED)
+        E_max = n_digits;
+    else
+        E_max = dtoa_max_digits_table[radix - 2] + 4;
+    if ((flags & JS_DTOA_EXP_MASK) == JS_DTOA_EXP_ENABLED ||
+        ((flags & JS_DTOA_EXP_MASK) == JS_DTOA_EXP_AUTO && (E <= -6 || E > E_max))) {
+        q += output_digits(q, tmp1, radix, P, 1);
+        E--;
+        if (radix == 10) {
+            *q++ = 'e';
+        } else if (radix1 == 1 && radix_shift <= 4) {
+            E *= radix_shift;
+            *q++ = 'p';
+        } else {
+            *q++ = '@';
+        }
+        if (E < 0) {
+            *q++ = '-';
+            E = -E;
+        } else {
+            *q++ = '+';
+        }
+        q += u32toa(q, E);
+    } else if (E <= 0) {
+        *q++ = '0';
+        *q++ = '.';
+        for(i = 0; i < -E; i++)
+            *q++ = '0';
+        q += output_digits(q, tmp1, radix, P, P);
+    } else {
+        q += output_digits(q, tmp1, radix, P, min_int(P, E));
+        for(i = 0; i < E - P; i++)
+            *q++ = '0';
+    }
+ done:
+    *q = '\0';
+    dtoa_free(mant_max);
+    dtoa_free(tmp1);
+    return q - buf;
+}
+
+/* XXX: add fast path for small integers */
+/// Line number here: 1353
+double js_atod(const char *str, const char **pnext, int radix, int flags,
+               JSATODTempMem *tmp_mem)
+{
+    uint64_t *mptr = tmp_mem->mem;
+    const char *p, *p_start;
+    limb_t cur_limb, radix_base, extra_digits;
+    int is_neg, digit_count, limb_digit_count, digits_per_limb, sep, radix1, radix_shift;
+    int radix_bits, expn, e, max_digits, expn_offset, dot_pos, sig_pos, pos;
+    mpb_t *tmp0;
+    double dval;
+    BOOL is_bin_exp, is_zero, expn_overflow;
+    uint64_t m, a;
+
+    tmp0 = dtoa_malloc(&mptr, sizeof(mpb_t) + sizeof(limb_t) * DBIGNUM_LEN_MAX);
+    assert((mptr - tmp_mem->mem) <= sizeof(JSATODTempMem) / sizeof(mptr[0]));
+    /* optional separator between digits */
+    sep = (flags & JS_ATOD_ACCEPT_UNDERSCORES) ? '_' : 256;
+
+    p = str;
+    is_neg = 0;
+    if (p[0] == '+') {
+        p++;
+        p_start = p;
+    } else if (p[0] == '-') {
+        is_neg = 1;
+        p++;
+        p_start = p;
+    } else {
+        p_start = p;
+    }
+    
+    if (p[0] == '0') {
+        if ((p[1] == 'x' || p[1] == 'X') &&
+            (radix == 0 || radix == 16)) {
+            p += 2;
+            radix = 16;
+        } else if ((p[1] == 'o' || p[1] == 'O') &&
+                   radix == 0 && (flags & JS_ATOD_ACCEPT_BIN_OCT)) {
+            p += 2;
+            radix = 8;
+        } else if ((p[1] == 'b' || p[1] == 'B') &&
+                   radix == 0 && (flags & JS_ATOD_ACCEPT_BIN_OCT)) {
+            p += 2;
+            radix = 2;
+        } else if ((p[1] >= '0' && p[1] <= '9') &&
+                   radix == 0 && (flags & JS_ATOD_ACCEPT_LEGACY_OCTAL)) {
+            int i;
+            sep = 256;
+            for (i = 1; (p[i] >= '0' && p[i] <= '7'); i++)
+                continue;
+            if (p[i] == '8' || p[i] == '9')
+                goto no_prefix;
+            p += 1;
+            radix = 8;
+        } else {
+            goto no_prefix;
+        }
+        /* there must be a digit after the prefix */
+        if (to_digit((uint8_t)*p) >= radix)
+            goto fail;
+    no_prefix: ;
+    } else {
+        if (!(flags & JS_ATOD_INT_ONLY) && strstart(p, "Infinity", &p))
+            goto overflow;
+    }
+    if (radix == 0)
+        radix = 10;
+
+    cur_limb = 0;
+    expn_offset = 0;
+    digit_count = 0;
+    limb_digit_count = 0;
+    max_digits = atod_max_digits_table[radix - 2];
+    digits_per_limb = digits_per_limb_table[radix - 2];
+    radix_base = radix_base_table[radix - 2];
+    radix_shift = ctz32(radix);
+    radix1 = radix >> radix_shift;
+    if (radix1 == 1) {
+        /* radix = 2^radix_bits */
+        radix_bits = radix_shift;
+    } else {
+        radix_bits = 0;
+    }
+    tmp0->len = 1;
+    tmp0->tab[0] = 0;
+    extra_digits = 0;
+    pos = 0;
+    dot_pos = -1;
+    /* skip leading zeros */
+    for(;;) {
+        if (*p == '.' && (p > p_start || to_digit(p[1]) < radix) &&
+            !(flags & JS_ATOD_INT_ONLY)) {
+            if (*p == sep)
+                goto fail;
+            if (dot_pos >= 0)
+                break;
+            dot_pos = pos;
+            p++;
+        }
+        if (*p == sep && p > p_start && p[1] == '0')
+            p++;
+        if (*p != '0')
+            break;
+        p++;
+        pos++;
+    }
+    
+    sig_pos = pos;
+    for(;;) {
+        limb_t c;
+        if (*p == '.' && (p > p_start || to_digit(p[1]) < radix) &&
+            !(flags & JS_ATOD_INT_ONLY)) {
+            if (*p == sep)
+                goto fail;
+            if (dot_pos >= 0)
+                break;
+            dot_pos = pos;
+            p++;
+        }
+        if (*p == sep && p > p_start && to_digit(p[1]) < radix)
+            p++;
+        c = to_digit(*p);
+        if (c >= radix)
+            break;
+        p++;
+        pos++;
+        if (digit_count < max_digits) {
+            /* XXX: could be faster when radix_bits != 0 */
+            cur_limb = cur_limb * radix + c;
+            limb_digit_count++;
+            if (limb_digit_count == digits_per_limb) {
+                mpb_mul1_base(tmp0, radix_base, cur_limb);
+                cur_limb = 0;
+                limb_digit_count = 0;
+            }
+            digit_count++;
+        } else {
+            extra_digits |= c;
+        }
+    }
+    if (limb_digit_count != 0) {
+        mpb_mul1_base(tmp0, pow_ui(radix, limb_digit_count), cur_limb);
+    }
+    if (digit_count == 0) {
+        is_zero = TRUE;
+        expn_offset = 0;
+    } else {
+        is_zero = FALSE;
+        if (dot_pos < 0)
+            dot_pos = pos;
+        expn_offset = sig_pos + digit_count - dot_pos;
+    }
+    
+    /* Use the extra digits for rounding if the base is a power of
+       two. Otherwise they are just truncated. */
+    if (radix_bits != 0 && extra_digits != 0) {
+        tmp0->tab[0] |= 1;
+    }
+    
+    /* parse the exponent, if any */
+    expn = 0;
+    expn_overflow = FALSE;
+    is_bin_exp = FALSE;
+    if (!(flags & JS_ATOD_INT_ONLY) &&
+        ((radix == 10 && (*p == 'e' || *p == 'E')) ||
+         (radix != 10 && (*p == '@' ||
+                          (radix_bits >= 1 && radix_bits <= 4 && (*p == 'p' || *p == 'P'))))) &&
+        p > p_start) {
+        BOOL exp_is_neg;
+        int c;
+        is_bin_exp = (*p == 'p' || *p == 'P');
+        p++;
+        exp_is_neg = 0;
+        if (*p == '+') {
+            p++;
+        } else if (*p == '-') {
+            exp_is_neg = 1;
+            p++;
+        }
+        c = to_digit(*p);
+        if (c >= 10)
+            goto fail; /* XXX: could stop before the exponent part */
+        expn = c;
+        p++;
+        for(;;) {
+            if (*p == sep && to_digit(p[1]) < 10)
+                p++;
+            c = to_digit(*p);
+            if (c >= 10)
+                break;
+            if (!expn_overflow) {
+                if (unlikely(expn > ((INT32_MAX - 2 - 9) / 10))) {
+                    expn_overflow = TRUE;
+                } else {
+                    expn = expn * 10 + c;
+                }
+            }
+            p++;
+        }
+        if (exp_is_neg)
+            expn = -expn;
+        /* if zero result, the exponent can be arbitrarily large */
+        if (!is_zero && expn_overflow) {
+            if (exp_is_neg)
+                a = 0;
+            else
+                a = (uint64_t)0x7ff << 52; /* infinity */
+            goto done;
+        }
+    }
+
+    if (p == p_start)
+        goto fail;
+
+    if (is_zero) {
+        a = 0;
+    } else {
+        int expn1;
+        if (radix_bits != 0) {
+            if (!is_bin_exp)
+                expn *= radix_bits;
+            expn -= expn_offset * radix_bits;
+            expn1 = expn + digit_count * radix_bits;
+            if (expn1 >= 1024 + radix_bits)
+                goto overflow;
+            else if (expn1 <= -1075)
+                goto underflow;
+            m = round_to_d(&e, tmp0, -expn, JS_RNDN);
+        } else {
+            expn -= expn_offset;
+            expn1 = expn + digit_count;
+            if (expn1 >= max_exponent[radix - 2] + 1)
+                goto overflow;
+            else if (expn1 <= min_exponent[radix - 2])
+                goto underflow;
+            m = mul_pow_round_to_d(&e, tmp0, radix1, radix_shift, expn, JS_RNDN);
+        }
+        if (m == 0) {
+        underflow:
+            a = 0;
+        } else if (e > 1024) {
+        overflow:
+            /* overflow */
+            a = (uint64_t)0x7ff << 52;
+        } else if (e < -1073) {
+            /* underflow */
+            /* XXX: check rounding */
+            a = 0;
+        } else if (e < -1021) {
+            /* subnormal */
+            a = m >> (-e - 1021);
+        } else {
+            a = ((uint64_t)(e + 1022) << 52) | (m & (((uint64_t)1 << 52) - 1));
+        }
+    }
+ done:
+    a |= (uint64_t)is_neg << 63;
+    dval = uint64_as_float64(a);
+ done1:
+    if (pnext)
+        *pnext = p;
+    dtoa_free(tmp0);
+    return dval;
+ fail:
+    dval = NAN;
+    goto done1;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/* WARNING: undefined if a = 0 */
+/// Line number here: 128
+static inline int clz32(unsigned int a)
+{
+    return __builtin_clz(a);
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.h
+
+/// Line number here: 58
+typedef struct {
+    uint64_t mem[37];
+} JSDTOATempMem
+
+/// Line number here: 62
+typedef struct {
+    uint64_t mem[27];
+} JSATODTempMem
+
+
+
+----- Callgraph:
+strict digraph G {
+"pow_ui(uint32_t, uint32_t)";
+"pow_ui(uint32_t, uint32_t)" -> "clz32(unsigned int)";
+"clz32(unsigned int)";
+"clz32(unsigned int)" -> "__builtin_clz(unsigned int)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "clz32(unsigned int)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "pow_ui(uint32_t, uint32_t)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "udiv1norm_init(limb_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "min_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui(uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_mul1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "max_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_floor_log2(mpb_t *)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_renorm(mpb_t *)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "dtoa_malloc(uint64_t **, size_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "ctz32(unsigned int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "float64_as_uint64(double)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "clz64(uint64_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "u64toa_radix(char *, uint64_t, unsigned int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mul_log2_radix(int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "pow_ui(uint32_t, uint32_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mul_pow_round(mpb_t *, uint64_t, int, int, int, int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mpb_get_u64(mpb_t *)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mpb_set_u64(mpb_t *, uint64_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mul_pow_round_to_d(int *, mpb_t *, int, int, int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "output_digits(char *, mpb_t *, int, int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "max_int(int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "memmove(void *, const void *, size_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mul_pow(mpb_t *, int, int, int, BOOL, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mpb_shr_round(mpb_t *, int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "mpb_cmp(const mpb_t *, const mpb_t *)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "u32toa(char *, uint32_t)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "min_int(int, int)";
+"js_dtoa(char *, double, int, int, int, JSDTOATempMem *)" -> "dtoa_free(void *)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "dtoa_malloc(uint64_t **, size_t)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "to_digit(int)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "strstart(const char *, const char *, const char **)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "ctz32(unsigned int)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "mpb_mul1_base(mpb_t *, limb_t, limb_t)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "pow_ui(uint32_t, uint32_t)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "__builtin_expect(long, long)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "round_to_d(int *, mpb_t *, int, int)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "mul_pow_round_to_d(int *, mpb_t *, int, int, int, int)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "uint64_as_float64(uint64_t)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "dtoa_free(void *)";
+"js_atod(const char *, const char **, int, int, JSATODTempMem *)" -> "__builtin_nanf(const char *)";
+}

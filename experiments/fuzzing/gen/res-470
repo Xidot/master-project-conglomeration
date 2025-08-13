@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_object_list_get_hash(JSObject *, uint32_t)
+-------------------------
+Let me analyze the target function `js_object_list_get_hash` and its usage for logical errors.
+
+:quickjs.c:js_object_list_get_hash:35945
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35944,6 +35944,9 @@
+ static uint32_t js_object_list_get_hash(JSObject *p, uint32_t hash_size)
+ {
++    if (hash_size == 0 || (hash_size & (hash_size - 1)) != 0) {
++        funlogline();
++    }
+     return ((uintptr_t)p * 3163) & (hash_size - 1);
+ }
+```
+
+The logical error here is that the function assumes `hash_size` is a power of two (since it uses `hash_size - 1` as a bitmask), but there's no check to enforce this. The function is called from multiple places where `hash_size` is passed in, and while the resize function does ensure powers of two, this assumption isn't explicitly validated in the hash function itself.
+
+The inserted check verifies that:
+1. `hash_size` isn't zero (would cause underflow)
+2. `hash_size` is a power of two (using the standard bit trick `(n & (n - 1)) == 0`)
+
+This condition will only trigger when these invalid cases occur, which would lead to incorrect hash calculations.

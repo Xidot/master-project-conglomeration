@@ -1,0 +1,19 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -113,6 +113,7 @@
+ static inline limb_t udiv1norm(limb_t *pr, limb_t a1, limb_t a0,
+                                 limb_t d, limb_t d_inv)
+ {
++    if (a1 >= d) funlogline(); // Check precondition violation
+     limb_t n1m, n_adj, q, r, ah;
+     dlimb_t a;
+     n1m = ((slimb_t)a0 >> (LIMB_BITS - 1));
+@@ -120,6 +121,7 @@
+     a = (dlimb_t)d_inv * (a1 - n1m) + n_adj;
+     q = (a >> LIMB_BITS) + a1;
+     /* compute a - q * r and update q so that the remainder is between
+        0 and d - 1 */
++    if (q < a1) funlogline(); // Check for overflow in q calculation
+     a = ((dlimb_t)a1 << LIMB_BITS) | a0;
+     a = a - (dlimb_t)q * d - d;
+     ah = a >> LIMB_BITS;

@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12809,6 +12809,9 @@
+ static int JS_NumberIsInteger(JSContext *ctx, JSValueConst val)
+ {
+     double d;
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
++        funlogline();
++    }
+     if (!JS_IsNumber(val))
+         return FALSE;
+     if (unlikely(JS_ToFloat64(ctx, &d, val)))
+@@ -12813,6 +12813,9 @@
+         return FALSE;
+     if (unlikely(JS_ToFloat64(ctx, &d, val)))
+         return -1;
++    if (ret < 0) {
++        funlogline();
++    }
+     return isfinite(d) && floor(d) == d;
+ }

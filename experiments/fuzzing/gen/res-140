@@ -1,0 +1,64 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddBrand(JSContext *, JSValue, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_AddBrand` function:
+
+:quickjs.c:JS_AddBrand:7804
+:quickjs.c:JS_AddBrand:7811
+:quickjs.c:JS_AddBrand:7821
+:quickjs.c:JS_AddBrand:7828
+
+---
+
+Here's the unified diff with the added checks:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7803,6 +7803,8 @@
+     JSAtom brand_atom;
+ 
+     if (unlikely(JS_VALUE_GET_TAG(home_obj) != JS_TAG_OBJECT)) {
++        if (JS_VALUE_GET_TAG(home_obj) == JS_TAG_NULL)
++            funlogline();
+         JS_ThrowTypeErrorNotAnObject(ctx);
+         return -1;
+     }
+@@ -7810,6 +7812,8 @@
+     prs = find_own_property(&pr, p, JS_ATOM_Private_brand);
+     if (!prs) {
+         /* if the brand is not present, add it */
++        if (p->class_id >= JS_CLASS_INIT_COUNT)
++            funlogline();
+         brand = JS_NewSymbolFromAtom(ctx, JS_ATOM_brand, JS_ATOM_TYPE_PRIVATE);
+         if (JS_IsException(brand))
+             return -1;
+@@ -7821,6 +7825,8 @@
+     } else {
+         brand = JS_DupValue(ctx, pr->u.value);
+     }
++    if (JS_IsException(brand))
++        funlogline();
+     brand_atom = js_symbol_to_atom(ctx, brand);
+ 
+     if (JS_IsObject(obj)) {
+@@ -7828,6 +7834,8 @@
+         prs = find_own_property(&pr, p1, brand_atom);
+         if (unlikely(prs)) {
+             JS_FreeAtom(ctx, brand_atom);
++            if (prs->flags & JS_PROP_CONFIGURABLE)
++                funlogline();
+             JS_ThrowTypeError(ctx, "private method is already present");
+             return -1;
+         }
+```
+
+The bugs identified are:
+
+1. Missing check for NULL home_obj before checking if it's an object
+2. Missing validation of class_id before adding brand property
+3. Missing check for exception after brand creation
+4. Missing check for configurable property when detecting duplicate brand
+
+The added checks will log these error conditions while maintaining the original behavior. The conditions are chosen to only trigger when the bug would manifest, not during normal operation.

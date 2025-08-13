@@ -1,0 +1,65 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9335,6 +9335,8 @@
+                              JSValueConst getter, JSValueConst setter,
+                              int flags)
+ {
++    if (!ctx || !p)
++        funlogline();
+     JSProperty *pr;
+     int ret, prop_flags;
+ 
+@@ -9348,6 +9350,8 @@
+                 if (__JS_AtomIsTaggedInt(prop)) {
+                     idx = __JS_AtomToUInt32(prop);
+                     if (idx == p->u.array.count) {
++                        if (p->u.array.count == UINT32_MAX)
++                            funlogline();
+                         if (!p->extensible)
+                             goto not_extensible;
+                         if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET))
+@@ -9360,6 +9364,8 @@
+                     }
+                 } else if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
+                     /* convert the fast array to normal array */
++                    if (convert_fast_array_to_array(ctx, p) < 0)
++                        funlogline();
+                 convert_to_array:
+                     if (convert_fast_array_to_array(ctx, p))
+                         return -1;
+@@ -9376,6 +9382,8 @@
+                     if (unlikely(!(pslen->flags & JS_PROP_WRITABLE)))
+                         return JS_ThrowTypeErrorReadOnly(ctx, flags, JS_ATOM_length);
+                     /* XXX: should update the length after defining
++                    if (idx + 1 < len)
++                        funlogline();
+                        the property */
+                     len = idx + 1;
+                     set_value(ctx, &plen->u.value, JS_NewUint32(ctx, len));
+@@ -9393,6 +9401,8 @@
+         } else if (!(flags & JS_PROP_NO_EXOTIC)) {
+             const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+             if (em) {
++                if (!em->define_own_property)
++                    funlogline();
+                 if (em->define_own_property) {
+                     return em->define_own_property(ctx, JS_MKPTR(JS_TAG_OBJECT, p),
+                                                    prop, val, getter, setter, flags);
+@@ -9426,6 +9436,8 @@
+         pr->u.getset.getter = NULL;
+         if ((flags & JS_PROP_HAS_GET) && JS_IsFunction(ctx, getter)) {
+             pr->u.getset.getter =
++                if (!JS_IsFunction(ctx, getter))
++                    funlogline();
+                 JS_VALUE_GET_OBJ(JS_DupValue(ctx, getter));
+         }
+         pr->u.getset.setter = NULL;
+@@ -9455,6 +9467,8 @@
+             pr->u.value = JS_DupValue(ctx, val);
+         } else {
+             pr->u.value = JS_UNDEFINED;
++            if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED)
++                funlogline();
+         }
+     }
+     return TRUE;

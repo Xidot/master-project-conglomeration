@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -46248,6 +46248,8 @@
+ void JS_AddIntrinsicRegExp(JSContext *ctx)
+ {
+     JSValueConst obj;
++    if (ctx->class_proto[JS_CLASS_REGEXP].tag != JS_TAG_UNINITIALIZED)
++        funlogline();
+ 
+     JS_AddIntrinsicRegExpCompiler(ctx);
+ 
+@@ -46255,6 +46257,8 @@
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_REGEXP], js_regexp_proto_funcs,
+                                countof(js_regexp_proto_funcs));
+     obj = JS_NewGlobalCConstructor(ctx, "RegExp", js_regexp_constructor, 2,
+                                    ctx->class_proto[JS_CLASS_REGEXP]);
++    if (ctx->regexp_ctor.tag != JS_TAG_UNINITIALIZED)
++        funlogline();
+     ctx->regexp_ctor = JS_DupValue(ctx, obj);
+     JS_SetPropertyFunctionList(ctx, obj, js_regexp_funcs, countof(js_regexp_funcs));
+ 
+@@ -46262,6 +46266,8 @@
+         JS_NewObjectProto(ctx, ctx->iterator_proto);
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_REGEXP_STRING_ITERATOR],
+                                js_regexp_string_iterator_proto_funcs,
+                                countof(js_regexp_string_iterator_proto_funcs));
++    if (ctx->class_proto[JS_CLASS_REGEXP_STRING_ITERATOR].tag != JS_TAG_UNINITIALIZED)
++        funlogline();
+ }

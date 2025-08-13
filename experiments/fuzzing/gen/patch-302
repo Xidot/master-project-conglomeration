@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15942,6 +15942,8 @@
+     int done = 1;
+ 
+     if (likely(!JS_IsUndefined(sp[offset]))) {
++        if (JS_IsException(sp[offset]))
++            return -1;
+         value = JS_IteratorNext(ctx, sp[offset], sp[offset + 1], 0, NULL, &done);
+         if (JS_IsException(value))
+             done = -1;
+@@ -15949,6 +15951,8 @@
+             /* value is JS_UNDEFINED or JS_EXCEPTION */
+             /* replace the iteration object with undefined */
+             JS_FreeValue(ctx, sp[offset]);
++            if (!JS_IsUndefined(value) && !JS_IsException(value))
++                funlogline();
+             sp[offset] = JS_UNDEFINED;
+             if (done < 0) {
+                 return -1;

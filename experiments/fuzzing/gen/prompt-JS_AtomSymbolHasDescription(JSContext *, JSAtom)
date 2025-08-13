@@ -1,0 +1,90 @@
+Target function: "JS_AtomSymbolHasDescription(JSContext *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* return TRUE if 'v' is a symbol with a string description */
+/// Line number here: 3216
+static BOOL JS_AtomSymbolHasDescription(JSContext *ctx, JSAtom v)
+{
+    JSRuntime *rt;
+    JSAtomStruct *p;
+
+    rt = ctx->rt;
+    if (__JS_AtomIsTaggedInt(v))
+        return FALSE;
+    p = rt->atom_array[v];
+    return (((p->atom_type == JS_ATOM_TYPE_SYMBOL &&
+              p->hash != JS_ATOM_HASH_PRIVATE) ||
+             p->atom_type == JS_ATOM_TYPE_GLOBAL_SYMBOL) &&
+            !(p->len == 0 && p->is_wide_char != 0));
+}
+
+/// Line number here: 2365
+static inline BOOL __JS_AtomIsTaggedInt(JSAtom v)
+{
+    return (v & JS_ATOM_TAG_INT) != 0;
+}
+
+/// Line number here: 5311
+static JSValue js_get_function_name(JSContext *ctx, JSAtom name)
+{
+    JSValue name_str;
+
+    name_str = JS_AtomToString(ctx, name);
+    if (JS_AtomSymbolHasDescription(ctx, name)) {
+        name_str = JS_ConcatString3(ctx, "[", name_str, "]");
+    }
+    return name_str;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_AtomSymbolHasDescription(JSContext *, JSAtom)";
+"JS_AtomSymbolHasDescription(JSContext *, JSAtom)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"js_get_function_name(JSContext *, JSAtom)";
+"js_get_function_name(JSContext *, JSAtom)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_get_function_name(JSContext *, JSAtom)" -> "JS_AtomSymbolHasDescription(JSContext *, JSAtom)";
+"js_get_function_name(JSContext *, JSAtom)" -> "JS_ConcatString3(JSContext *, const char *, JSValue, const char *)";
+}

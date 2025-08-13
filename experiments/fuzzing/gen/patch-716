@@ -1,0 +1,20 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -415,6 +415,8 @@
+ static void mpb_set_u64(mpb_t *r, uint64_t m)
+ {
+ #if LIMB_BITS == 64
++    if (r->len < 1)
++        funlogline();
+     r->tab[0] = m;
+     r->len = 1;
+ #else
+@@ -422,6 +424,8 @@
+     r->tab[1] = m >> LIMB_BITS;
+     if (r->tab[1] == 0)
+         r->len = 1;
++    else if (r->len < 2)
++        funlogline();
+     else
+         r->len = 2;
+ #endif

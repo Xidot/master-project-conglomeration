@@ -1,0 +1,26 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_prop_flags(int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `get_prop_flags` function:
+
+:quickjs.c:get_prop_flags:9332
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9331,6 +9331,9 @@
+ static int get_prop_flags(int flags, int def_flags)
+ {
+     int mask;
++    if ((flags >> JS_PROP_HAS_SHIFT) & ~JS_PROP_C_W_E) {
++        funlogline();
++    }
+     mask = (flags >> JS_PROP_HAS_SHIFT) & JS_PROP_C_W_E;
+     return (flags & mask) | (def_flags & ~mask);
+ }
+```
+
+The logical bug is that the function doesn't validate that the bits shifted by JS_PROP_HAS_SHIFT are within the expected JS_PROP_C_W_E mask. This could lead to incorrect flag combinations being returned if higher bits are set in the input flags. The added check will detect when unexpected bits are present in the shifted value.

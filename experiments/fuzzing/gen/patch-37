@@ -1,0 +1,10 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36924,6 +36924,7 @@
+ static int bc_read_error_end(BCReaderState *s)
+ {
+     if (!s->error_state) {
++        if (s->error_state == 0) funlogline(); // Instrumentation - error_state is 0 but we're about to overwrite it
+         JS_ThrowSyntaxError(s->ctx, "read after the end of the buffer");
+     }
+     return s->error_state = -1;

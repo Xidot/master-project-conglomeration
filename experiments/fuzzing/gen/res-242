@@ -1,0 +1,49 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ConcatString1(JSContext *, const JSString *, const JSString *)
+-------------------------
+Here are the potential logical bugs in the target function "JS_ConcatString1":
+
+:quickjs.c:JS_ConcatString1:4100
+:quickjs.c:JS_ConcatString1:4104
+:quickjs.c:JS_ConcatString1:4107
+
+---
+
+1. quickjs.c:JS_ConcatString1:4100 - Integer overflow in len calculation when adding p1->len + p2->len
+2. quickjs.c:JS_ConcatString1:4104 - Missing null terminator for wide char case
+3. quickjs.c:JS_ConcatString1:4107 - Potential buffer overflow in copy_str16 when p1->len is incorrect
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4097,6 +4097,8 @@
+     uint32_t len;
+     int is_wide_char;
+ 
++    if (p1->len > UINT32_MAX - p2->len)
++        funlogline();
+     len = p1->len + p2->len;
+     if (len > JS_STRING_LEN_MAX)
+         return JS_ThrowInternalError(ctx, "string too long");
+@@ -4104,6 +4106,8 @@
+     p = js_alloc_string(ctx, len, is_wide_char);
+     if (!p)
+         return JS_EXCEPTION;
++    if (is_wide_char && len >= JS_STRING_LEN_MAX)
++        funlogline();
+     if (!is_wide_char) {
+         memcpy(p->u.str8, p1->u.str8, p1->len);
+         memcpy(p->u.str8 + p1->len, p2->u.str8, p2->len);
+@@ -4111,6 +4115,8 @@
+     } else {
+         copy_str16(p->u.str16, p1, 0, p1->len);
+         copy_str16(p->u.str16 + p1->len, p2, 0, p2->len);
++        if (p1->len > len || p2->len > len - p1->len)
++            funlogline();
+     }
+     return JS_MKPTR(JS_TAG_STRING, p);
+ }
+```

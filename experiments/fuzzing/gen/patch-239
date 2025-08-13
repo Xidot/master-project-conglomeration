@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16356,6 +16356,8 @@
+     JSAtom name_atom;
+ 
+     b = JS_VALUE_GET_PTR(bfunc);
++    if (!b)
++        return JS_EXCEPTION;
+     func_obj = JS_NewObjectClass(ctx, func_kind_to_class_id[b->func_kind]);
+     if (JS_IsException(func_obj)) {
+         JS_FreeValue(ctx, bfunc);
+@@ -16379,6 +16381,8 @@
+         int proto_class_id;
+         /* generators have a prototype field which is used as
+            prototype for the generator object */
++        if (b->func_kind < 0 || b->func_kind >= JS_FUNC_ASYNC_GENERATOR)
++            goto fail;
+         if (b->func_kind == JS_FUNC_ASYNC_GENERATOR)
+             proto_class_id = JS_CLASS_ASYNC_GENERATOR;
+         else
+@@ -16403,6 +16407,8 @@
+                                   JS_AUTOINIT_ID_PROTOTYPE, NULL,
+                                   JS_PROP_WRITABLE);
+     }
++    if (JS_IsException(func_obj))
++        goto fail;
+     return func_obj;
+  fail:
+     /* bfunc is freed when func_obj is freed */

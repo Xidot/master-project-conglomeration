@@ -1,0 +1,434 @@
+Target function: "JS_WriteArrayBuffer(BCWriterState *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36071
+typedef struct BCWriterState {
+    JSContext *ctx;
+    DynBuf dbuf;
+    BOOL allow_bytecode : 8;
+    BOOL allow_sab : 8;
+    BOOL allow_reference : 8;
+    uint32_t first_atom;
+    uint32_t *atom_to_idx;
+    int atom_to_idx_size;
+    JSAtom *idx_to_atom;
+    int idx_to_atom_count;
+    int idx_to_atom_size;
+    uint8_t **sab_tab;
+    int sab_tab_len;
+    int sab_tab_size;
+    /* list of referenced objects (used if allow_reference = TRUE) */
+    JSObjectList object_list;
+} BCWriterState
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/*******************************************************************/
+/* binary object writer & reader */
+/// Line number here: 36030
+enum BCTagEnum {
+    BC_TAG_NULL = 1,
+    BC_TAG_UNDEFINED,
+    BC_TAG_BOOL_FALSE,
+    BC_TAG_BOOL_TRUE,
+    BC_TAG_INT32,
+    BC_TAG_FLOAT64,
+    BC_TAG_STRING,
+    BC_TAG_OBJECT,
+    BC_TAG_ARRAY,
+    BC_TAG_BIG_INT,
+    BC_TAG_TEMPLATE_OBJECT,
+    BC_TAG_FUNCTION_BYTECODE,
+    BC_TAG_MODULE,
+    BC_TAG_TYPED_ARRAY,
+    BC_TAG_ARRAY_BUFFER,
+    BC_TAG_SHARED_ARRAY_BUFFER,
+    BC_TAG_DATE,
+    BC_TAG_OBJECT_VALUE,
+    BC_TAG_OBJECT_REFERENCE,
+}
+
+/// Line number here: 36611
+static int JS_WriteArrayBuffer(BCWriterState *s, JSValueConst obj)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    JSArrayBuffer *abuf = p->u.array_buffer;
+    if (abuf->detached) {
+        JS_ThrowTypeErrorDetachedArrayBuffer(s->ctx);
+        return -1;
+    }
+    bc_put_u8(s, BC_TAG_ARRAY_BUFFER);
+    bc_put_leb128(s, abuf->byte_length);
+    dbuf_put(&s->dbuf, abuf->data, abuf->byte_length);
+    return 0;
+}
+
+/// Line number here: 52719
+static JSValue JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *ctx)
+{
+    return JS_ThrowTypeError(ctx, "ArrayBuffer is detached");
+}
+
+/// Line number here: 36107
+static void bc_put_u8(BCWriterState *s, uint8_t v)
+{
+    dbuf_putc(&s->dbuf, v);
+}
+
+/// Line number here: 36133
+static void bc_put_leb128(BCWriterState *s, uint32_t v)
+{
+    dbuf_put_leb128(&s->dbuf, v);
+}
+
+/// Line number here: 485
+typedef union JSFloat64Union {
+    double d;
+    uint64_t u64;
+    uint32_t u32[2];
+} JSFloat64Union
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 36641
+static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
+{
+    uint32_t tag;
+
+    if (js_check_stack_overflow(s->ctx->rt, 0)) {
+        JS_ThrowStackOverflow(s->ctx);
+        return -1;
+    }
+
+    tag = JS_VALUE_GET_NORM_TAG(obj);
+    switch(tag) {
+    case JS_TAG_NULL:
+        bc_put_u8(s, BC_TAG_NULL);
+        break;
+    case JS_TAG_UNDEFINED:
+        bc_put_u8(s, BC_TAG_UNDEFINED);
+        break;
+    case JS_TAG_BOOL:
+        bc_put_u8(s, BC_TAG_BOOL_FALSE + JS_VALUE_GET_INT(obj));
+        break;
+    case JS_TAG_INT:
+        bc_put_u8(s, BC_TAG_INT32);
+        bc_put_sleb128(s, JS_VALUE_GET_INT(obj));
+        break;
+    case JS_TAG_FLOAT64:
+        {
+            JSFloat64Union u;
+            bc_put_u8(s, BC_TAG_FLOAT64);
+            u.d = JS_VALUE_GET_FLOAT64(obj);
+            bc_put_u64(s, u.u64);
+        }
+        break;
+    case JS_TAG_STRING:
+        {
+            JSString *p = JS_VALUE_GET_STRING(obj);
+            bc_put_u8(s, BC_TAG_STRING);
+            JS_WriteString(s, p);
+        }
+        break;
+    case JS_TAG_STRING_ROPE:
+        {
+            JSValue str;
+            str = JS_ToString(s->ctx, obj);
+            if (JS_IsException(str))
+                goto fail;
+            JS_WriteObjectRec(s, str);
+            JS_FreeValue(s->ctx, str);
+        }
+        break;
+    case JS_TAG_FUNCTION_BYTECODE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        if (JS_WriteFunctionTag(s, obj))
+            goto fail;
+        break;
+    case JS_TAG_MODULE:
+        if (!s->allow_bytecode)
+            goto invalid_tag;
+        if (JS_WriteModule(s, obj))
+            goto fail;
+        break;
+    case JS_TAG_OBJECT:
+        {
+            JSObject *p = JS_VALUE_GET_OBJ(obj);
+            int ret, idx;
+
+            if (s->allow_reference) {
+                idx = js_object_list_find(s->ctx, &s->object_list, p);
+                if (idx >= 0) {
+                    bc_put_u8(s, BC_TAG_OBJECT_REFERENCE);
+                    bc_put_leb128(s, idx);
+                    break;
+                } else {
+                    if (js_object_list_add(s->ctx, &s->object_list, p))
+                        goto fail;
+                }
+            } else {
+                if (p->tmp_mark) {
+                    JS_ThrowTypeError(s->ctx, "circular reference");
+                    goto fail;
+                }
+                p->tmp_mark = 1;
+            }
+            switch(p->class_id) {
+            case JS_CLASS_ARRAY:
+                ret = JS_WriteArray(s, obj);
+                break;
+            case JS_CLASS_OBJECT:
+                ret = JS_WriteObjectTag(s, obj);
+                break;
+            case JS_CLASS_ARRAY_BUFFER:
+                ret = JS_WriteArrayBuffer(s, obj);
+                break;
+            case JS_CLASS_SHARED_ARRAY_BUFFER:
+                if (!s->allow_sab)
+                    goto invalid_tag;
+                ret = JS_WriteSharedArrayBuffer(s, obj);
+                break;
+            case JS_CLASS_DATE:
+                bc_put_u8(s, BC_TAG_DATE);
+                ret = JS_WriteObjectRec(s, p->u.object_data);
+                break;
+            case JS_CLASS_NUMBER:
+            case JS_CLASS_STRING:
+            case JS_CLASS_BOOLEAN:
+            case JS_CLASS_BIG_INT:
+                bc_put_u8(s, BC_TAG_OBJECT_VALUE);
+                ret = JS_WriteObjectRec(s, p->u.object_data);
+                break;
+            default:
+                if (p->class_id >= JS_CLASS_UINT8C_ARRAY &&
+                    p->class_id <= JS_CLASS_FLOAT64_ARRAY) {
+                    ret = JS_WriteTypedArray(s, obj);
+                } else {
+                    JS_ThrowTypeError(s->ctx, "unsupported object class");
+                    ret = -1;
+                }
+                break;
+            }
+            p->tmp_mark = 0;
+            if (ret)
+                goto fail;
+        }
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+    case JS_TAG_BIG_INT:
+        if (JS_WriteBigInt(s, obj))
+            goto fail;
+        break;
+    default:
+    invalid_tag:
+        JS_ThrowInternalError(s->ctx, "unsupported tag (%d)", tag);
+        goto fail;
+    }
+    return 0;
+
+ fail:
+    return -1;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/// Line number here: 136
+int dbuf_put(DynBuf *s, const uint8_t *data, size_t len)
+{
+    if (unlikely((s->size + len) > s->allocated_size)) {
+        if (dbuf_realloc(s, s->size + len))
+            return -1;
+    }
+    memcpy_no_ub(s->buf + s->size, data, len);
+    s->size += len;
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_WriteArrayBuffer(BCWriterState *, JSValue)";
+"JS_WriteArrayBuffer(BCWriterState *, JSValue)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"JS_WriteArrayBuffer(BCWriterState *, JSValue)" -> "bc_put_u8(BCWriterState *, uint8_t)";
+"JS_WriteArrayBuffer(BCWriterState *, JSValue)" -> "bc_put_leb128(BCWriterState *, uint32_t)";
+"JS_WriteArrayBuffer(BCWriterState *, JSValue)" -> "dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"bc_put_u8(BCWriterState *, uint8_t)";
+"bc_put_u8(BCWriterState *, uint8_t)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"bc_put_leb128(BCWriterState *, uint32_t)";
+"bc_put_leb128(BCWriterState *, uint32_t)" -> "dbuf_put_leb128(DynBuf *, uint32_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "__builtin_expect(long, long)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "dbuf_realloc(DynBuf *, size_t)";
+"dbuf_put(DynBuf *, const uint8_t *, size_t)" -> "memcpy_no_ub(void *, const void *, size_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_ThrowStackOverflow(JSContext *)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "bc_put_u8(BCWriterState *, uint8_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "bc_put_sleb128(BCWriterState *, int32_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "bc_put_u64(BCWriterState *, uint64_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteString(BCWriterState *, JSString *)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteObjectRec(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteFunctionTag(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteModule(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "js_object_list_find(JSContext *, JSObjectList *, JSObject *)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "bc_put_leb128(BCWriterState *, uint32_t)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "js_object_list_add(JSContext *, JSObjectList *, JSObject *)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteArray(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteObjectTag(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteArrayBuffer(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteTypedArray(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_WriteBigInt(BCWriterState *, JSValue)";
+"JS_WriteObjectRec(BCWriterState *, JSValue)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+}

@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48258,6 +48258,9 @@
+ /* 'val' can be JS_UNDEFINED */
+ static void js_weakref_free(JSRuntime *rt, JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_UNDEFINED) {
++        funlogline();
++    }
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT) {
+         JSObject *p = JS_VALUE_GET_OBJ(val);
+         assert(p->weakref_count >= 1);
+@@ -48265,6 +48268,9 @@
+         /* 'mark' is tested to avoid freeing the object structure when
+            it is about to be freed in a cycle or in
+            free_zero_refcount() */
++        if (p->weakref_count == 0 && p->header.ref_count == 0 && p->header.mark == 0) {
++            funlogline();
++        }
+         if (p->weakref_count == 0 && p->header.ref_count == 0 &&
+             p->header.mark == 0) {
+             js_free_rt(rt, p);
+@@ -48272,6 +48278,9 @@
+     } else if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
+         JSString *p = JS_VALUE_GET_STRING(val);
+         assert(p->hash >= 1);
++        if (p->hash == 0) {
++            funlogline();
++        }
+         p->hash--;
+         if (p->hash == 0 && p->header.ref_count == 0) {
+             /* can remove the dummy structure */

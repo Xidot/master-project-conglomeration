@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_symbol_to_atom(JSContext *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_symbol_to_atom:8324
+:js_get_atom_index:2639
+
+---
+The main logical issues appear to be:
+
+1. In js_symbol_to_atom(), there's no validation that the input JSValue is actually a symbol before proceeding with the conversion. The function comment states "val must be a symbol" but this isn't enforced.
+
+2. In js_get_atom_index(), the function assumes p->atom_type will be JS_ATOM_TYPE_SYMBOL for symbols, but there's no validation of this. The function also doesn't handle the case where p1 never equals p in the search loop.
+
+Here are the suggested modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8323,6 +8323,8 @@
+ /* val must be a symbol */
+ static JSAtom js_symbol_to_atom(JSContext *ctx, JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_SYMBOL)
++        funlogline();
+     JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+     return js_get_atom_index(ctx->rt, p);
+ }
+@@ -2640,6 +2642,8 @@
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p1;
+ 
++        if (p->hash & (rt->atom_hash_size - 1) >= rt->atom_hash_size)
++            funlogline();
+         i = rt->atom_hash[p->hash & (rt->atom_hash_size - 1)];
+         p1 = rt->atom_array[i];
+         while (p1 != p) {
+```
+
+The modifications add:
+1. Validation that the input is actually a symbol in js_symbol_to_atom()
+2. Bounds checking for the hash lookup in js_get_atom_index()

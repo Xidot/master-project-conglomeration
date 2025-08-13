@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_array_buffer_constructor2(JSContext *, JSValue, uint64_t, JSClassID)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_array_buffer_constructor2`:
+
+:quickjs.c:js_array_buffer_constructor2:52605
+
+---
+
+Now the modifications in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52605,6 +52605,9 @@
+ static JSValue js_array_buffer_constructor2(JSContext *ctx,
+                                             JSValueConst new_target,
+                                             uint64_t len, JSClassID class_id)
+ {
++    if (class_id != JS_CLASS_ARRAY_BUFFER && class_id != JS_CLASS_SHARED_ARRAY_BUFFER) {
++        funlogline();
++    }
+     return js_array_buffer_constructor3(ctx, new_target, len, class_id,
+                                         NULL, js_array_buffer_free, NULL,
+                                         TRUE);
+```
+
+The reasoning is brief:
+1. The function accepts any JSClassID but only properly handles array buffer types (JS_CLASS_ARRAY_BUFFER and JS_CLASS_SHARED_ARRAY_BUFFER). Passing other class IDs could lead to undefined behavior. The added check catches invalid class IDs.

@@ -1,0 +1,154 @@
+Target function: "weakref_delete_weakref(JSRuntime *, JSWeakRefHeader *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 367
+typedef struct {
+    struct list_head link;
+    JSWeakRefHeaderTypeEnum weakref_type;
+} JSWeakRefHeader
+
+/* WeakRef */
+/// Line number here: 55626
+typedef struct JSWeakRefData {
+    JSWeakRefHeader weakref_header;
+    JSValue target;
+} JSWeakRefData
+
+/// Line number here: 55638
+static void weakref_delete_weakref(JSRuntime *rt, JSWeakRefHeader *wh)
+{
+    JSWeakRefData *wrd = container_of(wh, JSWeakRefData, weakref_header);
+
+    if (!js_weakref_is_live(wrd->target)) {
+        js_weakref_free(rt, wrd->target);
+        wrd->target = JS_UNDEFINED;
+    }
+}
+
+/* JS_UNDEFINED is considered as a live weakref */
+/* XXX: add a specific JSWeakRef value type ? */
+/// Line number here: 48248
+static BOOL js_weakref_is_live(JSValueConst val)
+{
+    int *pref_count;
+    if (JS_IsUndefined(val))
+        return TRUE;
+    pref_count = JS_VALUE_GET_PTR(val);
+    return (*pref_count != 0);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* 'val' can be JS_UNDEFINED */
+/// Line number here: 48258
+static void js_weakref_free(JSRuntime *rt, JSValue val)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT) {
+        JSObject *p = JS_VALUE_GET_OBJ(val);
+        assert(p->weakref_count >= 1);
+        p->weakref_count--;
+        /* 'mark' is tested to avoid freeing the object structure when
+           it is about to be freed in a cycle or in
+           free_zero_refcount() */
+        if (p->weakref_count == 0 && p->header.ref_count == 0 &&
+            p->header.mark == 0) {
+            js_free_rt(rt, p);
+        }
+    } else if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
+        JSString *p = JS_VALUE_GET_STRING(val);
+        assert(p->hash >= 1);
+        p->hash--;
+        if (p->hash == 0 && p->header.ref_count == 0) {
+            /* can remove the dummy structure */
+            js_free_rt(rt, p);
+        }
+    }
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"weakref_delete_weakref(JSRuntime *, JSWeakRefHeader *)";
+"weakref_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "js_weakref_is_live(JSValue)";
+"weakref_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "js_weakref_free(JSRuntime *, JSValue)";
+"js_weakref_is_live(JSValue)";
+"js_weakref_is_live(JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_weakref_free(JSRuntime *, JSValue)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+}

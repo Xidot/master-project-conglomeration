@@ -1,0 +1,149 @@
+Target function: "string_buffer_write16(StringBuffer *, const uint16_t *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 3674
+static int string_buffer_write16(StringBuffer *s, const uint16_t *p, int len)
+{
+    int c = 0, i;
+
+    for (i = 0; i < len; i++) {
+        c |= p[i];
+    }
+    if (s->len + len > s->size) {
+        if (string_buffer_realloc(s, s->len + len, c))
+            return -1;
+    } else if (!s->is_wide_char && c >= 0x100) {
+        if (string_buffer_widen(s, s->size))
+            return -1;
+    }
+    if (s->is_wide_char) {
+        memcpy(&s->str->u.str16[s->len], p, len << 1);
+        s->len += len;
+    } else {
+        for (i = 0; i < len; i++) {
+            s->str->u.str8[s->len + i] = p[i];
+        }
+        s->len += len;
+    }
+    return 0;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 3547
+static no_inline int string_buffer_realloc(StringBuffer *s, int new_len, int c)
+{
+    JSString *new_str;
+    int new_size;
+    size_t new_size_bytes, slack;
+
+    if (s->error_status)
+        return -1;
+
+    if (new_len > JS_STRING_LEN_MAX) {
+        JS_ThrowInternalError(s->ctx, "string too long");
+        return string_buffer_set_error(s);
+    }
+    new_size = min_int(max_int(new_len, s->size * 3 / 2), JS_STRING_LEN_MAX);
+    if (!s->is_wide_char && c >= 0x100) {
+        return string_buffer_widen(s, new_size);
+    }
+    new_size_bytes = sizeof(JSString) + (new_size << s->is_wide_char) + 1 - s->is_wide_char;
+    new_str = js_realloc2(s->ctx, s->str, new_size_bytes, &slack);
+    if (!new_str)
+        return string_buffer_set_error(s);
+    new_size = min_int(new_size + (slack >> s->is_wide_char), JS_STRING_LEN_MAX);
+    s->size = new_size;
+    s->str = new_str;
+    return 0;
+}
+
+/// Line number here: 3525
+static no_inline int string_buffer_widen(StringBuffer *s, int size)
+{
+    JSString *str;
+    size_t slack;
+    int i;
+
+    if (s->error_status)
+        return -1;
+
+    str = js_realloc2(s->ctx, s->str, sizeof(JSString) + (size << 1), &slack);
+    if (!str)
+        return string_buffer_set_error(s);
+    size += slack >> 1;
+    for(i = s->len; i-- > 0;) {
+        str->u.str16[i] = str->u.str8[i];
+    }
+    s->is_wide_char = 1;
+    s->size = size;
+    s->str = str;
+    return 0;
+}
+
+/// Line number here: 3706
+static int string_buffer_concat(StringBuffer *s, const JSString *p,
+                                uint32_t from, uint32_t to)
+{
+    if (to <= from)
+        return 0;
+    if (p->is_wide_char)
+        return string_buffer_write16(s, p->u.str16 + from, to - from);
+    else
+        return string_buffer_write8(s, p->u.str8 + from, to - from);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 42
+extern void *memcpy (void *__restrict __dest, const void *__restrict __src,
+		     size_t __n) __THROW __nonnull ((1, 2))
+
+
+
+----- Callgraph:
+strict digraph G {
+"string_buffer_write16(StringBuffer *, const uint16_t *, int)";
+"string_buffer_write16(StringBuffer *, const uint16_t *, int)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_write16(StringBuffer *, const uint16_t *, int)" -> "string_buffer_widen(StringBuffer *, int)";
+"string_buffer_write16(StringBuffer *, const uint16_t *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "min_int(int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "max_int(int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "string_buffer_widen(StringBuffer *, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"string_buffer_widen(StringBuffer *, int)";
+"string_buffer_widen(StringBuffer *, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"string_buffer_widen(StringBuffer *, int)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)" -> "string_buffer_write16(StringBuffer *, const uint16_t *, int)";
+"string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)" -> "string_buffer_write8(StringBuffer *, const uint8_t *, int)";
+}

@@ -1,0 +1,64 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-test_one_input_init(JSRuntime *, JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `test_one_input_init` function:
+
+1. :fuzz_common.c:test_one_input_init:30 - No check if `rt` or `ctx` are NULL before using them
+2. :fuzz_common.c:test_one_input_init:36 - Using `JS_GetRuntime(ctx)` result without checking if it's NULL
+3. :fuzz_common.c:test_one_input_init:42 - No check if `js_init_module_std` or `js_init_module_os` succeeded
+4. :fuzz_common.c:test_one_input_init:47 - No check if `std_val` is valid before awaiting it
+
+Here's the diff with the fixes:
+
+```diff
+--- a/fuzz_common.c
++++ b/fuzz_common.c
+@@ -27,6 +27,9 @@
+ 
+ /// Line number here: 30
+ void test_one_input_init(JSRuntime *rt, JSContext *ctx) {
++    if (!rt || !ctx)
++        funlogline();
++
+     // 64 Mo
+     JS_SetMemoryLimit(rt, 0x4000000);
+     // 64 Kb
+@@ -34,6 +37,9 @@
+ 
+     JS_SetModuleLoaderFunc(rt, NULL, js_module_loader, NULL);
+     JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, NULL);
++    if (!JS_GetRuntime(ctx))
++        funlogline();
++
+     js_std_add_helpers(ctx, 0, NULL);
+ 
+     // Load os and std
+@@ -46,6 +52,9 @@
+                 "globalThis.std = std;\n"
+                 "globalThis.os = os;\n";
+     JSValue std_val = JS_Eval(ctx, str, strlen(str), "<input>", JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
++    if (JS_IsException(std_val) && !js_init_module_std(ctx, "std") && !js_init_module_os(ctx, "os"))
++        funlogline();
++
+     if (!JS_IsException(std_val)) {
+         js_module_set_import_meta(ctx, std_val, 1, 1);
+         std_val = JS_EvalFunction(ctx, std_val);
+@@ -53,5 +62,7 @@
+         js_std_dump_error(ctx);
+     }
+     std_val = js_std_await(ctx, std_val);
++    if (JS_IsException(std_val))
++        funlogline();
+     JS_FreeValue(ctx, std_val);
+ }
+```
+
+The main logical issues are:
+
+1. Missing NULL checks for input parameters
+2. Missing check for JS_GetRuntime() result
+3. Missing validation of module initialization
+4. Missing check of await result before freeing
+
+The added checks will help catch these error conditions early. The `funlogline()` calls will help track when these error conditions occur during fuzzing.

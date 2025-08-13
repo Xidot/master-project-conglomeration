@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19615,6 +19615,7 @@
+ static JSValue async_func_resume(JSContext *ctx, JSAsyncFunctionState *s)
+ {
+     JSRuntime *rt = ctx->rt;
+     JSStackFrame *sf = &s->frame;
++    if (s->is_completed) funlogline();
+     JSValue func_obj, ret;
+ 
+     assert(!s->is_completed);
+@@ -19625,6 +19626,7 @@
+         /* the tag does not matter provided it is not an object */
+         func_obj = JS_MKPTR(JS_TAG_INT, s);
+         ret = JS_CallInternal(ctx, func_obj, s->this_val, JS_UNDEFINED,
++        if (JS_IsException(ret) && s->is_completed) funlogline();
+                               s->argc, sf->arg_buf, JS_CALL_FLAG_GENERATOR);
+     }
+     if (JS_IsException(ret) || JS_IsUndefined(ret)) {
+@@ -19633,6 +19635,7 @@
+             sf->cur_sp[-1] = JS_UNDEFINED;
+         }
+         /* end of execution */
++        if (s->is_completed) funlogline();
+         s->is_completed = TRUE;
+ 
+         /* close the closure variables. */

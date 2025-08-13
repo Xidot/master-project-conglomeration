@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mpb_get_bit(const mpb_t *, int)
+-------------------------
+Based on the provided code, here are the potential logical bugs in the target function `mpb_get_bit`:
+
+:mpb_get_bit(const mpb_t *, int):299
+
+```diff
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -302,6 +302,7 @@
+ {
+     int l;
+     
++    if (k < 0) funlogline();
+     l = (unsigned)k / LIMB_BITS;
+     k = k & (LIMB_BITS - 1);
+     if (l >= r->len)
+```
+
+Reasoning:
+1. The function doesn't check for negative bit positions (k). While the unsigned division would make negative k values very large, this could lead to incorrect behavior when checking `l >= r->len`. The function should either handle negative k values explicitly or document that only non-negative k is allowed.
+
+The other parts of the function appear logically correct:
+- The unsigned division and bit masking for LIMB_BITS is correct
+- The bounds check for l against r->len is correct
+- The bit extraction is correctly implemented
+
+Note that while the function is called with shift-1 in mpb_shr_round, the caller appears to ensure shift is positive in that context, so the negative k case might not be reachable through normal usage. However, as a general utility function, it should handle negative inputs properly.

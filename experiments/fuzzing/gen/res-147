@@ -1,0 +1,50 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicJSON(JSContext *)
+-------------------------
+Based on the provided code, here are the potential logical bugs:
+
+:JS_AddIntrinsicJSON:46963
+:JS_SetPropertyFunctionList:38149
+
+---
+
+1. In `JS_AddIntrinsicJSON`, there's no check if `ctx->global_obj` is valid before using it in `JS_SetPropertyFunctionList`. If `global_obj` is invalid/NULL, this could cause issues.
+
+2. In `JS_SetPropertyFunctionList`, if `tab` is NULL but `len` > 0, it will cause invalid memory access in the loop. Also, if `len` is negative, the loop won't execute but this might not be the intended behavior.
+
+Here are the suggested modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -46962,6 +46962,9 @@
+ 
+ void JS_AddIntrinsicJSON(JSContext *ctx)
+ {
++    if (!ctx->global_obj) {
++        funlogline();
++    }
+     /* add JSON as autoinit object */
+     JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_json_obj, countof(js_json_obj));
+ }
+ 
+@@ -38151,6 +38151,9 @@
+ {
+     int i, ret;
+ 
++    if ((tab == NULL && len > 0) || len < 0) {
++        funlogline();
++    }
+     for (i = 0; i < len; i++) {
+         const JSCFunctionListEntry *e = &tab[i];
+         JSAtom atom = find_atom(ctx, e->name);
+```
+
+The modifications add checks for:
+1. NULL global_obj in JS_AddIntrinsicJSON
+2. NULL tab with positive len or negative len in JS_SetPropertyFunctionList
+
+These are logical errors because:
+1. The function assumes global_obj exists but doesn't verify it
+2. The function doesn't validate its input parameters properly before using them

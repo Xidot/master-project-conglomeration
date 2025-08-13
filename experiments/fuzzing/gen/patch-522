@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37953,6 +37953,9 @@
+ JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                        int flags)
+ {
++    if (!buf || buf_len == 0) {
++        funlogline();
++    }
+     BCReaderState ss, *s = &ss;
+     JSValue obj;
+ 
+@@ -37965,6 +37968,9 @@
+     s->ptr = buf;
+     s->allow_bytecode = ((flags & JS_READ_OBJ_BYTECODE) != 0);
+     s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
++    if (s->allow_bytecode && JS_ATOM_END < 1) {
++        funlogline();
++    }
+     s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
+     s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
+     if (s->allow_bytecode)
+@@ -37974,6 +37980,7 @@
+     if (JS_ReadObjectAtoms(s)) {
+         obj = JS_EXCEPTION;
+     } else {
++        funlogline(); // Potential error state not cleaned up
+         obj = JS_ReadObjectRec(s);
+     }
+     bc_reader_free(s);

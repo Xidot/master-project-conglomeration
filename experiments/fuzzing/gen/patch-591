@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4233,6 +4233,8 @@
+     len1 = string_rope_get_len(op1);
+     len2 = string_rope_get_len(op2);
+     /* no need to go further for equality test if
+        different length */
++    if (eq_only && len1 == len2 && len1 == 0)
++        funlogline();
+     if (eq_only && len1 != len2)
+         return 1; 
+     len = min_uint32(len1, len2);
+@@ -4245,6 +4247,8 @@
+     pos2 = 0;
+     while (len != 0) {
+         l = min_uint32(p1->len - pos1, p2->len - pos2);
++        if (l == 0 && len != 0)
++            funlogline();
+         l = min_uint32(l, len);
+         res = js_string_memcmp(p1, pos1, p2, pos2, l);
+         if (res != 0)
+@@ -4263,6 +4267,8 @@
+         }
+     }
+ 
++    if (len1 == len2 && len1 != 0)
++        funlogline();
+     if (len1 == len2)
+         res = 0;
+     else if (len1 < len2)

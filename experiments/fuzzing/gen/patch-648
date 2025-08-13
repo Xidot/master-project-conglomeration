@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12955,6 +12955,10 @@
+ 
+ JSValue JS_ToPropertyKey(JSContext *ctx, JSValueConst val)
+ {
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
++        funlogline();
++        return JS_DupValue(ctx, val);
++    }
+     return JS_ToStringInternal(ctx, val, TRUE);
+ }

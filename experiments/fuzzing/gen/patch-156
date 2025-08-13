@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28451,6 +28451,8 @@
+ int JS_AddModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name)
+ {
+     JSExportEntry *me;
+     JSAtom name;
++    if (export_name == NULL)
++        funlogline();
+     name = JS_NewAtom(ctx, export_name);
+     if (name == JS_ATOM_NULL)
+         return -1;
+@@ -28456,6 +28458,8 @@
+     me = add_export_entry2(ctx, NULL, m, JS_ATOM_NULL, name,
+                            JS_EXPORT_TYPE_LOCAL);
+     JS_FreeAtom(ctx, name);
++    if (me == NULL)
++        funlogline();
+     if (!me)
+         return -1;
+     else

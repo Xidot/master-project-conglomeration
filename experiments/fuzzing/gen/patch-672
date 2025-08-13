@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36373,6 +36373,8 @@
+ static int JS_WriteFunctionTag(BCWriterState *s, JSValueConst obj)
+ {
+     JSFunctionBytecode *b = JS_VALUE_GET_PTR(obj);
++    if (!b)
++        funlogline();
+     uint32_t flags;
+     int idx, i;
+ 
+@@ -36397,6 +36399,8 @@
+     assert(idx <= 16);
+     bc_put_u16(s, flags);
+     bc_put_u8(s, b->js_mode);
++    if (b->js_mode > 0xFF)
++        funlogline();
+     bc_put_atom(s, b->func_name);
+ 
+     bc_put_leb128(s, b->arg_count);
+@@ -36427,6 +36431,8 @@
+     }
+ 
+     for(i = 0; i < b->closure_var_count; i++) {
++        if (!b->closure_var)
++            funlogline();
+         JSClosureVar *cv = &b->closure_var[i];
+         bc_put_atom(s, cv->var_name);
+         bc_put_leb128(s, cv->var_idx);

@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10732,6 +10732,9 @@
+ static inline js_limb_t udiv1norm(js_limb_t *pr, js_limb_t a1, js_limb_t a0,
+                                 js_limb_t d, js_limb_t d_inv)
+ {
++    if (a1 >= d) {
++        funlogline();
++    }
+     js_limb_t n1m, n_adj, q, r, ah;
+     js_dlimb_t a;
+     n1m = ((js_slimb_t)a0 >> (JS_LIMB_BITS - 1));
+@@ -10742,6 +10745,9 @@
+     a = ((js_dlimb_t)a1 << JS_LIMB_BITS) | a0;
+     a = a - (js_dlimb_t)q * d - d;
+     ah = a >> JS_LIMB_BITS;
++    if (ah > JS_LIMB_MAX - q - 1) {
++        funlogline();
++    }
+     q += 1 + ah;
+     r = (js_limb_t)a + (ah & d);
+     *pr = r;

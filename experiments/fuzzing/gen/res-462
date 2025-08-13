@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewUint32(JSContext *, uint32_t)
+-------------------------
+Based on the provided code, here are the potential logical bugs:
+
+:JS_NewUint32:582
+
+---
+
+The logical bug occurs in `JS_NewUint32` when handling values between `0x80000000` and `0xFFFFFFFF` (UINT32_MAX). The function checks if `val <= 0x7fffffff` to decide between creating an integer or float value, but this comparison is incorrect for unsigned 32-bit values. When `val` is between `0x80000000` and `0xFFFFFFFF`, it will be treated as a negative number when cast to `int32_t` in `JS_NewInt32`, which is not the intended behavior for an unsigned value.
+
+Here's the diff to detect this case:
+
+```diff
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -583,6 +583,9 @@
+ static js_force_inline JSValue JS_NewUint32(JSContext *ctx, uint32_t val)
+ {
+     JSValue v;
++    if (val > 0x7fffffff && val <= 0xffffffff) {
++        funlogline();
++    }
+     if (val <= 0x7fffffff) {
+         v = JS_NewInt32(ctx, val);
+     } else {
+```
+
+The condition `val > 0x7fffffff && val <= 0xffffffff` will be true when the unsigned value is in the range that would be incorrectly treated as negative if cast to int32_t.

@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7042,6 +7042,8 @@
+ JSValue __attribute__((format(printf, 2, 3))) JS_ThrowSyntaxError(JSContext *ctx, const char *fmt, ...)
+ {
+     JSValue val;
++    if (!fmt)
++        funlogline();
+     va_list ap;
+ 
+     va_start(ap, fmt);
+@@ -7028,6 +7030,8 @@
+                              const char *fmt, va_list ap)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!fmt)
++        funlogline();
+     JSStackFrame *sf;
+     BOOL add_backtrace;
+ 
+@@ -37033,6 +37037,8 @@
+ static int bc_idx_to_atom(BCReaderState *s, JSAtom *patom, uint32_t idx)
+ {
+     JSAtom atom;
++    if (idx >= s->idx_to_atom_count + s->first_atom)
++        funlogline();
+ 
+     if (__JS_AtomIsTaggedInt(idx)) {
+         atom = idx;
+@@ -44667,6 +44673,8 @@
+ {
+     const char *str;
+     int re_flags, mask;
++    if ((re_flags & LRE_FLAG_UNICODE_SETS) && (re_flags & LRE_FLAG_UNICODE))
++        funlogline();
+     uint8_t *re_bytecode_buf;
+     size_t i, len;
+     int re_bytecode_len;

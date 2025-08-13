@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36186,6 +36186,8 @@
+ 
+ static int bc_put_atom(BCWriterState *s, JSAtom atom)
+ {
++    if (atom == 0)
++        funlogline();
+     uint32_t v;
+ 
+     if (__JS_AtomIsTaggedInt(atom)) {
+@@ -36193,6 +36195,8 @@
+     } else {
+         if (bc_atom_to_idx(s, &v, atom))
+             return -1;
++        if (v == 0)
++            funlogline();
+         v <<= 1;
+     }
+     bc_put_leb128(s, v);

@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_unary_arith_slow(JSContext *, JSValue *, OPCodeEnum)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_unary_arith_slow` function:
+
+:quickjs.c:js_unary_arith_slow:14052
+:quickjs.c:js_unary_arith_slow:14072
+:quickjs.c:js_unary_arith_slow:14089
+:quickjs.c:js_unary_arith_slow:14106
+
+----- 
+
+1. Line 14052: In the `JS_TAG_INT` case, when handling `OP_neg`, there's no check for integer overflow when negating `v64`. This could lead to undefined behavior if `v64 == INT64_MIN`.
+
+2. Line 14072: In the `JS_TAG_SHORT_BIG_INT` case for `OP_inc`, there's no check for overflow when incrementing `v`. If `v == JS_SHORT_BIG_INT_MAX`, it should handle the overflow case.
+
+3. Line 14089: Similarly, in the `JS_TAG_SHORT_BIG_INT` case for `OP_dec`, there's no check for underflow when decrementing `v`. If `v == JS_SHORT_BIG_INT_MIN`, it should handle the underflow case.
+
+4. Line 14106: In the `JS_TAG_SHORT_BIG_INT` case for `OP_neg`, there's no check for the special case where negating `JS_SHORT_BIG_INT_MIN` would overflow.
+
+Here's the diff to add the checks:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14049,6 +14049,8 @@
+                 case OP_neg:
+                     if (v64 == 0) {
+                         sp[-1] = __JS_NewFloat64(ctx, -0.0);
++                    } else if (v64 == INT64_MIN) {
++                        sp[-1] = __JS_NewFloat64(ctx, -(double)v64);
+                     } else {
+                         v64 = -v64;
+                     }
+@@ -14069,6 +14071,8 @@
+                 case OP_inc:
+                     if (v == JS_SHORT_BIG_INT_MAX)
+                         goto bigint_slow_case;
++                    if (v == JS_SHORT_BIG_INT_MAX - 1)
++                        funlogline();
+                     sp[-1] = __JS_NewShortBigInt(ctx, v + 1);
+                     break;
+                 case OP_dec:
+@@ -14086,6 +14090,8 @@
+                 bigint_slow_case:
+                     p1 = js_bigint_set_short(&buf1, op1);
+                     goto bigint_slow_case1;
++                } else if (v == JS_SHORT_BIG_INT_MIN + 1) {
++                    funlogline();
+                 }
+                 sp[-1] = __JS_NewShortBigInt(ctx, -v);
+                 break;
+```
+
+The changes add overflow/underflow checks and logging for the edge cases. For the INT64_MIN negation case, we handle it by converting to float64 to avoid overflow. The other cases log when we're approaching the limits.

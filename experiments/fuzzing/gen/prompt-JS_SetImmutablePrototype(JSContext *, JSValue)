@@ -1,0 +1,260 @@
+Target function: "JS_SetImmutablePrototype(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 7237
+static void JS_SetImmutablePrototype(JSContext *ctx, JSValueConst obj)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return;
+    p = JS_VALUE_GET_OBJ(obj);
+    p->has_immutable_prototype = TRUE;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* Minimum amount of objects to be able to compile code and display
+   error messages. No JSAtom should be allocated by this function. */
+/// Line number here: 52260
+static void JS_AddIntrinsicBasicObjects(JSContext *ctx)
+{
+    JSValue proto;
+    int i;
+
+    ctx->class_proto[JS_CLASS_OBJECT] = JS_NewObjectProto(ctx, JS_NULL);
+    JS_SetImmutablePrototype(ctx, ctx->class_proto[JS_CLASS_OBJECT]);
+    
+    ctx->function_proto = JS_NewCFunction3(ctx, js_function_proto, "", 0,
+                                           JS_CFUNC_generic, 0,
+                                           ctx->class_proto[JS_CLASS_OBJECT]);
+    ctx->class_proto[JS_CLASS_BYTECODE_FUNCTION] = JS_DupValue(ctx, ctx->function_proto);
+    ctx->class_proto[JS_CLASS_ERROR] = JS_NewObject(ctx);
+#if 0
+    /* these are auto-initialized from js_error_proto_funcs,
+       but delaying might be a problem */
+    JS_DefinePropertyValue(ctx, ctx->class_proto[JS_CLASS_ERROR], JS_ATOM_name,
+                           JS_AtomToString(ctx, JS_ATOM_Error),
+                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValue(ctx, ctx->class_proto[JS_CLASS_ERROR], JS_ATOM_message,
+                           JS_AtomToString(ctx, JS_ATOM_empty_string),
+                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+#endif
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_ERROR],
+                               js_error_proto_funcs,
+                               countof(js_error_proto_funcs));
+
+    for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
+        proto = JS_NewObjectProto(ctx, ctx->class_proto[JS_CLASS_ERROR]);
+        JS_DefinePropertyValue(ctx, proto, JS_ATOM_name,
+                               JS_NewAtomString(ctx, native_error_name[i]),
+                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValue(ctx, proto, JS_ATOM_message,
+                               JS_AtomToString(ctx, JS_ATOM_empty_string),
+                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        ctx->native_error_proto[i] = proto;
+    }
+
+    /* the array prototype is an array */
+    ctx->class_proto[JS_CLASS_ARRAY] =
+        JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                               JS_CLASS_ARRAY);
+
+    ctx->array_shape = js_new_shape2(ctx, get_proto_obj(ctx->class_proto[JS_CLASS_ARRAY]),
+                                     JS_PROP_INITIAL_HASH_SIZE, 1);
+    add_shape_property(ctx, &ctx->array_shape, NULL,
+                       JS_ATOM_length, JS_PROP_WRITABLE | JS_PROP_LENGTH);
+
+    /* XXX: could test it on first context creation to ensure that no
+       new atoms are created in JS_AddIntrinsicBasicObjects(). It is
+       necessary to avoid useless renumbering of atoms after
+       JS_EvalBinary() if it is done just after
+       JS_AddIntrinsicBasicObjects(). */
+    //    assert(ctx->rt->atom_count == JS_ATOM_END);
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_AddIntrinsicBasicObjects(JSContext *)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_NewObjectProto(JSContext *, JSValue)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_SetImmutablePrototype(JSContext *, JSValue)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_NewObject(JSContext *)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_NewAtomString(JSContext *, const char *)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "js_new_shape2(JSContext *, JSObject *, int, int)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "get_proto_obj(JSValue)";
+"JS_AddIntrinsicBasicObjects(JSContext *)" -> "add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)";
+}

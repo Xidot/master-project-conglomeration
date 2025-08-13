@@ -1,0 +1,378 @@
+Target function: "free_zero_refcount(JSRuntime *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 5809
+static void free_zero_refcount(JSRuntime *rt)
+{
+    struct list_head *el;
+    JSGCObjectHeader *p;
+
+    rt->gc_phase = JS_GC_PHASE_DECREF;
+    for(;;) {
+        el = rt->gc_zero_ref_count_list.next;
+        if (el == &rt->gc_zero_ref_count_list)
+            break;
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->ref_count == 0);
+        free_gc_object(rt, p);
+    }
+    rt->gc_phase = JS_GC_PHASE_NONE;
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 5789
+static void free_gc_object(JSRuntime *rt, JSGCObjectHeader *gp)
+{
+    switch(gp->gc_obj_type) {
+    case JS_GC_OBJ_TYPE_JS_OBJECT:
+        free_object(rt, (JSObject *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_FUNCTION_BYTECODE:
+        free_function_bytecode(rt, (JSFunctionBytecode *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_ASYNC_FUNCTION:
+        __async_func_free(rt, (JSAsyncFunctionState *)gp);
+        break;
+    case JS_GC_OBJ_TYPE_MODULE:
+        js_free_module_def(rt, (JSModuleDef *)gp);
+        break;
+    default:
+        abort();
+    }
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* called with the ref_count of 'v' reaches zero. */
+/// Line number here: 5827
+void __JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    uint32_t tag = JS_VALUE_GET_TAG(v);
+
+#ifdef DUMP_FREE
+    {
+        printf("Freeing ");
+        if (tag == JS_TAG_OBJECT) {
+            JS_DumpObject(rt, JS_VALUE_GET_OBJ(v));
+        } else {
+            JS_DumpValueShort(rt, v);
+            printf("\n");
+        }
+    }
+#endif
+
+    switch(tag) {
+    case JS_TAG_STRING:
+        {
+            JSString *p = JS_VALUE_GET_STRING(v);
+            if (p->atom_type) {
+                JS_FreeAtomStruct(rt, p);
+            } else {
+#ifdef DUMP_LEAKS
+                list_del(&p->link);
+#endif
+                js_free_rt(rt, p);
+            }
+        }
+        break;
+    case JS_TAG_STRING_ROPE:
+        /* Note: recursion is acceptable because the rope depth is bounded */
+        {
+            JSStringRope *p = JS_VALUE_GET_STRING_ROPE(v);
+            JS_FreeValueRT(rt, p->left);
+            JS_FreeValueRT(rt, p->right);
+            js_free_rt(rt, p);
+        }
+        break;
+    case JS_TAG_OBJECT:
+    case JS_TAG_FUNCTION_BYTECODE:
+    case JS_TAG_MODULE:
+        {
+            JSGCObjectHeader *p = JS_VALUE_GET_PTR(v);
+            if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
+                list_del(&p->link);
+                list_add(&p->link, &rt->gc_zero_ref_count_list);
+                p->mark = 1; /* indicate that the object is about to be freed */
+                if (rt->gc_phase == JS_GC_PHASE_NONE) {
+                    free_zero_refcount(rt);
+                }
+            }
+        }
+        break;
+    case JS_TAG_BIG_INT:
+        {
+            JSBigInt *p = JS_VALUE_GET_PTR(v);
+            js_free_rt(rt, p);
+        }
+        break;
+    case JS_TAG_SYMBOL:
+        {
+            JSAtomStruct *p = JS_VALUE_GET_PTR(v);
+            JS_FreeAtomStruct(rt, p);
+        }
+        break;
+    default:
+        abort();
+    }
+}
+
+/// Line number here: 367
+typedef struct {
+    struct list_head link;
+    JSWeakRefHeaderTypeEnum weakref_type;
+} JSWeakRefHeader
+
+/// Line number here: 358
+enum {
+    JS_WEAKREF_TYPE_MAP,
+    JS_WEAKREF_TYPE_WEAKREF,
+    JS_WEAKREF_TYPE_FINREC,
+}
+
+/* garbage collection */
+/// Line number here: 5905
+static void gc_remove_weak_objects(JSRuntime *rt)
+{
+    struct list_head *el;
+
+    /* add the freed objects to rt->gc_zero_ref_count_list so that
+       rt->weakref_list is not modified while we traverse it */
+    rt->gc_phase = JS_GC_PHASE_DECREF; 
+        
+    list_for_each(el, &rt->weakref_list) {
+        JSWeakRefHeader *wh = list_entry(el, JSWeakRefHeader, link);
+        switch(wh->weakref_type) {
+        case JS_WEAKREF_TYPE_MAP:
+            map_delete_weakrefs(rt, wh);
+            break;
+        case JS_WEAKREF_TYPE_WEAKREF:
+            weakref_delete_weakref(rt, wh);
+            break;
+        case JS_WEAKREF_TYPE_FINREC:
+            finrec_delete_weakref(rt, wh);
+            break;
+        default:
+            abort();
+        }
+    }
+
+    rt->gc_phase = JS_GC_PHASE_NONE;
+    /* free the freed objects here. */
+    free_zero_refcount(rt);
+}
+
+/// Line number here: 19668
+static void async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+    if (--s->header.ref_count == 0) {
+        if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
+            list_del(&s->header.link);
+            list_add(&s->header.link, &rt->gc_zero_ref_count_list);
+            if (rt->gc_phase == JS_GC_PHASE_NONE) {
+                free_zero_refcount(rt);
+            }
+        }
+    }
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"free_zero_refcount(JSRuntime *)";
+"free_zero_refcount(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"free_zero_refcount(JSRuntime *)" -> "free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "free_object(JSRuntime *, JSObject *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "free_function_bytecode(JSRuntime *, JSFunctionBytecode *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "__async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "js_free_module_def(JSRuntime *, JSModuleDef *)";
+"free_gc_object(JSRuntime *, JSGCObjectHeader *)" -> "abort()";
+"__JS_FreeValueRT(JSRuntime *, JSValue)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "list_del(struct list_head *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "list_add(struct list_head *, struct list_head *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "free_zero_refcount(JSRuntime *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "abort()";
+"gc_remove_weak_objects(JSRuntime *)";
+"gc_remove_weak_objects(JSRuntime *)" -> "map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)";
+"gc_remove_weak_objects(JSRuntime *)" -> "weakref_delete_weakref(JSRuntime *, JSWeakRefHeader *)";
+"gc_remove_weak_objects(JSRuntime *)" -> "finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)";
+"gc_remove_weak_objects(JSRuntime *)" -> "abort()";
+"gc_remove_weak_objects(JSRuntime *)" -> "free_zero_refcount(JSRuntime *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_del(struct list_head *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_add(struct list_head *, struct list_head *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "free_zero_refcount(JSRuntime *)";
+}

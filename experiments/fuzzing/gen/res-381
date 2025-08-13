@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_IsInstanceOf(JSContext *, JSValue, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_IsInstanceOf` function:
+
+:quickjs.c:JS_IsInstanceOf:7483
+:quickjs.c:JS_IsInstanceOf:7491
+:quickjs.c:JS_IsInstanceOf:7498
+
+---
+
+Here's the unified diff with the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7480,6 +7480,8 @@
+     JSValue method;
+ 
+     if (!JS_IsObject(obj))
++        if (JS_IsException(val))
++            funlogline();
+         goto fail;
+     method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_hasInstance);
+     if (JS_IsException(method))
+@@ -7495,6 +7497,8 @@
+     /* legacy case */
+     if (!JS_IsFunction(ctx, obj)) {
+     fail:
++        if (JS_IsException(obj))
++            funlogline();
+         JS_ThrowTypeError(ctx, "invalid 'instanceof' right operand");
+         return -1;
+     }
+```
+
+Reasons:
+1. First bug (line 7483): Missing check for exception value before proceeding with instanceof check
+2. Second bug (line 7491): Missing check for exception in method before calling JS_CallFree
+3. Third bug (line 7498): Missing check for exception in obj before throwing TypeError
+
+The instrumentation checks for exception cases that could lead to incorrect behavior in the instanceof operation. The changes add checks that call funlogline() when these exceptional cases occur.

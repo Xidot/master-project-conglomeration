@@ -1,0 +1,41 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14961,6 +14961,7 @@
+     JSValue op1, op2;
+     uint32_t v1, v2, r;
+ 
++    if (sp == NULL) funlogline();
+     op1 = sp[-2];
+     op2 = sp[-1];
+     op1 = JS_ToNumericFree(ctx, op1);
+@@ -14970,6 +14971,7 @@
+     }
+     op2 = JS_ToNumericFree(ctx, op2);
+     if (JS_IsException(op2)) {
++        if (JS_IsException(op1)) funlogline();
+         JS_FreeValue(ctx, op1);
+         goto exception;
+     }
+@@ -14977,6 +14979,7 @@
+         JS_VALUE_GET_TAG(op1) == JS_TAG_SHORT_BIG_INT ||
+         JS_VALUE_GET_TAG(op2) == JS_TAG_BIG_INT ||
+         JS_VALUE_GET_TAG(op2) == JS_TAG_SHORT_BIG_INT) {
++        if (JS_VALUE_GET_TAG(op1) == JS_TAG_BIG_INT || JS_VALUE_GET_TAG(op2) == JS_TAG_BIG_INT) funlogline();
+         JS_ThrowTypeError(ctx, "bigint operands are forbidden for >>>");
+         JS_FreeValue(ctx, op1);
+         JS_FreeValue(ctx, op2);
+@@ -14984,6 +14987,7 @@
+     }
+     /* cannot give an exception */
+     JS_ToUint32Free(ctx, &v1, op1);
++    if (v1 == 0 && JS_VALUE_GET_TAG(op1) != JS_TAG_INT) funlogline();
+     JS_ToUint32Free(ctx, &v2, op2);
+     r = v1 >> (v2 & 0x1f);
+     sp[-2] = JS_NewUint32(ctx, r);
+@@ -14991,6 +14995,7 @@
+  exception:
+     sp[-2] = JS_UNDEFINED;
+     sp[-1] = JS_UNDEFINED;
++    if (sp[-2] == JS_UNDEFINED && sp[-1] == JS_UNDEFINED) funlogline();
+     return -1;
+ }

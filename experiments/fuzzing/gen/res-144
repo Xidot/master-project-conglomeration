@@ -1,0 +1,24 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicBigInt(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_AddIntrinsicBigInt` function:
+
+:quickjs.c:JS_AddIntrinsicBigInt:52238
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52238,6 +52238,7 @@
+ static void JS_AddIntrinsicBigInt(JSContext *ctx)
+ {
+     JSValueConst obj1;
++    if (ctx->class_proto[JS_CLASS_BIG_INT] != JS_NULL) funlogline();
+ 
+     ctx->class_proto[JS_CLASS_BIG_INT] = JS_NewObject(ctx);
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_BIG_INT],
+```
+
+The logical bug here is that the function doesn't check if `class_proto[JS_CLASS_BIG_INT]` is already initialized before overwriting it. This could lead to memory leaks if the proto was already set. The added check will detect when we're about to overwrite an existing proto value.

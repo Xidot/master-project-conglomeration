@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-udiv1norm(js_limb_t *, js_limb_t, js_limb_t, js_limb_t, js_limb_t)
+-------------------------
+Here are the potential logical bugs in the target function `udiv1norm`:
+
+:udiv1norm:10732
+:udiv1norm:10745
+
+---
+
+1. Line 10732: The function assumes `a1 < d` as per the comment, but there's no check to enforce this precondition. If `a1 >= d`, the calculations will be incorrect.
+
+2. Line 10745: The adjustment `q += 1 + ah` could potentially overflow if `ah` is large enough, but there's no check for this condition.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10732,6 +10732,9 @@
+ static inline js_limb_t udiv1norm(js_limb_t *pr, js_limb_t a1, js_limb_t a0,
+                                 js_limb_t d, js_limb_t d_inv)
+ {
++    if (a1 >= d) {
++        funlogline();
++    }
+     js_limb_t n1m, n_adj, q, r, ah;
+     js_dlimb_t a;
+     n1m = ((js_slimb_t)a0 >> (JS_LIMB_BITS - 1));
+@@ -10742,6 +10745,9 @@
+     a = ((js_dlimb_t)a1 << JS_LIMB_BITS) | a0;
+     a = a - (js_dlimb_t)q * d - d;
+     ah = a >> JS_LIMB_BITS;
++    if (ah > JS_LIMB_MAX - q - 1) {
++        funlogline();
++    }
+     q += 1 + ah;
+     r = (js_limb_t)a + (ah & d);
+     *pr = r;
+```
+
+The first check ensures the precondition `a1 < d` is met, while the second check guards against potential overflow in the quotient calculation. Both conditions would indicate logical errors in the function's operation.

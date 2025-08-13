@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11762,6 +11762,9 @@
+     /* compute the maximum number of limbs */
+     /* XXX: overflow */
+     if (radix == 10) {
++        if (n_digits > (INT_MAX - 7) / 27) {
++            funlogline();
++        }
+         n_bits = (n_digits * 27 + 7) / 8; /* >= ceil(n_digits * log2(10)) */
+     } else {
+         n_bits = n_digits * log2_radix;
+@@ -11789,6 +11789,9 @@
+                 if (c >= radix)
+                     break;
+                 p++;
++                if (v > UINT64_MAX / 10) {
++                    funlogline();
++                }
+                 v = v * 10 + c;
+             }
+             if (i == 0)
+@@ -11822,6 +11822,9 @@
+             bit_pos = i * log2_radix;
+             shift = bit_pos & (JS_LIMB_BITS - 1);
+             pos = bit_pos / JS_LIMB_BITS;
++            if (c << shift < c) {
++                funlogline();
++            }
+             r->tab[pos] |= c << shift;
+             /* if log2_radix does not divide JS_LIMB_BITS, needed an
+                additional op */

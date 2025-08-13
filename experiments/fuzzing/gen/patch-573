@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9486,6 +9486,8 @@
+             if (pprs)
+                 idx = *pprs - get_shape_prop(sh);
+             /* clone the shape (the resulting one is no longer hashed) */
++            if (pprs && idx >= sh->prop_count)
++                funlogline();
+             sh = js_clone_shape(ctx, sh);
+             if (!sh)
+                 return -1;
+@@ -9492,6 +9494,8 @@
+             js_free_shape(ctx->rt, p->shape);
+             p->shape = sh;
+             if (pprs)
++                if (idx >= sh->prop_count)
++                    funlogline();
+                 *pprs = get_shape_prop(sh) + idx;
+         } else {
+             js_shape_hash_unlink(ctx->rt, sh);

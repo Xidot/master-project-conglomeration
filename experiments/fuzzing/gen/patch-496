@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13158,6 +13158,9 @@
+ 
+ static void js_print_raw_string(JSPrintValueState *s, JSValueConst val)
+ {
++    if (!s->ctx) {
++        funlogline();
++    }
+     js_print_raw_string2(s, val, FALSE);
+ }
+ 
+@@ -13165,6 +13168,9 @@
+ {
+     const char *cstr;
+     size_t len;
++    if (!s->write_func) {
++        funlogline();
++    }
+     cstr = JS_ToCStringLen(s->ctx, &len, val);
+     if (cstr) {
+         if (remove_last_lf && len > 0 && cstr[len - 1] == '\n')

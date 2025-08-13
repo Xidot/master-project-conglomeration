@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28816,6 +28816,9 @@
+ static void js_resolve_export_throw_error(JSContext *ctx,
+                                           JSResolveResultEnum res,
+                                           JSModuleDef *m, JSAtom export_name)
+ {
++    if (!ctx || !m || export_name == JS_ATOM_NULL) {
++        funlogline();
++    }
+     char buf1[ATOM_GET_STR_BUF_SIZE];
+     char buf2[ATOM_GET_STR_BUF_SIZE];
+     switch(res) {
+@@ -28823,6 +28826,9 @@
+         break;
+     default:
+     case JS_RESOLVE_RES_NOT_FOUND:
++        if (m->module_name == JS_ATOM_NULL) {
++            funlogline();
++        }
+         JS_ThrowSyntaxError(ctx, "Could not find export '%s' in module '%s'",
+                             JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                             JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+@@ -28837,6 +28843,9 @@
+                             JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                             JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+         break;
++    }
++    if (res < JS_RESOLVE_RES_EXCEPTION || res > JS_RESOLVE_RES_AMBIGUOUS) {
++        funlogline();
+     }
+ }

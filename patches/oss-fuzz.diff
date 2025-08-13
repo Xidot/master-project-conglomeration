@@ -1,0 +1,358 @@
+diff --git a/infra/base-images/base-runner/run_fuzzer b/infra/base-images/base-runner/run_fuzzer
+index 6e55917..6a110c4 100755
+--- a/infra/base-images/base-runner/run_fuzzer
++++ b/infra/base-images/base-runner/run_fuzzer
+@@ -224,5 +224,6 @@ if [ ! -z "$DEBUGGER" ]; then
+   CMD_LINE="$DEBUGGER $CMD_LINE"
+ fi
+ 
++echo "STARTING =================================================="
+ bash -c "$CMD_LINE"
+ 
+diff --git a/infra/helper.py b/infra/helper.py
+index 1f00332..adfb929 100755
+--- a/infra/helper.py
++++ b/infra/helper.py
+@@ -585,7 +585,7 @@ def _check_fuzzer_exists(project, fuzzer_name, architecture='x86_64'):
+   command.extend(['-v', '%s:/out' % project.out])
+   command.append(BASE_RUNNER_IMAGE)
+ 
+-  command.extend(['/bin/bash', '-c', 'test -f /out/%s' % fuzzer_name])
++  command.extend(['/bin/test', '-f', '/out/%s' % fuzzer_name])
+ 
+   try:
+     subprocess.check_call(command)
+diff --git a/projects/clib/Dockerfile b/projects/clib/Dockerfile
+index 275657a..614a5ee 100644
+--- a/projects/clib/Dockerfile
++++ b/projects/clib/Dockerfile
+@@ -16,6 +16,7 @@
+ 
+ FROM gcr.io/oss-fuzz-base/base-builder
+ RUN apt-get update && apt-get install -y make cmake libcurl4-gnutls-dev -qq
+-RUN git clone --depth 1 https://github.com/clibs/clib
++# RUN git clone --depth 1 file:///../../../programs/clib
++COPY ./clib $SRC/clib
+ WORKDIR $SRC/
+ COPY build.sh $SRC/
+diff --git a/projects/llvm/Dockerfile b/projects/llvm/Dockerfile
+deleted file mode 100644
+index 6d6d346..0000000
+--- a/projects/llvm/Dockerfile
++++ /dev/null
+@@ -1,28 +0,0 @@
+-# Copyright 2017 Google Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#      http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-################################################################################
+-
+-FROM gcr.io/oss-fuzz-base/base-builder
+-RUN apt-get update -y && \
+-    apt-get install -y autoconf automake libtool curl make g++ unzip wget git \
+-    binutils liblzma-dev libz-dev python-all cmake ninja-build subversion \
+-    pkg-config
+-
+-RUN git clone --depth 1 https://github.com/llvm/llvm-project.git
+-
+-RUN git clone --depth 1 https://github.com/AdaLogics/ada-fuzzers && \
+-    $SRC/ada-fuzzers/projects/llvm/copy-over.sh
+-
+-COPY build.sh *.py $SRC/
+diff --git a/projects/llvm/build.sh b/projects/llvm/build.sh
+deleted file mode 100644
+index 679caeb..0000000
+--- a/projects/llvm/build.sh
++++ /dev/null
+@@ -1,187 +0,0 @@
+-#!/bin/bash -eux
+-#
+-# Copyright 2017 Google Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#      http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-#
+-################################################################################
+-
+-if [ -n "${OSS_FUZZ_CI-}" ]; then
+-  readonly FUZZERS=(\
+-    llvm-dwarfdump-fuzzer \
+-  )
+-else
+-  # For coverage we skip "clangd-fuzzer" because it eats too much memory
+-  # and the process gets killed.
+-  if [[ "$SANITIZER" = coverage ]]; then
+-    readonly FUZZERS=( \
+-      llvm-microsoft-demangle-fuzzer \
+-      llvm-dwarfdump-fuzzer \
+-      llvm-itanium-demangle-fuzzer \
+-      llvm-yaml-numeric-parser-fuzzer \
+-      llvm-yaml-parser-fuzzer \
+-      llvm-dlang-demangle-fuzzer \
+-      vfabi-demangler-fuzzer \
+-      llvm-rust-demangle-fuzzer \
+-      llvm-dis-fuzzer \
+-      llvm-opt-fuzzer \
+-      llvm-isel-fuzzer \
+-      llvm-special-case-list-fuzzer \
+-      clang-objc-fuzzer \
+-      clang-format-fuzzer \
+-      clang-fuzzer \
+-      llvm-parse-assembly-fuzzer \
+-      llvm-symbol-reader-fuzzer \
+-      llvm-object-yaml-fuzzer \
+-    )
+-  else
+-    readonly FUZZERS=( \
+-      llvm-microsoft-demangle-fuzzer \
+-      llvm-dwarfdump-fuzzer \
+-      llvm-itanium-demangle-fuzzer \
+-      llvm-yaml-numeric-parser-fuzzer \
+-      llvm-yaml-parser-fuzzer \
+-      llvm-dlang-demangle-fuzzer \
+-      vfabi-demangler-fuzzer \
+-      llvm-rust-demangle-fuzzer \
+-      llvm-dis-fuzzer \
+-      llvm-opt-fuzzer \
+-      llvm-isel-fuzzer \
+-      llvm-special-case-list-fuzzer \
+-      clang-objc-fuzzer \
+-      clang-format-fuzzer \
+-      clang-fuzzer \
+-      clangd-fuzzer \
+-      llvm-parse-assembly-fuzzer \
+-      llvm-symbol-reader-fuzzer \
+-      llvm-object-yaml-fuzzer \
+-    )
+-  fi
+-fi
+-# Fuzzers whose inputs are C-family source can use clang-fuzzer-dictionary.
+-readonly CLANG_DICT_FUZZERS=( \
+-  clang-fuzzer \
+-  clang-format-fuzzer \
+-  clang-objc-fuzzer \
+-)
+-
+-case $SANITIZER in
+-  address) LLVM_SANITIZER="Address" ;;
+-  undefined) LLVM_SANITIZER="Undefined" ;;
+-  memory) LLVM_SANITIZER="MemoryWithOrigins" ;;
+-  *) LLVM_SANITIZER="" ;;
+-esac
+-case "${LIB_FUZZING_ENGINE}" in
+-  -fsanitize=fuzzer) CMAKE_FUZZING_CONFIG="-DLLVM_USE_SANITIZE_COVERAGE=ON" ;;
+-  *) CMAKE_FUZZING_CONFIG="-DLLVM_LIB_FUZZING_ENGINE=${LIB_FUZZING_ENGINE}" ;;
+-esac
+-
+-LLVM=llvm-project/llvm
+-
+-mkdir build
+-cd build
+-
+-cmake -GNinja -DCMAKE_BUILD_TYPE=Release ../$LLVM \
+-    -DLLVM_ENABLE_PROJECTS="clang;lld;clang-tools-extra" \
+-    -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;compiler-rt" \
+-    -DLLVM_ENABLE_ASSERTIONS=ON \
+-    -DLLVM_USE_LINKER=lld \
+-    -DCMAKE_C_COMPILER="${CC}" \
+-    -DCMAKE_CXX_COMPILER="${CXX}" \
+-    -DCMAKE_C_FLAGS="${CFLAGS}" \
+-    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+-    "${CMAKE_FUZZING_CONFIG}" \
+-    -DLLVM_NO_DEAD_STRIP=ON \
+-    -DLLVM_USE_SANITIZER="${LLVM_SANITIZER}" \
+-    -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=WebAssembly \
+-    -DCOMPILER_RT_INCLUDE_TESTS=OFF
+-
+-# Patch certain build rules in code coverage mode, as otherwise the process is killed.
+-# Verify we can build some of the troublesome rules by building them.
+-if [[ "$SANITIZER" = coverage ]]; then
+-  mv build.ninja ../
+-  python3 $SRC/coverage_patcher.py ../build.ninja build.ninja
+-  ninja lib/Target/AMDGPU/Utils/CMakeFiles/LLVMAMDGPUUtils.dir/AMDGPUBaseInfo.cpp.o -j $(( $(nproc) / 2))
+-  ninja lib/Target/AMDGPU/MCTargetDesc/CMakeFiles/LLVMAMDGPUDesc.dir/AMDGPUMCCodeEmitter.cpp.o -j $(( $(nproc) / 2))
+-fi
+-
+-for fuzzer in "${FUZZERS[@]}"; do
+-  # Limit workload in CI
+-  if [ -n "${OSS_FUZZ_CI-}" ]; then
+-    ninja $fuzzer -j 3
+-  else
+-    # Do not exhaust memory limitations on the cloud machine, coverage
+-    # takes more resources which causes processes to crash.
+-    if [[ "$SANITIZER" = coverage ]]; then
+-      ninja $fuzzer -j $(( $(nproc) / 4)) || ninja $fuzzer -j 2 || ninja $fuzzer -j 1
+-    else
+-      ninja $fuzzer -j $(( $(nproc) / 4))
+-    fi
+-  fi
+-  cp bin/$fuzzer $OUT
+-done
+-
+-
+-# Exit early in the CI as the llvm-isel-fuzzer and opt fuzzer won't be there.
+-if [ -n "${OSS_FUZZ_CI-}" ]; then
+-  exit 0
+-fi
+-
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--hexagon-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--riscv64-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--mips64-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--arm-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--ppc64-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--aarch64-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--x86_64-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--wasm32-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--nvptx-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--ve-O2
+-cp $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--bpf-O2
+-mv $OUT/llvm-isel-fuzzer $OUT/llvm-isel-fuzzer--aarch64-gisel
+-
+-# Same for llvm-opt-fuzzer
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-earlycse
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-simplifycfg
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-gvn
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-sccp
+-
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-loop_predication
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-guard_widening
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-loop_vectorize
+-
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-loop_unswitch
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-licm
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-indvars
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-strength_reduce
+-
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-irce
+-
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-dse
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-loop_idiom
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-reassociate
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-lower_matrix_intrinsics
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-memcpyopt
+-cp $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-sroa
+-
+-mv $OUT/llvm-opt-fuzzer $OUT/llvm-opt-fuzzer--x86_64-instcombine
+-
+-
+-ninja clang-fuzzer-dictionary
+-for fuzzer in "${CLANG_DICT_FUZZERS[@]}"; do
+-  bin/clang-fuzzer-dictionary > $OUT/$fuzzer.dict
+-done
+-
+-zip -j "${OUT}/clang-objc-fuzzer_seed_corpus.zip"  $SRC/$LLVM/../clang/tools/clang-fuzzer/corpus_examples/objc/*
+-zip -j "${OUT}/clangd-fuzzer_seed_corpus.zip"  $SRC/$LLVM/../clang-tools-extra/clangd/test/*
+-zip -j "${OUT}/clang-fuzzer_seed_corpus.zip" $SRC/llvm-project/clang/test/Parser/*.cpp
+diff --git a/projects/llvm/coverage_patcher.py b/projects/llvm/coverage_patcher.py
+deleted file mode 100644
+index 24185ee..0000000
+--- a/projects/llvm/coverage_patcher.py
++++ /dev/null
+@@ -1,39 +0,0 @@
+-#!/usr/bin/python3
+-# Copyright 2023 Google LLC
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#      http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-"""Module for patching out coverage instrumentation for specific files."""
+-
+-import os
+-import sys
+-
+-with open(sys.argv[1], "r") as f:
+-  content = f.read()
+-
+-patch_flag = False
+-new_content = ""
+-for line in content.split("\n"):
+-  if patch_flag:
+-    if "FLAGS =" in line:
+-      print("Patching")
+-      line = line.replace("-fprofile-instr-generate -fcoverage-mapping", "")
+-      patch_flag = False
+-
+-  # Find the AMDGPUBaseInfo.cpp.o build
+-  if "build" in line and ("AMDGPUBaseInfo.cpp.o" in line or "AMDGPUMCCodeEmitter.cpp.o" in line):
+-    # Find the next flag
+-    patch_flag = True
+-  new_content += line + "\n"
+-
+-with open(sys.argv[2], "w") as f:
+-  f.write(new_content)
+diff --git a/projects/llvm/project.yaml b/projects/llvm/project.yaml
+deleted file mode 100644
+index 8d04b38..0000000
+--- a/projects/llvm/project.yaml
++++ /dev/null
+@@ -1,27 +0,0 @@
+-homepage: "http://llvm.org/"
+-language: c++
+-primary_contact: "rnk@google.com"
+-auto_ccs:
+-  - "jonas@devlieghere.com"
+-  - "vsk@apple.com"
+-  - "akilsrin@apple.com"
+-  - "igmyrj@gmail.com"
+-  - "xpl0re@gmail.com"
+-  - "jfb@chromium.org"
+-  - "eneyman@google.com"
+-  - "bigcheesegs@gmail.com"
+-  - "davg@google.com"
+-  - "sammccall@google.com"
+-  - "david@adalogics.com"
+-
+-sanitizers:
+-  - address
+-  - memory
+-
+-fuzzing_engines:
+-  - libfuzzer
+-  - honggfuzz
+-
+-# Bug reports are public by default:
+-view_restrictions: none
+-main_repo: 'https://github.com/llvm/llvm-project.git'
+diff --git a/projects/quickjs/Dockerfile b/projects/quickjs/Dockerfile
+index 94cf850..e5607ae 100644
+--- a/projects/quickjs/Dockerfile
++++ b/projects/quickjs/Dockerfile
+@@ -16,7 +16,10 @@
+ 
+ FROM gcr.io/oss-fuzz-base/base-builder
+ RUN apt-get update && apt-get install -y make
+-RUN git clone --depth 1 https://github.com/bellard/quickjs quickjs
++#RUN git clone --depth 1 https://github.com/bellard/quickjs quickjs
++
+ RUN git clone --depth 1 https://github.com/renatahodovan/quickjs-corpus
++
++COPY ./quickjs $SRC/quickjs
+ WORKDIR $SRC/quickjs
+ COPY build.sh $SRC/

@@ -1,0 +1,20 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -955,6 +955,9 @@
+ static void mul_pow_round(mpb_t *tmp1, uint64_t m, int e, int radix1, int radix_shift, int f,
+                           int rnd_mode)
+ {
+     int e_offset;
++    
++    if (tmp1 == NULL)
++        funlogline();
+ 
+     mpb_set_u64(tmp1, m);
+     e_offset = mul_pow(tmp1, radix1, radix_shift, f, TRUE, e);
+@@ -962,6 +965,8 @@
+     if (e_offset < INT_MIN + e || e_offset > INT_MAX - e)
+         funlogline();
+     mpb_shr_round(tmp1, -e + e_offset, rnd_mode);
++    if (-e + e_offset < INT_MIN/2 || -e + e_offset > INT_MAX/2)
++        funlogline();
+ }

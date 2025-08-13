@@ -1,0 +1,137 @@
+Target function: "JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/* C module definition */
+/// Line number here: 1125
+typedef int JSModuleInitFunc(JSContext *ctx, JSModuleDef *m)
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* create a C module */
+/// Line number here: 28436
+JSModuleDef *JS_NewCModule(JSContext *ctx, const char *name_str,
+                           JSModuleInitFunc *func)
+{
+    JSModuleDef *m;
+    JSAtom name;
+    name = JS_NewAtom(ctx, name_str);
+    if (name == JS_ATOM_NULL)
+        return NULL;
+    m = js_new_module_def(ctx, name);
+    if (!m)
+        return NULL;
+    m->init_func = func;
+    return m;
+}
+
+/// Line number here: 2956
+JSAtom JS_NewAtom(JSContext *ctx, const char *str)
+{
+    return JS_NewAtomLen(ctx, str, strlen(str));
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/* 'name' is freed. The module is referenced by 'ctx->loaded_modules' */
+/// Line number here: 28248
+static JSModuleDef *js_new_module_def(JSContext *ctx, JSAtom name)
+{
+    JSModuleDef *m;
+    m = js_mallocz(ctx, sizeof(*m));
+    if (!m) {
+        JS_FreeAtom(ctx, name);
+        return NULL;
+    }
+    m->header.ref_count = 1;
+    add_gc_object(ctx->rt, &m->header, JS_GC_OBJ_TYPE_MODULE);
+    m->module_name = name;
+    m->module_ns = JS_UNDEFINED;
+    m->func_obj = JS_UNDEFINED;
+    m->eval_exception = JS_UNDEFINED;
+    m->meta_obj = JS_UNDEFINED;
+    m->promise = JS_UNDEFINED;
+    m->resolving_funcs[0] = JS_UNDEFINED;
+    m->resolving_funcs[1] = JS_UNDEFINED;
+    m->private_value = JS_UNDEFINED;
+    list_add_tail(&m->link, &ctx->loaded_modules);
+    return m;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)";
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)" -> "js_new_module_def(JSContext *, JSAtom)";
+"JS_NewAtom(JSContext *, const char *)";
+"JS_NewAtom(JSContext *, const char *)" -> "JS_NewAtomLen(JSContext *, const char *, size_t)";
+"JS_NewAtom(JSContext *, const char *)" -> "strlen(const char *)";
+"js_new_module_def(JSContext *, JSAtom)";
+"js_new_module_def(JSContext *, JSAtom)" -> "js_mallocz(JSContext *, size_t)";
+"js_new_module_def(JSContext *, JSAtom)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_new_module_def(JSContext *, JSAtom)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"js_new_module_def(JSContext *, JSAtom)" -> "list_add_tail(struct list_head *, struct list_head *)";
+}

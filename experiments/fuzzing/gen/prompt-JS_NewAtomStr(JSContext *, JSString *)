@@ -1,0 +1,564 @@
+Target function: "JS_NewAtomStr(JSContext *, JSString *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* Warning: 'p' is freed */
+/// Line number here: 2913
+static JSAtom JS_NewAtomStr(JSContext *ctx, JSString *p)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t n;
+    if (is_num_string(&n, p)) {
+        if (n <= JS_ATOM_MAX_INT) {
+            js_free_string(rt, p);
+            return __JS_AtomFromUInt32(n);
+        }
+    }
+    /* XXX: should generate an exception */
+    return __JS_NewAtom(rt, p, JS_ATOM_TYPE_STRING);
+}
+
+/* return TRUE if the string is a number n with 0 <= n <= 2^32-1 */
+/// Line number here: 2386
+static inline BOOL is_num_string(uint32_t *pval, const JSString *p)
+{
+    uint32_t n;
+    uint64_t n64;
+    int c, i, len;
+
+    len = p->len;
+    if (len == 0 || len > 10)
+        return FALSE;
+    c = string_get(p, 0);
+    if (is_num(c)) {
+        if (c == '0') {
+            if (len != 1)
+                return FALSE;
+            n = 0;
+        } else {
+            n = c - '0';
+            for(i = 1; i < len; i++) {
+                c = string_get(p, i);
+                if (!is_num(c))
+                    return FALSE;
+                n64 = (uint64_t)n * 10 + (c - '0');
+                if ((n64 >> 32) != 0)
+                    return FALSE;
+                n = n64;
+            }
+        }
+        *pval = n;
+        return TRUE;
+    } else {
+        return FALSE;
+    }
+}
+
+/* same as JS_FreeValueRT() but faster */
+/// Line number here: 1887
+static inline void js_free_string(JSRuntime *rt, JSString *str)
+{
+    if (--str->header.ref_count <= 0) {
+        if (str->atom_type) {
+            JS_FreeAtomStruct(rt, str);
+        } else {
+#ifdef DUMP_LEAKS
+            list_del(&str->link);
+#endif
+            js_free_rt(rt, str);
+        }
+    }
+}
+
+/// Line number here: 2370
+static inline JSAtom __JS_AtomFromUInt32(uint32_t v)
+{
+    return v | JS_ATOM_TAG_INT;
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* string case (internal). Return JS_ATOM_NULL if error. 'str' is
+   freed. */
+/// Line number here: 2658
+static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+    int len;
+
+#if 0
+    printf("__JS_NewAtom: ");  JS_DumpString(rt, str); printf("\n");
+#endif
+    if (atom_type < JS_ATOM_TYPE_SYMBOL) {
+        /* str is not NULL */
+        if (str->atom_type == atom_type) {
+            /* str is the atom, return its index */
+            i = js_get_atom_index(rt, str);
+            /* reduce string refcount and increase atom's unless constant */
+            if (__JS_AtomIsConst(i))
+                str->header.ref_count--;
+            return i;
+        }
+        /* try and locate an already registered atom */
+        len = str->len;
+        h = hash_string(str, atom_type);
+        h &= JS_ATOM_HASH_MASK;
+        h1 = h & (rt->atom_hash_size - 1);
+        i = rt->atom_hash[h1];
+        while (i != 0) {
+            p = rt->atom_array[i];
+            if (p->hash == h &&
+                p->atom_type == atom_type &&
+                p->len == len &&
+                js_string_memcmp(p, 0, str, 0, len) == 0) {
+                if (!__JS_AtomIsConst(i))
+                    p->header.ref_count++;
+                goto done;
+            }
+            i = p->hash_next;
+        }
+    } else {
+        h1 = 0; /* avoid warning */
+        if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+            h = 0;
+        } else {
+            h = JS_ATOM_HASH_PRIVATE;
+            atom_type = JS_ATOM_TYPE_SYMBOL;
+        }
+    }
+
+    if (rt->atom_free_index == 0) {
+        /* allow new atom entries */
+        uint32_t new_size, start;
+        JSAtomStruct **new_array;
+
+        /* alloc new with size progression 3/2:
+           4 6 9 13 19 28 42 63 94 141 211 316 474 711 1066 1599 2398 3597 5395 8092
+           preallocating space for predefined atoms (at least 195).
+         */
+        new_size = max_int(211, rt->atom_size * 3 / 2);
+        if (new_size > JS_ATOM_MAX)
+            goto fail;
+        /* XXX: should use realloc2 to use slack space */
+        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        if (!new_array)
+            goto fail;
+        /* Note: the atom 0 is not used */
+        start = rt->atom_size;
+        if (start == 0) {
+            /* JS_ATOM_NULL entry */
+            p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+            if (!p) {
+                js_free_rt(rt, new_array);
+                goto fail;
+            }
+            p->header.ref_count = 1;  /* not refcounted */
+            p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            new_array[0] = p;
+            rt->atom_count++;
+            start = 1;
+        }
+        rt->atom_size = new_size;
+        rt->atom_array = new_array;
+        rt->atom_free_index = start;
+        for(i = start; i < new_size; i++) {
+            uint32_t next;
+            if (i == (new_size - 1))
+                next = 0;
+            else
+                next = i + 1;
+            rt->atom_array[i] = atom_set_free(next);
+        }
+    }
+
+    if (str) {
+        if (str->atom_type == 0) {
+            p = str;
+            p->atom_type = atom_type;
+        } else {
+            p = js_malloc_rt(rt, sizeof(JSString) +
+                             (str->len << str->is_wide_char) +
+                             1 - str->is_wide_char);
+            if (unlikely(!p))
+                goto fail;
+            p->header.ref_count = 1;
+            p->is_wide_char = str->is_wide_char;
+            p->len = str->len;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            memcpy(p->u.str8, str->u.str8, (str->len << str->is_wide_char) +
+                   1 - str->is_wide_char);
+            js_free_string(rt, str);
+        }
+    } else {
+        p = js_malloc_rt(rt, sizeof(JSAtomStruct)); /* empty wide string */
+        if (!p)
+            return JS_ATOM_NULL;
+        p->header.ref_count = 1;
+        p->is_wide_char = 1;    /* Hack to represent NULL as a JSString */
+        p->len = 0;
+#ifdef DUMP_LEAKS
+        list_add_tail(&p->link, &rt->string_list);
+#endif
+    }
+
+    /* use an already free entry */
+    i = rt->atom_free_index;
+    rt->atom_free_index = atom_get_free(rt->atom_array[i]);
+    rt->atom_array[i] = p;
+
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+
+    rt->atom_count++;
+
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+        if (unlikely(rt->atom_count >= rt->atom_count_resize))
+            JS_ResizeAtomHash(rt, rt->atom_hash_size * 2);
+    }
+
+    //    JS_DumpAtoms(rt);
+    return i;
+
+ fail:
+    i = JS_ATOM_NULL;
+ done:
+    if (str)
+        js_free_string(rt, str);
+    return i;
+}
+
+/* str is UTF-8 encoded */
+/// Line number here: 2939
+JSAtom JS_NewAtomLen(JSContext *ctx, const char *str, size_t len)
+{
+    JSValue val;
+
+    if (len == 0 ||
+        (!is_digit(*str) &&
+         count_ascii((const uint8_t *)str, len) == len)) {
+        JSAtom atom = __JS_FindAtom(ctx->rt, str, len, JS_ATOM_TYPE_STRING);
+        if (atom)
+            return atom;
+    }
+    val = JS_NewStringLen(ctx, str, len);
+    if (JS_IsException(val))
+        return JS_ATOM_NULL;
+    return JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(val));
+}
+
+/* return JS_ATOM_NULL in case of exception */
+/// Line number here: 8331
+JSAtom JS_ValueToAtom(JSContext *ctx, JSValueConst val)
+{
+    JSAtom atom;
+    uint32_t tag;
+    tag = JS_VALUE_GET_TAG(val);
+    if (tag == JS_TAG_INT &&
+        (uint32_t)JS_VALUE_GET_INT(val) <= JS_ATOM_MAX_INT) {
+        /* fast path for integer values */
+        atom = __JS_AtomFromUInt32(JS_VALUE_GET_INT(val));
+    } else if (tag == JS_TAG_SYMBOL) {
+        JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+        atom = JS_DupAtom(ctx, js_get_atom_index(ctx->rt, p));
+    } else {
+        JSValue str;
+        str = JS_ToPropertyKey(ctx, val);
+        if (JS_IsException(str))
+            return JS_ATOM_NULL;
+        if (JS_VALUE_GET_TAG(str) == JS_TAG_SYMBOL) {
+            atom = js_symbol_to_atom(ctx, str);
+        } else {
+            atom = JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(str));
+        }
+    }
+    return atom;
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/// Line number here: 1043
+enum OPCodeEnum {
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f) OP_ ## id,
+#define def(id, size, n_pop, n_push, f)
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_COUNT, /* excluding temporary opcodes */
+    /* temporary opcodes : overlap with the short opcodes */
+    OP_TEMP_START = OP_nop + 1,
+    OP___dummy = OP_TEMP_START - 1,
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f)
+#define def(id, size, n_pop, n_push, f) OP_ ## id,
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_TEMP_END,
+}
+
+/// Line number here: 22604
+static __exception int emit_push_const(JSParseState *s, JSValueConst val,
+                                       BOOL as_atom)
+{
+    int idx;
+
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING && as_atom) {
+        JSAtom atom;
+        /* warning: JS_NewAtomStr frees the string value */
+        JS_DupValue(s->ctx, val);
+        atom = JS_NewAtomStr(s->ctx, JS_VALUE_GET_STRING(val));
+        if (atom != JS_ATOM_NULL && !__JS_AtomIsTaggedInt(atom)) {
+            emit_op(s, OP_push_atom_value);
+            emit_u32(s, atom);
+            return 0;
+        }
+    }
+
+    idx = cpool_add(s, JS_DupValue(s->ctx, val));
+    if (idx < 0)
+        return -1;
+    emit_op(s, OP_push_const);
+    emit_u32(s, idx);
+    return 0;
+}
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 37902
+static int JS_ReadObjectAtoms(BCReaderState *s)
+{
+    uint8_t v8;
+    JSString *p;
+    int i;
+    JSAtom atom;
+
+    if (bc_get_u8(s, &v8))
+        return -1;
+    if (v8 != BC_VERSION) {
+        JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
+                            v8, BC_VERSION);
+        return -1;
+    }
+    if (bc_get_leb128(s, &s->idx_to_atom_count))
+        return -1;
+
+    bc_read_trace(s, "%d atom indexes {\n", s->idx_to_atom_count);
+
+    if (s->idx_to_atom_count != 0) {
+        s->idx_to_atom = js_mallocz(s->ctx, s->idx_to_atom_count *
+                                    sizeof(s->idx_to_atom[0]));
+        if (!s->idx_to_atom)
+            return s->error_state = -1;
+    }
+    for(i = 0; i < s->idx_to_atom_count; i++) {
+        p = JS_ReadString(s);
+        if (!p)
+            return -1;
+        atom = JS_NewAtomStr(s->ctx, p);
+        if (atom == JS_ATOM_NULL)
+            return s->error_state = -1;
+        s->idx_to_atom[i] = atom;
+        if (s->is_rom_data && (atom != (i + s->first_atom)))
+            s->is_rom_data = FALSE; /* atoms must be relocated */
+    }
+    bc_read_trace(s, "}\n");
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewAtomStr(JSContext *, JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "is_num_string(uint32_t *, const JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "js_free_string(JSRuntime *, JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "__JS_AtomFromUInt32(uint32_t)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "__JS_NewAtom(JSRuntime *, JSString *, int)";
+"is_num_string(uint32_t *, const JSString *)";
+"is_num_string(uint32_t *, const JSString *)" -> "string_get(const JSString *, int)";
+"is_num_string(uint32_t *, const JSString *)" -> "is_num(int)";
+"js_free_string(JSRuntime *, JSString *)";
+"js_free_string(JSRuntime *, JSString *)" -> "JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)";
+"js_free_string(JSRuntime *, JSString *)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__JS_AtomIsConst(JSAtom)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "hash_string(const JSString *, uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "max_int(int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_set_free(uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__builtin_expect(long, long)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_string(JSRuntime *, JSString *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_get_free(const JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "JS_ResizeAtomHash(JSRuntime *, int)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "is_digit(int)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "count_ascii(const uint8_t *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "__JS_FindAtom(JSRuntime *, const char *, size_t, int)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_IsException(JSValue)";
+"JS_NewAtomLen(JSContext *, const char *, size_t)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"JS_ValueToAtom(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "__JS_AtomFromUInt32(uint32_t)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_ToPropertyKey(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "js_symbol_to_atom(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"emit_push_const(JSParseState *, JSValue, BOOL)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "JS_DupValue(JSContext *, JSValue)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "emit_op(JSParseState *, uint8_t)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "emit_u32(JSParseState *, uint32_t)";
+"emit_push_const(JSParseState *, JSValue, BOOL)" -> "cpool_add(JSParseState *, JSValue)";
+"JS_ReadObjectAtoms(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "js_mallocz(JSContext *, size_t)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ReadString(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+}

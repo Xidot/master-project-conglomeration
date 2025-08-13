@@ -1,0 +1,68 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-add_property(JSContext *, JSObject *, JSAtom, int)
+-------------------------
+Based on the analysis of the code and call graph, here are the potential logical bugs in the `add_property` function:
+
+/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:add_property:8504
+
+/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:add_property:8520
+
+/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:add_property:8528
+
+/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:add_property:8536
+
+/var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:add_property:8541
+
+---
+
+Here's the unified diff with the instrumentation added:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8517,6 +8517,8 @@
+         /* matching shape found: use it */
+         /*  the property array may need to be resized */
+         if (new_sh->prop_size != sh->prop_size) {
++            if (new_sh->prop_size < sh->prop_count)
++                funlogline();
+             JSProperty *new_prop;
+             new_prop = js_realloc(ctx, p->prop, sizeof(p->prop[0]) *
+                       new_sh->prop_size);
+@@ -8525,6 +8527,8 @@
+             p->prop = new_prop;
+         }
+         p->shape = js_dup_shape(new_sh);
++        if (sh->header.ref_count <= 0)
++            funlogline();
+         js_free_shape(ctx->rt, sh);
+         return &p->prop[new_sh->prop_count - 1];
+     } else if (sh->header.ref_count != 1) {
+@@ -8534,6 +8538,8 @@
+             return NULL;
+         /* hash the cloned shape */
+         new_sh->is_hashed = TRUE;
++        if (new_sh->is_hashed != TRUE)
++            funlogline();
+         js_shape_hash_link(ctx->rt, new_sh);
+         js_free_shape(ctx->rt, p->shape);
+         p->shape = new_sh;
+@@ -8541,6 +8547,8 @@
+ }
+ assert(p->shape->header.ref_count == 1);
+ if (add_shape_property(ctx, &p->shape, p, prop, prop_flags))
++    if (p->shape->header.ref_count != 1)
++        funlogline();
+     return NULL;
+ return &p->prop[p->shape->prop_count - 1];
+ }
+```
+
+The instrumentation checks for:
+1. New shape having smaller prop_size than current prop_count
+2. Freeing a shape with ref_count <= 0
+3. Failed is_hashed flag setting
+4. Shape ref_count changed after add_shape_property
+
+These checks help detect potential logical errors in property array resizing, reference counting, and shape management.

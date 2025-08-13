@@ -1,0 +1,34 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_promise_then(JSContext *, JSValue, int, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_promise_then` function:
+
+1. :quickjs.c:js_promise_then:50139 - Missing check for NULL resolving_funcs after js_new_promise_capability
+2. :quickjs.c:js_promise_then:50139 - No validation of argc parameter before accessing argv array
+
+Here's the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50145,6 +50145,9 @@
+     result_promise = js_new_promise_capability(ctx, resolving_funcs, ctor);
+     JS_FreeValue(ctx, ctor);
+     if (JS_IsException(result_promise))
+         return result_promise;
++    if (!resolving_funcs[0] || !resolving_funcs[1]) {
++        funlogline();
++    }
+     ret = perform_promise_then(ctx, this_val, argv,
+                                (JSValueConst *)resolving_funcs);
+     for(i = 0; i < 2; i++)
+```
+
+The reasoning for these bugs:
+
+1. After calling js_new_promise_capability(), there's no check if resolving_funcs were properly initialized. If js_new_promise_capability() fails but doesn't return an exception, we could be working with NULL pointers.
+
+2. The argc parameter is used to access argv array but there's no validation that argc >= 2 before accessing argv[0] and argv[1] in perform_promise_then(). This could lead to out-of-bounds access.
+
+The first bug is addressed by adding a NULL check for the resolving_funcs array elements. The second bug isn't easily detectable with a simple condition since we'd need to know the expected argc value, so it's noted but not instrumented.

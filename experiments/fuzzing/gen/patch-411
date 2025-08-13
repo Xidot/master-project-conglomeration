@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5244,6 +5244,9 @@
+ 
+ JSValue JS_NewArray(JSContext *ctx)
+ {
++    if (!ctx->array_shape) {
++        return JS_ThrowInternalError(ctx, "array shape not initialized");
++    }
+     return JS_NewObjectFromShape(ctx, js_dup_shape(ctx->array_shape),
+                                  JS_CLASS_ARRAY);
+ }

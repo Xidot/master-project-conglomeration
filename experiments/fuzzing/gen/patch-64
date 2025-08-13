@@ -1,0 +1,19 @@
+--- a/cutils.c
++++ b/cutils.c
+@@ -133,6 +133,8 @@
+ 
+ int dbuf_put(DynBuf *s, const uint8_t *data, size_t len)
+ {
++    if (s->error)
++        funlogline();
+     if (unlikely((s->size + len) > s->allocated_size)) {
+         if (dbuf_realloc(s, s->size + len))
+             return -1;
+@@ -140,6 +142,7 @@
+     memcpy_no_ub(s->buf + s->size, data, len);
+     s->size += len;
+     return 0;
++        funlogline();
+ }
+ 
+ /* return < 0 if error */

@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3821,6 +3821,8 @@
+     p_start = (const uint8_t *)buf;
+     p_end = p_start + buf_len;
+     len1 = count_ascii(p_start, buf_len);
++    if (buf_len > JS_STRING_LEN_MAX)
++        funlogline();
+     p = p_start + len1;
+     if (len1 > JS_STRING_LEN_MAX)
+         return JS_ThrowInternalError(ctx, "string too long");
+     if (p == p_end) {
+@@ -3828,6 +3830,8 @@
+         return js_new_string8_len(ctx, buf, buf_len);
+     } else {
+         if (string_buffer_init(ctx, b, buf_len))
++            if (buf_len > JS_STRING_LEN_MAX)
++                funlogline();
+             goto fail;
+         string_buffer_write8(b, p_start, len1);
+         while (p < p_end) {
+@@ -3845,6 +3849,8 @@
+                 } else {
+                     /* invalid char */
+                     c = 0xfffd;
++                    if (p_next == p)
++                        funlogline();
+                     /* skip the invalid chars */
+                     /* XXX: seems incorrect. Why not just use c = *p++; ? */
+                     while (p < p_end && (*p >= 0x80 && *p < 0xc0))

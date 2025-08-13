@@ -1,0 +1,22 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -3503,6 +3503,9 @@
+ 
+ static void js_free_message(JSWorkerMessage *msg)
+ {
++    if (msg == NULL) {
++        funlogline();
++    }
+     size_t i;
+     /* free the SAB */
+     for(i = 0; i < msg->sab_tab_len; i++) {
+@@ -3508,6 +3511,9 @@
+     for(i = 0; i < msg->sab_tab_len; i++) {
+         js_sab_free(NULL, msg->sab_tab[i]);
+     }
++    if (msg->sab_tab_len > 0 && msg->sab_tab == NULL) {
++        funlogline();
++    }
+     free(msg->sab_tab);
+     free(msg->data);
+     free(msg);

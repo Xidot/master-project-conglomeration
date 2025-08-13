@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6203,6 +6203,9 @@
+ 
+ static void JS_RunGCInternal(JSRuntime *rt, BOOL remove_weak_objects)
+ {
++    if (rt == NULL) {
++        funlogline();
++    }
+     if (remove_weak_objects) {
+         /* free the weakly referenced object or symbol structures, delete
+            the associated Map/Set entries and queue the finalization
+@@ -6210,11 +6213,17 @@
+         gc_remove_weak_objects(rt);
+     }
+     
++    if (rt->gc_phase != JS_GC_PHASE_NONE) {
++        funlogline();
++    }
+     /* decrement the reference of the children of each object. mark =
+        1 after this pass. */
+     gc_decref(rt);
+ 
+     /* keep the GC objects with a non zero refcount and their childs */
++    if (rt->gc_phase != JS_GC_PHASE_DECREF) {
++        funlogline();
++    }
+     gc_scan(rt);
+ 
+     /* free the GC objects in a cycle */

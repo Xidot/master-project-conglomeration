@@ -1,0 +1,51 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1359,6 +1359,9 @@
+ void *js_malloc(JSContext *ctx, size_t size)
+ {
+     void *ptr;
++    if (size == 0) {
++        funlogline();
++    }
+     ptr = js_malloc_rt(ctx->rt, size);
+     if (unlikely(!ptr)) {
+         JS_ThrowOutOfMemory(ctx);
+@@ -10877,6 +10880,9 @@
+ {
+     JSBigInt *r;
+     if (len > JS_BIGINT_MAX_SIZE) {
++        if (len <= 0) {
++            funlogline();
++        }
+         JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+         return NULL;
+     }
+@@ -52540,6 +52546,9 @@
+     JSArrayBuffer *abuf = NULL;
+ 
+     obj = js_create_from_ctor(ctx, new_target, class_id);
++    if (size == 0 && !alloc_flag) {
++        funlogline();
++    }
+     if (JS_IsException(obj))
+         return obj;
+     /* XXX: we are currently limited to 2 GB */
+@@ -54305,6 +54314,9 @@
+     JSObject *p;
+ 
+     buffer = argv[0];
++    if (p->u.array.u.ptr == NULL) {
++        funlogline();
++    }
+     abuf = js_get_array_buffer(ctx, buffer);
+     if (!abuf)
+         return JS_EXCEPTION;
+@@ -54521,6 +54533,9 @@
+ {
+     JSTypedArray *ta;
+     JSObject *p, *pbuffer;
++    if (offset + (len << size_log2) < offset) {
++        funlogline();
++    }
+     JSArrayBuffer *abuf;
+     int size_log2;

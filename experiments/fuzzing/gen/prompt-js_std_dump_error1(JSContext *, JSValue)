@@ -1,0 +1,146 @@
+Target function: "js_std_dump_error1(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 1154
+typedef void JSPrintValueWrite(void *opaque, const char *buf, size_t len)
+
+/* debug value output */
+/// Line number here: 1152
+typedef struct {
+    JS_BOOL show_hidden : 8; /* only show enumerable properties */
+    JS_BOOL raw_dump : 8; /* avoid doing autoinit and avoid any malloc() call (for internal use) */
+    uint32_t max_depth; /* recurse up to this depth, 0 = no limit */
+    uint32_t max_string_length; /* print no more than this length for
+                                   strings, 0 = no limit */
+    uint32_t max_item_count; /*  print no more than this count for
+                                 arrays or objects, 0 = no limit */
+} JSPrintValueOptions
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 4150
+static void js_std_dump_error1(JSContext *ctx, JSValueConst exception_val)
+{
+    JS_PrintValue(ctx, js_print_value_write, stderr, exception_val, NULL);
+    fputc('\n', stderr);
+}
+
+/// Line number here: 4156
+void js_std_dump_error(JSContext *ctx)
+{
+    JSValue exception_val;
+
+    exception_val = JS_GetException(ctx);
+    js_std_dump_error1(ctx, exception_val);
+    JS_FreeValue(ctx, exception_val);
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 142
+typedef struct {
+    struct list_head link;
+    JSValue promise;
+    JSValue reason;
+} JSRejectedPromiseEntry
+
+/* check if there are pending promise rejections. It must be done
+   asynchrously in case a rejected promise is handled later. Currently
+   we do it once the application is about to sleep. It could be done
+   more often if needed. */
+/// Line number here: 4213
+static void js_std_promise_rejection_check(JSContext *ctx)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    struct list_head *el;
+
+    if (unlikely(!list_empty(&ts->rejected_promise_list))) {
+        list_for_each(el, &ts->rejected_promise_list) {
+            JSRejectedPromiseEntry *rp = list_entry(el, JSRejectedPromiseEntry, link);
+            fprintf(stderr, "Possibly unhandled promise rejection: ");
+            js_std_dump_error1(ctx, rp->reason);
+        }
+        exit(1);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 13679
+void JS_PrintValue(JSContext *ctx, JSPrintValueWrite *write_func, void *write_opaque,
+                   JSValueConst val, const JSPrintValueOptions *options)
+{
+    JS_PrintValueInternal(ctx->rt, ctx, write_func, write_opaque, val, options);
+}
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /usr/include/stdio.h
+
+/// Line number here: 610
+extern int fputc (int __c, FILE *__stream) __nonnull ((2))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "fputc(int, FILE *)";
+"JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)" -> "JS_PrintValueInternal(JSRuntime *, JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"js_std_dump_error(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "JS_GetException(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_promise_rejection_check(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_std_promise_rejection_check(JSContext *)" -> "__builtin_expect(long, long)";
+"js_std_promise_rejection_check(JSContext *)" -> "list_empty(struct list_head *)";
+"js_std_promise_rejection_check(JSContext *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_promise_rejection_check(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_promise_rejection_check(JSContext *)" -> "exit(int)";
+}

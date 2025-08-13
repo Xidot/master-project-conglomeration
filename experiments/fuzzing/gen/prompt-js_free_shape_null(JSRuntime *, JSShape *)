@@ -1,0 +1,38 @@
+Target function: "js_free_shape_null(JSRuntime *, JSShape *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 4783
+static void js_free_shape_null(JSRuntime *rt, JSShape *sh)
+{
+    if (sh)
+        js_free_shape(rt, sh);
+}
+
+/// Line number here: 4776
+static void js_free_shape(JSRuntime *rt, JSShape *sh)
+{
+    if (unlikely(--sh->header.ref_count <= 0)) {
+        js_free_shape0(rt, sh);
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_free_shape_null(JSRuntime *, JSShape *)";
+"js_free_shape_null(JSRuntime *, JSShape *)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"js_free_shape(JSRuntime *, JSShape *)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "__builtin_expect(long, long)";
+"js_free_shape(JSRuntime *, JSShape *)" -> "js_free_shape0(JSRuntime *, JSShape *)";
+}

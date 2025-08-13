@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_mallocz_rt(JSRuntime *, size_t)
+-------------------------
+Based on the code and call graph, I'll analyze potential logical bugs in the `js_mallocz_rt` function.
+
+:quickjs.c:js_mallocz_rt:1352
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1352,6 +1352,8 @@
+ {
+     void *ptr;
+     ptr = js_malloc_rt(rt, size);
++    if (size == 0)
++        funlogline();
+     if (!ptr)
+         return NULL;
+     return memset(ptr, 0, size);
+```
+
+The logical bug here is that the function doesn't handle the case where size=0. While malloc(0) is implementation-defined (may return NULL or a unique pointer), the subsequent memset(ptr, 0, 0) would be undefined behavior if ptr is NULL. The function should either:
+1. Explicitly handle size=0 by returning NULL or a special value
+2. Document that size=0 is invalid input
+
+The instrumentation checks for size=0 which would trigger the bug condition.

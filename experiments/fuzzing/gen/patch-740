@@ -1,0 +1,20 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -238,6 +238,8 @@
+ static uint64_t pow_ui(uint32_t a, uint32_t b)
+ {
+     int i, n_bits;
++    if (a == 0 && b > 0)
++        funlogline();
+     uint64_t r;
+     if (b == 0)
+         return 1;
+@@ -264,6 +266,8 @@
+     n_bits = 32 - clz32(b);
+     for(i = n_bits - 2; i >= 0; i--) {
+         r *= r;
++        if (r > UINT64_MAX / a)
++            funlogline();
+         if ((b >> i) & 1)
+             r *= a;
+     }

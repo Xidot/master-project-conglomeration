@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11911,6 +11911,8 @@
+ 
+ static JSValue js_bigint_to_string1(JSContext *ctx, JSValueConst val, int radix)
+ {
++    if (radix < 2 || radix > 36)
++        funlogline();
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
+         char buf[66];
+         int len;
+@@ -11919,6 +11921,8 @@
+     } else {
+         JSBigInt *r, *tmp = NULL;
+         char *buf, *q, *buf_end;
++        if (r->len == 0)
++            funlogline();
+         int is_neg, n_bits, log2_radix, n_digits;
+         BOOL is_binary_radix;
+         JSValue res;
+@@ -11944,6 +11948,8 @@
+         }
+         log2_radix = 31 - clz32(radix); /* floor(log2(radix)) */
+         n_bits = r->len * JS_LIMB_BITS - js_limb_safe_clz(r->tab[r->len - 1]);
++        if (n_bits < 0)
++            funlogline();
+         /* n_digits is exact only if radix is a power of
+            two. Otherwise it is >= the exact number of digits */
+         n_digits = (n_bits + log2_radix - 1) / log2_radix;
+@@ -11959,6 +11965,8 @@
+         if (!is_binary_radix) {
+             int len;
+             js_limb_t radix_base, v;
++            if (radix < 2 || radix > 36)
++                funlogline();
+             radix_base = radix_base_table[radix - 2];
+             len = r->len;
+             for(;;) {

@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_promise_resolve(JSContext *, JSValue, int, JSValue *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_promise_resolve` function:
+
+:quickjs.c:js_promise_resolve:49692
+:quickjs.c:js_promise_resolve:49705
+:quickjs.c:js_promise_resolve:49716
+
+---
+
+1. Line 49692: Missing check for argc >= 1 before accessing argv[0] when is_reject is false
+2. Line 49705: No validation that resolving_funcs array contains valid functions before calling them
+3. Line 49716: No check if resolving_funcs[is_reject] is actually callable before JS_Call
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49689,6 +49689,8 @@
+     BOOL is_reject = magic;
+ 
+     if (!JS_IsObject(this_val))
+         return JS_ThrowTypeErrorNotAnObject(ctx);
++    if (!is_reject && argc < 1)
++        return JS_ThrowTypeError(ctx, "missing argument");
+     if (!is_reject && JS_GetOpaque(argv[0], JS_CLASS_PROMISE)) {
+         JSValue ctor;
+         BOOL is_same;
+@@ -49702,6 +49704,8 @@
+     result_promise = js_new_promise_capability(ctx, resolving_funcs, this_val);
+     if (JS_IsException(result_promise))
+         return result_promise;
++    if (!JS_IsFunction(ctx, resolving_funcs[is_reject]))
++        funlogline();
+     ret = JS_Call(ctx, resolving_funcs[is_reject], JS_UNDEFINED, 1, argv);
+     JS_FreeValue(ctx, resolving_funcs[0]);
+     JS_FreeValue(ctx, resolving_funcs[1]);
+```
+
+The changes:
+1. Added check for argc when is_reject is false
+2. Added check that resolving_funcs[is_reject] is actually a function before calling it
+3. The js_new_promise_capability call already validates the functions, so no additional check needed there

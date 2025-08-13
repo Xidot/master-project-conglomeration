@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29092,6 +29092,8 @@
+                 if (res_me->u.local.var_ref) {
+                     en->u.var_ref = res_me->u.local.var_ref;
+                 } else {
++                    if (JS_IsUndefined(res_m->func_obj))
++                        funlogline();
+                     JSObject *p1 = JS_VALUE_GET_OBJ(res_m->func_obj);
+                     en->u.var_ref = p1->u.func.var_refs[res_me->u.local.var_idx];
+                 }
+@@ -29117,6 +29119,8 @@
+             {
+                 JSVarRef *var_ref = en->u.var_ref;
+                 pr = add_property(ctx, p, en->export_name,
++                if (!var_ref)
++                    funlogline();
+                                   JS_PROP_ENUMERABLE | JS_PROP_WRITABLE |
+                                   JS_PROP_VARREF);
+                 if (!pr)
+@@ -29142,6 +29146,8 @@
+             /* the exported namespace or reference may depend on
+                circular references, so we resolve it lazily */
+             if (JS_DefineAutoInitProperty(ctx, obj,
++            if (JS_DefineAutoInitProperty(ctx, obj,
++                                          en->export_name,
+                                           JS_AUTOINIT_ID_MODULE_NS,
+                                           m, JS_PROP_ENUMERABLE | JS_PROP_WRITABLE) < 0)
+             break;

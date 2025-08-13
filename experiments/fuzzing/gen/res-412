@@ -1,0 +1,37 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__JS_NewAtomInit(JSRuntime *, const char *, int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `__JS_NewAtomInit`:
+
+:__JS_NewAtomInit:2814
+:__JS_NewAtomInit:2818
+
+---
+
+1. Line 2814: The function doesn't validate the input `len` parameter against the actual string length. If `len` is larger than the actual string length (not null-terminated), it could lead to buffer overflow when copying.
+
+2. Line 2818: The function assumes the string is null-terminated but doesn't explicitly check this before copying. If the input string isn't properly null-terminated, the null byte write could overflow.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2811,6 +2811,9 @@
+ static JSAtom __JS_NewAtomInit(JSRuntime *rt, const char *str, int len,
+                                int atom_type)
+ {
+     JSString *p;
++    if (len < 0 || (str[len] != '\0' && memchr(str, '\0', len) == NULL)) {
++        funlogline();
++    }
+     p = js_alloc_string_rt(rt, len, 0);
+     if (!p)
+         return JS_ATOM_NULL;
+```
+
+The modification adds a check for:
+1. Negative length
+2. Whether the string is properly null-terminated within the given length
+This covers both potential logical bugs with a single check.

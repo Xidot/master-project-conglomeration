@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1875,6 +1875,9 @@
+ static JSString *js_alloc_string(JSContext *ctx, int max_len, int is_wide_char)
+ {
+     JSString *p;
++    if (max_len < 0 || (is_wide_char != 0 && is_wide_char != 1)) {
++        funlogline();
++    }
+     p = js_alloc_string_rt(ctx->rt, max_len, is_wide_char);
+     if (unlikely(!p)) {
+         JS_ThrowOutOfMemory(ctx);

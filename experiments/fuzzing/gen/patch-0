@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28409,6 +28409,10 @@
+                                        JSAtom local_name, JSAtom export_name,
+                                        JSExportTypeEnum export_type)
+ {
++    if (export_type == JS_EXPORT_TYPE_LOCAL && local_name == JS_ATOM_NULL) {
++        funlogline();
++    }
++
+     JSExportEntry *me;
+ 
+     if (find_export_entry(ctx, m, export_name)) {
+@@ -28425,6 +28425,10 @@
+                         sizeof(JSExportEntry),
+                         &m->export_entries_size,
+                         m->export_entries_count + 1))
++        return NULL;
++
++    if (export_type == JS_EXPORT_TYPE_INDIRECT && me->u.req_module_idx == 0) {
++        funlogline();
+         return NULL;
+ 
+     me = &m->export_entries[m->export_entries_count++];

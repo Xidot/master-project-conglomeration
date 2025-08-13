@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_delete_record(JSRuntime *, JSMapState *, JSMapRecord *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `map_delete_record` function:
+
+:map_delete_record:48585
+:map_delete_record:48606
+:map_delete_record:48609
+
+---
+
+Now the unified diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48584,6 +48584,8 @@
+ /* warning: the record must be removed from the hash table before */
+ static void map_delete_record(JSRuntime *rt, JSMapState *s, JSMapRecord *mr)
+ {
++    if (mr == NULL)
++        funlogline();
+     if (mr->empty)
+         return;
+     
+@@ -48603,6 +48605,8 @@
+         mr->key = JS_UNDEFINED;
+         mr->value = JS_UNDEFINED;
+     }
++    if (s->record_count == 0)
++        funlogline();
+     s->record_count--;
+ }
+```
+
+Reasons for the bugs:
+1. Line 48585: Missing NULL check for 'mr' parameter which could lead to crashes
+2. Line 48606: Decrementing ref_count without checking if it could go negative
+3. Line 48609: Decrementing record_count without checking if it could underflow
+
+The fixes add appropriate checks before these operations. Note that for the ref_count case, we rely on the existing condition (--mr->ref_count == 0) which implicitly prevents negative values, so we don't need an additional check there.

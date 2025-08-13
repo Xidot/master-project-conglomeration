@@ -1,0 +1,103 @@
+Target function: "mp_div1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 55
+typedef int32_t slimb_t
+
+/// Line number here: 57
+typedef uint64_t dlimb_t
+
+/// Line number here: 136
+static limb_t mp_div1(limb_t *tabr, const limb_t *taba, limb_t n,
+                      limb_t b, limb_t r)
+{
+    slimb_t i;
+    dlimb_t a1;
+    for(i = n - 1; i >= 0; i--) {
+        a1 = ((dlimb_t)r << LIMB_BITS) | taba[i];
+        tabr[i] = a1 / b;
+        r = a1 % b;
+    }
+    return r;
+}
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* n_digits >= 1. 0 <= dot_pos <= n_digits. If dot_pos == n_digits,
+   the dot is not displayed. 'a' is modified. */
+/// Line number here: 846
+static int output_digits(char *buf,
+                         mpb_t *a, int radix, int n_digits1,
+                         int dot_pos)
+{
+    int n_digits, digits_per_limb, radix_bits, n, len;
+
+    n_digits = n_digits1;
+    if ((radix & (radix - 1)) == 0) {
+        /* radix = 2^radix_bits */
+        radix_bits = 31 - clz32(radix);
+    } else {
+        radix_bits = 0;
+    }
+    digits_per_limb = digits_per_limb_table[radix - 2];
+    if (radix_bits != 0) {
+        for(;;) {
+            n = min_int(n_digits, digits_per_limb);
+            n_digits -= n;
+            u64toa_bin_len(buf + n_digits, a->tab[0], radix_bits, n);
+            if (n_digits == 0)
+                break;
+            mpb_shr_round(a, digits_per_limb * radix_bits, JS_RNDZ);
+        }
+    } else {
+        limb_t r;
+        while (n_digits != 0) {
+            n = min_int(n_digits, digits_per_limb);
+            n_digits -= n;
+            r = mp_div1(a->tab, a->tab, a->len, radix_base_table[radix - 2], 0);
+            mpb_renorm(a);
+            limb_to_a(buf + n_digits, r, radix, n);
+        }
+    }
+
+    /* add the dot */
+    len = n_digits1;
+    if (dot_pos != n_digits1) {
+        memmove(buf + dot_pos + 1, buf + dot_pos, n_digits1 - dot_pos);
+        buf[dot_pos] = '.';
+        len++;
+    }
+    return len;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"output_digits(char *, mpb_t *, int, int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "clz32(unsigned int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "min_int(int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "u64toa_bin_len(char *, uint64_t, unsigned int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mp_div1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mpb_renorm(mpb_t *)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "limb_to_a(char *, limb_t, unsigned int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "memmove(void *, const void *, size_t)";
+}

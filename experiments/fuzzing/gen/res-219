@@ -1,0 +1,68 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_to_string(JSContext *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_to_string1` function:
+
+:quickjs.c:js_bigint_to_string1:11914
+:quickjs.c:js_bigint_to_string1:11922
+:quickjs.c:js_bigint_to_string1:11947
+:quickjs.c:js_bigint_to_string1:11962
+
+----------
+
+1. Line 11914: No check for invalid radix values (should be between 2-36)
+2. Line 11922: No handling for when r->len is 0 (invalid bigint)
+3. Line 11947: Potential integer overflow in n_digits calculation
+4. Line 11962: No check for radix_base_table bounds access
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11911,6 +11911,8 @@
+ 
+ static JSValue js_bigint_to_string1(JSContext *ctx, JSValueConst val, int radix)
+ {
++    if (radix < 2 || radix > 36)
++        funlogline();
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
+         char buf[66];
+         int len;
+@@ -11919,6 +11921,8 @@
+     } else {
+         JSBigInt *r, *tmp = NULL;
+         char *buf, *q, *buf_end;
++        if (r->len == 0)
++            funlogline();
+         int is_neg, n_bits, log2_radix, n_digits;
+         BOOL is_binary_radix;
+         JSValue res;
+@@ -11944,6 +11948,8 @@
+         }
+         log2_radix = 31 - clz32(radix); /* floor(log2(radix)) */
+         n_bits = r->len * JS_LIMB_BITS - js_limb_safe_clz(r->tab[r->len - 1]);
++        if (n_bits < 0)
++            funlogline();
+         /* n_digits is exact only if radix is a power of
+            two. Otherwise it is >= the exact number of digits */
+         n_digits = (n_bits + log2_radix - 1) / log2_radix;
+@@ -11959,6 +11965,8 @@
+         if (!is_binary_radix) {
+             int len;
+             js_limb_t radix_base, v;
++            if (radix < 2 || radix > 36)
++                funlogline();
+             radix_base = radix_base_table[radix - 2];
+             len = r->len;
+             for(;;) {
+```
+
+The changes add checks for:
+1. Invalid radix values
+2. Zero-length bigints
+3. Potential negative n_bits
+4. Radix bounds before accessing radix_base_table
+
+Each condition will call funlogline() when the bug condition is triggered.

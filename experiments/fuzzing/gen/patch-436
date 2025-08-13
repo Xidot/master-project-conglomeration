@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38260,6 +38260,9 @@ static JSValueConst JS_NewGlobalCConstructorOnly(JSContext *ctx, const char *nam
+                                                  JSCFunction *func, int length,
+                                                  JSValueConst proto)
+ {
++    if (func == NULL) {
++        funlogline();
++    }
+     JSValue func_obj;
+     func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor, 0);
+     JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
+@@ -38263,6 +38263,9 @@ static JSValueConst JS_NewGlobalCConstructorOnly(JSContext *ctx, const char *nam
+     func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor, 0);
+     JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
++    if (JS_VALUE_GET_TAG(func_obj) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     return func_obj;
+ }

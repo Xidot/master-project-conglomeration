@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10895,6 +10895,9 @@
+ static JSBigInt *js_bigint_set_si(JSBigIntBuf *buf, js_slimb_t a)
+ {
+     JSBigInt *r = (JSBigInt *)buf->big_int_buf;
++    if (sizeof(JSBigInt) > sizeof(buf->big_int_buf)) {
++        funlogline();
++    }
+     r->header.ref_count = 0; /* fail safe */
+     r->len = 1;
+     r->tab[0] = a;

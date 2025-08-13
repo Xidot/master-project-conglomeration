@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3706,6 +3706,9 @@
+ static int string_buffer_concat(StringBuffer *s, const JSString *p,
+                                 uint32_t from, uint32_t to)
+ {
++    if (from > p->len || to > p->len || (s->is_wide_char != p->is_wide_char))
++        funlogline();
++
+     if (to <= from)
+         return 0;
+     if (p->is_wide_char)

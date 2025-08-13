@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13919,6 +13919,9 @@
+     uint64_t res;
+ 
+     val = JS_ToBigIntFree(ctx, val);
++    if (!JS_VALUE_IS_BIG_INT(val) && !JS_IsException(val)) {
++        funlogline();
++    }
+     if (JS_IsException(val)) {
+         *pres = 0;
+         return -1;
+@@ -13929,6 +13929,7 @@
+         JSBigInt *p = JS_VALUE_GET_PTR(val);
+         /* return the value mod 2^64 */
+         res = p->tab[0];
++        funlogline(); // Missing free for JS_TAG_SHORT_BIG_INT case
+ #if JS_LIMB_BITS == 32
+         if (p->len >= 2)
+             res |= (uint64_t)p->tab[1] << 32;

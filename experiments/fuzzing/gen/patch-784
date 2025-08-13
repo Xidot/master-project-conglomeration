@@ -1,0 +1,33 @@
+--- a/cutils.h
++++ b/cutils.h
+@@ -374,6 +374,7 @@
+ static inline uint16_t tofp16(double d)
+ {
+     uint64_t a, addend;
++    if (d != d) funlogline(); // NaN check
+     uint32_t v, sgn;
+     int shift;
+     
+@@ -383,11 +384,13 @@
+     if (unlikely(a > 0x7ff0000000000000)) {
+         /* nan */
+         v = 0x7c01;
++        funlogline(); // NaN path
+     } else if (a < 0x3f10000000000000) { /* 0x1p-14 */
+         /* subnormal f16 number or zero */
+         if (a <= 0x3e60000000000000) { /* 0x1p-25 */
+             v = 0x0000; /* zero */
+         } else {
+             shift = 1051 - (a >> 52);
++            if (shift <= 0 || shift >= 64) funlogline(); // Invalid shift
+             a = ((uint64_t)1 << 52) | (a & (((uint64_t)1 << 52) - 1));
+             addend = ((a >> shift) & 1) + (((uint64_t)1 << (shift - 1)) - 1);
+             v = (a + addend) >> shift;
+@@ -399,6 +402,7 @@
+         addend = ((a >> (52 - 10)) & 1) + (((uint64_t)1 << (52 - 11)) - 1);
+         v = (a + addend) >> (52 - 10);
+         /* overflow ? */
++        if (v > 0x7c00 && v != 0x7c00) funlogline(); // Overflow handling
+         if (unlikely(v > 0x7c00))
+             v = 0x7c00;
+     }

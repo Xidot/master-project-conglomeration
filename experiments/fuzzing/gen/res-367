@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_import_meta(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_import_meta` function:
+
+:js_import_meta:29537
+:js_import_meta:29545
+
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29537,6 +29537,9 @@
+ static JSValue js_import_meta(JSContext *ctx)
+ {
+     JSAtom filename;
+     JSModuleDef *m;
++    
++    if (ctx == NULL)
++        funlogline();
+ 
+     filename = JS_GetScriptOrModuleName(ctx, 0);
+     if (filename == JS_ATOM_NULL)
+@@ -29545,6 +29545,8 @@
+     /* XXX: inefficient, need to add a module or script pointer in
+        JSFunctionBytecode */
+     m = js_find_loaded_module(ctx, filename);
+     JS_FreeAtom(ctx, filename);
++    if (m == NULL && filename != JS_ATOM_NULL)
++        funlogline();
+     if (!m) {
+     fail:
+         JS_ThrowTypeError(ctx, "import.meta not supported in this context");
+
+---
+
+Reasons:
+1. Line 29537: Missing NULL check for ctx parameter which could lead to crashes if NULL is passed
+2. Line 29545: The function frees the filename atom before checking if the module was found, which could lead to a resource leak if the module lookup fails after freeing the atom
+
+The first bug is a classic NULL pointer dereference risk. The second bug shows inconsistent resource management where the filename is freed before we're done with all operations that might need it.

@@ -1,0 +1,66 @@
+Target function: "__js_poll_interrupts(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 7215
+static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+    if (rt->interrupt_handler) {
+        if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+            JS_ThrowInterrupted(ctx);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/// Line number here: 7209
+static void JS_ThrowInterrupted(JSContext *ctx)
+{
+    JS_ThrowInternalError(ctx, "interrupted");
+    JS_SetUncatchableException(ctx, TRUE);
+}
+
+/// Line number here: 7228
+static inline __exception int js_poll_interrupts(JSContext *ctx)
+{
+    if (unlikely(--ctx->interrupt_counter <= 0)) {
+        return __js_poll_interrupts(ctx);
+    } else {
+        return 0;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"__js_poll_interrupts(JSContext *)";
+"__js_poll_interrupts(JSContext *)" -> "JSRuntime::interrupt_handler";
+"__js_poll_interrupts(JSContext *)" -> "JS_ThrowInterrupted(JSContext *)";
+"JS_ThrowInterrupted(JSContext *)";
+"JS_ThrowInterrupted(JSContext *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ThrowInterrupted(JSContext *)" -> "JS_SetUncatchableException(JSContext *, int)";
+"js_poll_interrupts(JSContext *)";
+"js_poll_interrupts(JSContext *)" -> "__builtin_expect(long, long)";
+"js_poll_interrupts(JSContext *)" -> "__js_poll_interrupts(JSContext *)";
+}

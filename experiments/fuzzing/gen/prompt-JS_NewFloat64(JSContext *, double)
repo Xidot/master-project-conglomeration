@@ -1,0 +1,108 @@
+Target function: "JS_NewFloat64(JSContext *, double)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 596
+static js_force_inline JSValue JS_NewFloat64(JSContext *ctx, double d)
+{
+    int32_t val;
+    union {
+        double d;
+        uint64_t u;
+    } u, t;
+    if (d >= INT32_MIN && d <= INT32_MAX) {
+        u.d = d;
+        val = (int32_t)d;
+        t.d = val;
+        /* -0 cannot be represented as integer, so we compare the bit
+           representation */
+        if (u.u == t.u)
+            return JS_MKVAL(JS_TAG_INT, val);
+    }
+    return __JS_NewFloat64(ctx, d);
+}
+
+/// Line number here: 254
+static inline JSValue __JS_NewFloat64(JSContext *ctx, double d)
+{
+    JSValue v;
+    v.tag = JS_TAG_FLOAT64;
+    v.u.float64 = d;
+    return v;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 2154
+static JSValue js_os_now(JSContext *ctx, JSValue this_val,
+                         int argc, JSValue *argv)
+{
+    return JS_NewFloat64(ctx, (double)get_time_ns() / 1e6);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewFloat64(JSContext *, double)";
+"JS_NewFloat64(JSContext *, double)" -> "__JS_NewFloat64(JSContext *, double)";
+"js_os_now(JSContext *, JSValue, int, JSValue *)";
+"js_os_now(JSContext *, JSValue, int, JSValue *)" -> "JS_NewFloat64(JSContext *, double)";
+"js_os_now(JSContext *, JSValue, int, JSValue *)" -> "get_time_ns()";
+}

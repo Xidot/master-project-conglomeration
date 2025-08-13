@@ -1,0 +1,413 @@
+Target function: "find_own_property1(JSObject *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 5514
+static force_inline JSShapeProperty *find_own_property1(JSObject *p,
+                                                        JSAtom atom)
+{
+    JSShape *sh;
+    JSShapeProperty *pr, *prop;
+    intptr_t h;
+    sh = p->shape;
+    h = (uintptr_t)atom & sh->prop_hash_mask;
+    h = prop_hash_end(sh)[-h - 1];
+    prop = get_shape_prop(sh);
+    while (h) {
+        pr = &prop[h - 1];
+        if (likely(pr->atom == atom)) {
+            return pr;
+        }
+        h = pr->hash_next;
+    }
+    return NULL;
+}
+
+/// Line number here: 4581
+static inline uint32_t *prop_hash_end(JSShape *sh)
+{
+    return (uint32_t *)sh;
+}
+
+/// Line number here: 4591
+static inline JSShapeProperty *get_shape_prop(JSShape *sh)
+{
+    return sh->prop;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* Note: it is important that no exception is returned by this function */
+/// Line number here: 6987
+static BOOL is_backtrace_needed(JSContext *ctx, JSValueConst obj)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id != JS_CLASS_ERROR)
+        return FALSE;
+    if (find_own_property1(p, JS_ATOM_stack))
+        return FALSE;
+    return TRUE;
+}
+
+/* flags is 0, DEFINE_GLOBAL_LEX_VAR or DEFINE_GLOBAL_FUNC_VAR */
+/* XXX: could support exotic global object. */
+/// Line number here: 9970
+static int JS_CheckDefineGlobalVar(JSContext *ctx, JSAtom prop, int flags)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+
+    p = JS_VALUE_GET_OBJ(ctx->global_obj);
+    prs = find_own_property1(p, prop);
+    /* XXX: should handle JS_PROP_AUTOINIT */
+    if (flags & DEFINE_GLOBAL_LEX_VAR) {
+        if (prs && !(prs->flags & JS_PROP_CONFIGURABLE))
+            goto fail_redeclaration;
+    } else {
+        if (!prs && !p->extensible)
+            goto define_error;
+        if (flags & DEFINE_GLOBAL_FUNC_VAR) {
+            if (prs) {
+                if (!(prs->flags & JS_PROP_CONFIGURABLE) &&
+                    ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET ||
+                     ((prs->flags & (JS_PROP_WRITABLE | JS_PROP_ENUMERABLE)) !=
+                      (JS_PROP_WRITABLE | JS_PROP_ENUMERABLE)))) {
+                define_error:
+                    JS_ThrowTypeErrorAtom(ctx, "cannot define variable '%s'",
+                                          prop);
+                    return -1;
+                }
+            }
+        }
+    }
+    /* check if there already is a lexical declaration */
+    p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+    prs = find_own_property1(p, prop);
+    if (prs) {
+    fail_redeclaration:
+        JS_ThrowSyntaxErrorVarRedeclaration(ctx, prop);
+        return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/* def_flags is (0, DEFINE_GLOBAL_LEX_VAR) |
+   JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE */
+/* XXX: could support exotic global object. */
+/// Line number here: 10012
+static int JS_DefineGlobalVar(JSContext *ctx, JSAtom prop, int def_flags)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    JSValue val;
+    int flags;
+
+    if (def_flags & DEFINE_GLOBAL_LEX_VAR) {
+        p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+        flags = JS_PROP_ENUMERABLE | (def_flags & JS_PROP_WRITABLE) |
+            JS_PROP_CONFIGURABLE;
+        val = JS_UNINITIALIZED;
+    } else {
+        p = JS_VALUE_GET_OBJ(ctx->global_obj);
+        flags = JS_PROP_ENUMERABLE | JS_PROP_WRITABLE |
+            (def_flags & JS_PROP_CONFIGURABLE);
+        val = JS_UNDEFINED;
+    }
+    prs = find_own_property1(p, prop);
+    if (prs)
+        return 0;
+    if (!p->extensible)
+        return 0;
+    pr = add_property(ctx, p, prop, flags);
+    if (unlikely(!pr))
+        return -1;
+    pr->u.value = val;
+    return 0;
+}
+
+/* 'def_flags' is 0 or JS_PROP_CONFIGURABLE. */
+/* XXX: could support exotic global object. */
+/// Line number here: 10045
+static int JS_DefineGlobalFunction(JSContext *ctx, JSAtom prop,
+                                   JSValueConst func, int def_flags)
+{
+
+    JSObject *p;
+    JSShapeProperty *prs;
+    int flags;
+
+    p = JS_VALUE_GET_OBJ(ctx->global_obj);
+    prs = find_own_property1(p, prop);
+    flags = JS_PROP_HAS_VALUE | JS_PROP_THROW;
+    if (!prs || (prs->flags & JS_PROP_CONFIGURABLE)) {
+        flags |= JS_PROP_ENUMERABLE | JS_PROP_WRITABLE | def_flags |
+            JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_WRITABLE | JS_PROP_HAS_ENUMERABLE;
+    }
+    if (JS_DefineProperty(ctx, ctx->global_obj, prop, func,
+                          JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
+        return -1;
+    return 0;
+}
+
+/* use for strict variable access: test if the variable exists */
+/// Line number here: 10124
+static int JS_CheckGlobalVar(JSContext *ctx, JSAtom prop)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    int ret;
+
+    /* no exotic behavior is possible in global_var_obj */
+    p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+    prs = find_own_property1(p, prop);
+    if (prs) {
+        ret = TRUE;
+    } else {
+        ret = JS_HasProperty(ctx, ctx->global_obj, prop);
+        if (ret < 0)
+            return -1;
+    }
+    return ret;
+}
+
+/* Note: all the fields are already sealed except length */
+/// Line number here: 23105
+static int seal_template_obj(JSContext *ctx, JSValueConst obj)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+
+    p = JS_VALUE_GET_OBJ(obj);
+    prs = find_own_property1(p, JS_ATOM_length);
+    if (prs) {
+        if (js_update_property_flags(ctx, p, &prs,
+                                     prs->flags & ~(JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE)))
+            return -1;
+    }
+    p->extensible = FALSE;
+    return 0;
+}
+
+/* Unfortunately, the spec gives a different behavior from GetOwnProperty ! */
+/// Line number here: 28930
+static int js_module_ns_has(JSContext *ctx, JSValueConst obj, JSAtom atom)
+{
+    return (find_own_property1(JS_VALUE_GET_OBJ(obj), atom) != NULL);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 75
+typedef long int		intptr_t
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"find_own_property1(JSObject *, JSAtom)";
+"find_own_property1(JSObject *, JSAtom)" -> "prop_hash_end(JSShape *)";
+"find_own_property1(JSObject *, JSAtom)" -> "get_shape_prop(JSShape *)";
+"find_own_property1(JSObject *, JSAtom)" -> "__builtin_expect(long, long)";
+"is_backtrace_needed(JSContext *, JSValue)";
+"is_backtrace_needed(JSContext *, JSValue)" -> "find_own_property1(JSObject *, JSAtom)";
+"JS_CheckDefineGlobalVar(JSContext *, JSAtom, int)";
+"JS_CheckDefineGlobalVar(JSContext *, JSAtom, int)" -> "find_own_property1(JSObject *, JSAtom)";
+"JS_CheckDefineGlobalVar(JSContext *, JSAtom, int)" -> "__JS_ThrowTypeErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"JS_CheckDefineGlobalVar(JSContext *, JSAtom, int)" -> "JS_ThrowSyntaxErrorVarRedeclaration(JSContext *, JSAtom)";
+"JS_DefineGlobalVar(JSContext *, JSAtom, int)";
+"JS_DefineGlobalVar(JSContext *, JSAtom, int)" -> "find_own_property1(JSObject *, JSAtom)";
+"JS_DefineGlobalVar(JSContext *, JSAtom, int)" -> "add_property(JSContext *, JSObject *, JSAtom, int)";
+"JS_DefineGlobalVar(JSContext *, JSAtom, int)" -> "__builtin_expect(long, long)";
+"JS_DefineGlobalFunction(JSContext *, JSAtom, JSValue, int)";
+"JS_DefineGlobalFunction(JSContext *, JSAtom, JSValue, int)" -> "find_own_property1(JSObject *, JSAtom)";
+"JS_DefineGlobalFunction(JSContext *, JSAtom, JSValue, int)" -> "JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_CheckGlobalVar(JSContext *, JSAtom)";
+"JS_CheckGlobalVar(JSContext *, JSAtom)" -> "find_own_property1(JSObject *, JSAtom)";
+"JS_CheckGlobalVar(JSContext *, JSAtom)" -> "JS_HasProperty(JSContext *, JSValue, JSAtom)";
+"seal_template_obj(JSContext *, JSValue)";
+"seal_template_obj(JSContext *, JSValue)" -> "find_own_property1(JSObject *, JSAtom)";
+"seal_template_obj(JSContext *, JSValue)" -> "js_update_property_flags(JSContext *, JSObject *, JSShapeProperty **, int)";
+"js_module_ns_has(JSContext *, JSValue, JSAtom)";
+"js_module_ns_has(JSContext *, JSValue, JSAtom)" -> "find_own_property1(JSObject *, JSAtom)";
+}

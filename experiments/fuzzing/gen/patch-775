@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4170,6 +4170,8 @@
+ /* Return the character at position 'idx'. 'val' must be a string or rope */
+ static int string_rope_get(JSValueConst val, uint32_t idx)
+ {
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING_ROPE && JS_VALUE_GET_TAG(val) != JS_TAG_STRING)
++        funlogline();
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
+         return string_get(JS_VALUE_GET_STRING(val), idx);
+     } else {
+@@ -4177,6 +4179,8 @@
+         uint32_t len;
+         if (JS_VALUE_GET_TAG(r->left) == JS_TAG_STRING)
+             len = JS_VALUE_GET_STRING(r->left)->len;
++        else if (JS_VALUE_GET_TAG(r->left) != JS_TAG_STRING_ROPE)
++            funlogline();
+         else
+             len = JS_VALUE_GET_STRING_ROPE(r->left)->len;
+         if (idx < len)

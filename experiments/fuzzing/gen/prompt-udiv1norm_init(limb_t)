@@ -1,0 +1,59 @@
+Target function: "udiv1norm_init(limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 57
+typedef uint64_t dlimb_t
+
+/* WARNING: d must be >= 2^(LIMB_BITS-1) */
+/// Line number here: 106
+static inline limb_t udiv1norm_init(limb_t d)
+{
+    limb_t a0, a1;
+    a1 = -d - 1;
+    a0 = -1;
+    return (((dlimb_t)a1 << LIMB_BITS) | a0) / d;
+}
+
+/// Line number here: 270
+static uint32_t pow_ui_inv(uint32_t *pr_inv, int *pshift, uint32_t a, uint32_t b)
+{
+    uint32_t r_inv, r;
+    int shift;
+#ifdef USE_POW5_TABLE
+    if (a == 5 && b >= 1 && b <= 13) {
+        r = pow5_table[b - 1];
+        shift = clz32(r);
+        r <<= shift;
+        r_inv = pow5_inv_table[b - 1];
+    } else
+#endif
+    {
+        r = pow_ui(a, b);
+        shift = clz32(r);
+        r <<= shift;
+        r_inv = udiv1norm_init(r);
+    }
+    *pshift = shift;
+    *pr_inv = r_inv;
+    return r;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "clz32(unsigned int)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "pow_ui(uint32_t, uint32_t)";
+"pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)" -> "udiv1norm_init(limb_t)";
+}

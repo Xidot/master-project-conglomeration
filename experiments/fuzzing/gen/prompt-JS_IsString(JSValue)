@@ -1,0 +1,423 @@
+Target function: "JS_IsString(JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 652
+static inline JS_BOOL JS_IsString(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_STRING ||
+        JS_VALUE_GET_TAG(v) == JS_TAG_STRING_ROPE;
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/* XXX: use 'o' and 'O' for object using JS_PrintValue() ? */
+/// Line number here: 170
+static JSValue js_printf_internal(JSContext *ctx,
+                                  int argc, JSValueConst *argv, FILE *fp)
+{
+    char fmtbuf[32];
+    uint8_t cbuf[UTF8_CHAR_LEN_MAX+1];
+    JSValue res;
+    DynBuf dbuf;
+    const char *fmt_str = NULL;
+    const uint8_t *fmt, *fmt_end;
+    const uint8_t *p;
+    char *q;
+    int i, c, len, mod;
+    size_t fmt_len;
+    int32_t int32_arg;
+    int64_t int64_arg;
+    double double_arg;
+    const char *string_arg;
+    /* Use indirect call to dbuf_printf to prevent gcc warning */
+    int (*dbuf_printf_fun)(DynBuf *s, const char *fmt, ...) = (void*)dbuf_printf;
+
+    js_std_dbuf_init(ctx, &dbuf);
+
+    if (argc > 0) {
+        fmt_str = JS_ToCStringLen(ctx, &fmt_len, argv[0]);
+        if (!fmt_str)
+            goto fail;
+
+        i = 1;
+        fmt = (const uint8_t *)fmt_str;
+        fmt_end = fmt + fmt_len;
+        while (fmt < fmt_end) {
+            for (p = fmt; fmt < fmt_end && *fmt != '%'; fmt++)
+                continue;
+            dbuf_put(&dbuf, p, fmt - p);
+            if (fmt >= fmt_end)
+                break;
+            q = fmtbuf;
+            *q++ = *fmt++;  /* copy '%' */
+
+            /* flags */
+            for(;;) {
+                c = *fmt;
+                if (c == '0' || c == '#' || c == '+' || c == '-' || c == ' ' ||
+                    c == '\'') {
+                    if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                        goto invalid;
+                    *q++ = c;
+                    fmt++;
+                } else {
+                    break;
+                }
+            }
+            /* width */
+            if (*fmt == '*') {
+                if (i >= argc)
+                    goto missing;
+                if (JS_ToInt32(ctx, &int32_arg, argv[i++]))
+                    goto fail;
+                q += snprintf(q, fmtbuf + sizeof(fmtbuf) - q, "%d", int32_arg);
+                fmt++;
+            } else {
+                while (my_isdigit(*fmt)) {
+                    if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                        goto invalid;
+                    *q++ = *fmt++;
+                }
+            }
+            if (*fmt == '.') {
+                if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                    goto invalid;
+                *q++ = *fmt++;
+                if (*fmt == '*') {
+                    if (i >= argc)
+                        goto missing;
+                    if (JS_ToInt32(ctx, &int32_arg, argv[i++]))
+                        goto fail;
+                    q += snprintf(q, fmtbuf + sizeof(fmtbuf) - q, "%d", int32_arg);
+                    fmt++;
+                } else {
+                    while (my_isdigit(*fmt)) {
+                        if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                            goto invalid;
+                        *q++ = *fmt++;
+                    }
+                }
+            }
+
+            /* we only support the "l" modifier for 64 bit numbers */
+            mod = ' ';
+            if (*fmt == 'l') {
+                mod = *fmt++;
+            }
+
+            /* type */
+            c = *fmt++;
+            if (q >= fmtbuf + sizeof(fmtbuf) - 1)
+                goto invalid;
+            *q++ = c;
+            *q = '\0';
+
+            switch (c) {
+            case 'c':
+                if (i >= argc)
+                    goto missing;
+                if (JS_IsString(argv[i])) {
+                    string_arg = JS_ToCString(ctx, argv[i++]);
+                    if (!string_arg)
+                        goto fail;
+                    int32_arg = unicode_from_utf8((const uint8_t *)string_arg, UTF8_CHAR_LEN_MAX, &p);
+                    JS_FreeCString(ctx, string_arg);
+                } else {
+                    if (JS_ToInt32(ctx, &int32_arg, argv[i++]))
+                        goto fail;
+                }
+                /* handle utf-8 encoding explicitly */
+                if ((unsigned)int32_arg > 0x10FFFF)
+                    int32_arg = 0xFFFD;
+                /* ignore conversion flags, width and precision */
+                len = unicode_to_utf8(cbuf, int32_arg);
+                dbuf_put(&dbuf, cbuf, len);
+                break;
+
+            case 'd':
+            case 'i':
+            case 'o':
+            case 'u':
+            case 'x':
+            case 'X':
+                if (i >= argc)
+                    goto missing;
+                if (JS_ToInt64Ext(ctx, &int64_arg, argv[i++]))
+                    goto fail;
+                if (mod == 'l') {
+                    /* 64 bit number */
+#if defined(_WIN32)
+                    if (q >= fmtbuf + sizeof(fmtbuf) - 3)
+                        goto invalid;
+                    q[2] = q[-1];
+                    q[-1] = 'I';
+                    q[0] = '6';
+                    q[1] = '4';
+                    q[3] = '\0';
+                    dbuf_printf_fun(&dbuf, fmtbuf, (int64_t)int64_arg);
+#else
+                    if (q >= fmtbuf + sizeof(fmtbuf) - 2)
+                        goto invalid;
+                    q[1] = q[-1];
+                    q[-1] = q[0] = 'l';
+                    q[2] = '\0';
+                    dbuf_printf_fun(&dbuf, fmtbuf, (long long)int64_arg);
+#endif
+                } else {
+                    dbuf_printf_fun(&dbuf, fmtbuf, (int)int64_arg);
+                }
+                break;
+
+            case 's':
+                if (i >= argc)
+                    goto missing;
+                /* XXX: handle strings containing null characters */
+                string_arg = JS_ToCString(ctx, argv[i++]);
+                if (!string_arg)
+                    goto fail;
+                dbuf_printf_fun(&dbuf, fmtbuf, string_arg);
+                JS_FreeCString(ctx, string_arg);
+                break;
+
+            case 'e':
+            case 'f':
+            case 'g':
+            case 'a':
+            case 'E':
+            case 'F':
+            case 'G':
+            case 'A':
+                if (i >= argc)
+                    goto missing;
+                if (JS_ToFloat64(ctx, &double_arg, argv[i++]))
+                    goto fail;
+                dbuf_printf_fun(&dbuf, fmtbuf, double_arg);
+                break;
+
+            case '%':
+                dbuf_putc(&dbuf, '%');
+                break;
+
+            default:
+                /* XXX: should support an extension mechanism */
+            invalid:
+                JS_ThrowTypeError(ctx, "invalid conversion specifier in format string");
+                goto fail;
+            missing:
+                JS_ThrowReferenceError(ctx, "missing argument for conversion specifier");
+                goto fail;
+            }
+        }
+        JS_FreeCString(ctx, fmt_str);
+    }
+    if (dbuf.error) {
+        res = JS_ThrowOutOfMemory(ctx);
+    } else {
+        if (fp) {
+            len = fwrite(dbuf.buf, 1, dbuf.size, fp);
+            res = JS_NewInt32(ctx, len);
+        } else {
+            res = JS_NewStringLen(ctx, (char *)dbuf.buf, dbuf.size);
+        }
+    }
+    dbuf_free(&dbuf);
+    return res;
+
+fail:
+    JS_FreeCString(ctx, fmt_str);
+    dbuf_free(&dbuf);
+    return JS_EXCEPTION;
+}
+
+/* return > 0 if the attributes indicate a JSON module */
+/// Line number here: 648
+int js_module_test_json(JSContext *ctx, JSValueConst attributes)
+{
+    JSValue str;
+    const char *cstr;
+    size_t len;
+    BOOL res;
+
+    if (JS_IsUndefined(attributes))
+        return FALSE;
+    str = JS_GetPropertyStr(ctx, attributes, "type");
+    if (!JS_IsString(str))
+        return FALSE;
+    cstr = JS_ToCStringLen(ctx, &len, str);
+    JS_FreeValue(ctx, str);
+    if (!cstr)
+        return FALSE;
+    /* XXX: raise an error if unknown type ? */
+    if (len == 4 && !memcmp(cstr, "json", len)) {
+        res = 1;
+    } else if (len == 5 && !memcmp(cstr, "json5", len)) {
+        res = 2;
+    } else {
+        res = 0;
+    }
+    JS_FreeCString(ctx, cstr);
+    return res;
+}
+
+/**********************************************************/
+/// Line number here: 4011
+static JSValue js_print(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    int i;
+    JSValueConst v;
+    
+    for(i = 0; i < argc; i++) {
+        if (i != 0)
+            putchar(' ');
+        v = argv[i];
+        if (JS_IsString(v)) {
+            const char *str;
+            size_t len;
+            str = JS_ToCStringLen(ctx, &len, v);
+            if (!str)
+                return JS_EXCEPTION;
+            fwrite(str, 1, len, stdout);
+            JS_FreeCString(ctx, str);
+        } else {
+            JS_PrintValue(ctx, js_print_value_write, stdout, v, NULL);
+        }
+    }
+    putchar('\n');
+    return JS_UNDEFINED;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "js_std_dbuf_init(JSContext *, DynBuf *)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "snprintf(char *restrict, size_t, const char *restrict, ...)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "my_isdigit(int)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_IsString(JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "unicode_from_utf8(const uint8_t *, int, const uint8_t **)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "unicode_to_utf8(uint8_t *, unsigned int)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ToInt64Ext(JSContext *, int64_t *, JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "js_printf_internal::dbuf_printf_fun";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "fwrite(const void *restrict, size_t, size_t, FILE *restrict)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"js_printf_internal(JSContext *, int, JSValue *, FILE *)" -> "dbuf_free(DynBuf *)";
+"js_module_test_json(JSContext *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_GetPropertyStr(JSContext *, JSValue, const char *)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_IsString(JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "memcmp(const void *, const void *, size_t)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_print(JSContext *, JSValue, int, JSValue *)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "putchar(int)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "JS_IsString(JSValue)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "fwrite(const void *restrict, size_t, size_t, FILE *restrict)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_print(JSContext *, JSValue, int, JSValue *)" -> "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+}

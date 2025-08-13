@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2107,6 +2107,9 @@
+     add_gc_object(rt, &ctx->header, JS_GC_OBJ_TYPE_JS_CONTEXT);
+ 
+     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
++                                   rt->class_count);
++    if (rt->class_count <= 0) {
++        funlogline();
+                                     rt->class_count);
+     if (!ctx->class_proto) {
+         js_free_rt(rt, ctx);
+@@ -2114,6 +2117,7 @@
+     }
+     ctx->rt = rt;
+     list_add_tail(&ctx->link, &rt->context_list);
++    funlogline(); // Context added to list before full initialization
+     for(i = 0; i < rt->class_count; i++)
+         ctx->class_proto[i] = JS_NULL;
+     ctx->array_ctor = JS_NULL;

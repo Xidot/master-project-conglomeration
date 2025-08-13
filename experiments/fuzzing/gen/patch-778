@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4211,6 +4211,8 @@
+ 
+     if (s->stack_len == 0)
+         return NULL;
++    if (s->stack_len <= 0)
++        funlogline();
+     val = s->stack[--s->stack_len];
+     for(;;) {
+         if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING)
+@@ -4218,6 +4220,8 @@
+         r = JS_VALUE_GET_STRING_ROPE(val);
+         assert(s->stack_len < JS_STRING_ROPE_MAX_DEPTH);
+         s->stack[s->stack_len++] = r->right;
++        if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING && !JS_VALUE_GET_STRING(val))
++            funlogline();
+         val = r->left;
+     }
+ }

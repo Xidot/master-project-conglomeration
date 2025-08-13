@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13207,6 +13207,7 @@
+ static uint32_t js_print_array_get_length(JSObject *p)
+ {
+     JSProperty *pr;
+     JSShapeProperty *prs;
++    if (p == NULL) funlogline();
+     JSValueConst val;
+ 
+     prs = find_own_property(&pr, p, JS_ATOM_length);
+@@ -13213,6 +13213,7 @@
+     if (!prs)
+         return 0;
+     if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL)
++        funlogline();
+         return 0;
+     val = pr->u.value;
+     switch(JS_VALUE_GET_NORM_TAG(val)) {
+@@ -13215,6 +13216,7 @@
+     case JS_TAG_FLOAT64:
+         return (uint32_t)JS_VALUE_GET_FLOAT64(val);
+     default:
++        funlogline();
+         return 0;
+     }
+ }

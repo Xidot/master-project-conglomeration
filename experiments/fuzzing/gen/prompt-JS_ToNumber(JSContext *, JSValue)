@@ -1,0 +1,88 @@
+Target function: "JS_ToNumber(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 12374
+static JSValue JS_ToNumber(JSContext *ctx, JSValueConst val)
+{
+    return JS_ToNumberFree(ctx, JS_DupValue(ctx, val));
+}
+
+/// Line number here: 12232
+enum JSToNumberHintEnum {
+    TON_FLAG_NUMBER,
+    TON_FLAG_NUMERIC,
+}
+
+/// Line number here: 12311
+static JSValue JS_ToNumberFree(JSContext *ctx, JSValue val)
+{
+    return JS_ToNumberHintFree(ctx, val, TON_FLAG_NUMBER);
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToNumber(JSContext *, JSValue)";
+"JS_ToNumber(JSContext *, JSValue)" -> "JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToNumber(JSContext *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToNumberFree(JSContext *, JSValue)" -> "JS_ToNumberHintFree(JSContext *, JSValue, JSToNumberHintEnum)";
+}

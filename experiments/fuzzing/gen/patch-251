@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29180,6 +29180,8 @@
+     p->u.func.home_object = NULL;
+     p->u.func.var_refs = NULL;
+     if (b->closure_var_count) {
++        if (b->closure_var_count < 0)
++            funlogline();
+         var_refs = js_mallocz(ctx, sizeof(var_refs[0]) * b->closure_var_count);
+         if (!var_refs)
+             goto fail;
+@@ -29191,6 +29193,8 @@
+             JSClosureVar *cv = &b->closure_var[i];
+             JSVarRef *var_ref;
+             if (cv->is_local) {
++                if (i >= b->closure_var_count)
++                    funlogline();
+                 var_ref = js_create_module_var(ctx, cv->is_lexical);
+                 if (!var_ref)
+                     goto fail;

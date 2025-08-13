@@ -1,0 +1,89 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36133,6 +36133,7 @@
+ static void bc_put_leb128(BCWriterState *s, uint32_t v)
+ {
++    if (v > 0x1FFFFFFF) funlogline();
+     dbuf_put_leb128(&s->dbuf, v);
+ }
+ 
+@@ -36322,6 +36323,7 @@
+     bc_put_u8(s, BC_TAG_BIG_INT);
+ 
+     if (JS_VALUE_GET_TAG(obj) == JS_TAG_SHORT_BIG_INT)
++        if (JS_VALUE_GET_TAG(obj) != JS_TAG_BIG_INT && JS_VALUE_GET_TAG(obj) != JS_TAG_SHORT_BIG_INT) funlogline();
+         p = js_bigint_set_short(&buf, obj);
+     else
+         p = JS_VALUE_GET_PTR(obj);
+@@ -36373,6 +36375,7 @@
+ {
+     JSFunctionBytecode *b = JS_VALUE_GET_PTR(obj);
+     uint32_t flags;
++    if (b->byte_code_len < 0) funlogline();
+     int idx, i;
+ 
+     bc_put_u8(s, BC_TAG_FUNCTION_BYTECODE);
+@@ -36462,6 +36465,7 @@
+ {
+     JSModuleDef *m = JS_VALUE_GET_PTR(obj);
+     int i;
++    if (m->req_module_entries_count < 0) funlogline();
+ 
+     bc_put_u8(s, BC_TAG_MODULE);
+     bc_put_atom(s, m->module_name);
+@@ -36515,6 +36519,7 @@
+     uint32_t i, len;
+     JSValue val;
+     int ret;
++    if (p->extensible && !s->allow_bytecode) funlogline();
+     BOOL is_template;
+ 
+     if (s->allow_bytecode && !p->extensible) {
+@@ -36558,6 +36563,7 @@
+     uint32_t i, prop_count;
+     JSShape *sh;
+     JSShapeProperty *pr;
++    if (sh->prop_count < 0) funlogline();
+     int pass;
+     JSAtom atom;
+ 
+@@ -36597,6 +36603,7 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSTypedArray *ta = p->u.typed_array;
++    if (ta->offset > ta->length) funlogline();
+ 
+     bc_put_u8(s, BC_TAG_TYPED_ARRAY);
+     bc_put_u8(s, p->class_id - JS_CLASS_UINT8C_ARRAY);
+@@ -36611,6 +36618,7 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf->byte_length < 0) funlogline();
+     if (abuf->detached) {
+         JS_ThrowTypeErrorDetachedArrayBuffer(s->ctx);
+         return -1;
+@@ -36625,6 +36633,7 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf->shared && abuf->detached) funlogline();
+     assert(!abuf->detached); /* SharedArrayBuffer are never detached */
+     bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
+     bc_put_leb128(s, abuf->byte_length);
+@@ -36641,6 +36650,7 @@
+ static int JS_WriteObjectRec(BCWriterState *s, JSValueConst obj)
+ {
+     uint32_t tag;
++    if (JS_VALUE_GET_NORM_TAG(obj) < JS_TAG_FIRST || JS_VALUE_GET_NORM_TAG(obj) > JS_TAG_FLOAT64) funlogline();
+ 
+     if (js_check_stack_overflow(s->ctx->rt, 0)) {
+         JS_ThrowStackOverflow(s->ctx);
+@@ -36782,6 +36792,7 @@
+ {
+     JSRuntime *rt = s->ctx->rt;
+     DynBuf dbuf1;
++    if (s->idx_to_atom_count < 0) funlogline();
+     int i, atoms_size;
+ 
+     dbuf1 = s->dbuf;

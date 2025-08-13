@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-floor_div(int64_t, int64_t)
+-------------------------
+Based on the provided code and call graph, here are the potential logical bugs in the `floor_div` function:
+
+:floor_div(int64_t, int64_t):50916
+:floor_div(int64_t, int64_t):50918
+
+---
+The main logical issue appears when `b == 0` (division by zero), which would cause undefined behavior. The function doesn't check for this case. Additionally, the modulo operation `a % b` is undefined when `b == 0`.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50916,6 +50916,9 @@
+ static int64_t floor_div(int64_t a, int64_t b) {
+     /* integer division rounding toward -Infinity */
+     int64_t m = a % b;
++    if (b == 0) {
++        funlogline();
++    }
+     return (a - (m + (m < 0) * b)) / b;
+ }
+```
+
+The modification adds a check for division by zero right before the modulo operation. When `b == 0`, it will call `funlogline()` to log the error condition.

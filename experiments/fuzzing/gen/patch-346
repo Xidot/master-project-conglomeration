@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10331,6 +10331,10 @@
+ 
+ void *JS_GetOpaque2(JSContext *ctx, JSValueConst obj, JSClassID class_id)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++        return NULL;
++    }
+     void *p = JS_GetOpaque(obj, class_id);
+     if (unlikely(!p)) {
+         JS_ThrowTypeErrorInvalidClass(ctx, class_id);

@@ -1,0 +1,303 @@
+Target function: "js_bigint_get_si_sat(const JSBigInt *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 11056
+static js_slimb_t js_bigint_get_si_sat(const JSBigInt *a)
+{
+    if (a->len == 1) {
+        return a->tab[0];
+    } else {
+#if JS_LIMB_BITS == 32
+        if (js_bigint_sign(a))
+            return INT32_MIN;
+        else
+            return INT32_MAX;
+#else
+        if (js_bigint_sign(a))
+            return INT64_MIN;
+        else
+            return INT64_MAX;
+#endif
+    }
+}
+
+/* return 0 or 1 depending on the sign */
+/// Line number here: 11051
+static inline int js_bigint_sign(const JSBigInt *a)
+{
+    return a->tab[a->len - 1] >> (JS_LIMB_BITS - 1);
+}
+
+/// Line number here: 230
+typedef enum OPCodeEnum OPCodeEnum
+
+/// Line number here: 406
+typedef int128_t js_sdlimb_t
+
+/// Line number here: 407
+typedef uint128_t js_dlimb_t
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/// Line number here: 14446
+static no_inline __exception int js_binary_logic_slow(JSContext *ctx,
+                                                      JSValue *sp,
+                                                      OPCodeEnum op)
+{
+    JSValue op1, op2;
+    uint32_t tag1, tag2;
+    uint32_t v1, v2, r;
+
+    op1 = sp[-2];
+    op2 = sp[-1];
+    tag1 = JS_VALUE_GET_NORM_TAG(op1);
+    tag2 = JS_VALUE_GET_NORM_TAG(op2);
+
+    if (tag1 == JS_TAG_SHORT_BIG_INT && tag2 == JS_TAG_SHORT_BIG_INT) {
+        js_slimb_t v1, v2, v;
+        js_sdlimb_t vd;
+        v1 = JS_VALUE_GET_SHORT_BIG_INT(op1);
+        v2 = JS_VALUE_GET_SHORT_BIG_INT(op2);
+        /* bigint fast path */
+        switch(op) {
+        case OP_and:
+            v = v1 & v2;
+            break;
+        case OP_or:
+            v = v1 | v2;
+            break;
+        case OP_xor:
+            v = v1 ^ v2;
+            break;
+        case OP_sar:
+            if (v2 > (JS_LIMB_BITS - 1)) {
+                goto slow_big_int;
+            } else if (v2 < 0) {
+                if (v2 < -(JS_LIMB_BITS - 1))
+                    goto slow_big_int;
+                v2 = -v2;
+                goto bigint_shl;
+            }
+        bigint_sar:
+            v = v1 >> v2;
+            break;
+        case OP_shl:
+            if (v2 > (JS_LIMB_BITS - 1)) {
+                goto slow_big_int;
+            } else if (v2 < 0) {
+                if (v2 < -(JS_LIMB_BITS - 1))
+                    goto slow_big_int;
+                v2 = -v2;
+                goto bigint_sar;
+            }
+        bigint_shl:
+            vd = (js_dlimb_t)v1 << v2;
+            if (likely(vd >= JS_SHORT_BIG_INT_MIN &&
+                       vd <= JS_SHORT_BIG_INT_MAX)) {
+                v = vd;
+            } else {
+                JSBigInt *r = js_bigint_new_di(ctx, vd);
+                if (!r)
+                    goto exception;
+                sp[-2] = JS_MKPTR(JS_TAG_BIG_INT, r);
+                return 0;
+            }
+            break;
+        default:
+            abort();
+        }
+        sp[-2] = __JS_NewShortBigInt(ctx, v);
+        return 0;
+    }
+    op1 = JS_ToNumericFree(ctx, op1);
+    if (JS_IsException(op1)) {
+        JS_FreeValue(ctx, op2);
+        goto exception;
+    }
+    op2 = JS_ToNumericFree(ctx, op2);
+    if (JS_IsException(op2)) {
+        JS_FreeValue(ctx, op1);
+        goto exception;
+    }
+
+    tag1 = JS_VALUE_GET_TAG(op1);
+    tag2 = JS_VALUE_GET_TAG(op2);
+    if ((tag1 == JS_TAG_BIG_INT || tag1 == JS_TAG_SHORT_BIG_INT) &&
+        (tag2 == JS_TAG_BIG_INT || tag2 == JS_TAG_SHORT_BIG_INT)) {
+        JSBigInt *p1, *p2, *r;
+        JSBigIntBuf buf1, buf2;
+    slow_big_int:
+        if (JS_VALUE_GET_TAG(op1) == JS_TAG_SHORT_BIG_INT)
+            p1 = js_bigint_set_short(&buf1, op1);
+        else
+            p1 = JS_VALUE_GET_PTR(op1);
+        if (JS_VALUE_GET_TAG(op2) == JS_TAG_SHORT_BIG_INT)
+            p2 = js_bigint_set_short(&buf2, op2);
+        else
+            p2 = JS_VALUE_GET_PTR(op2);
+        switch(op) {
+        case OP_and:
+        case OP_or:
+        case OP_xor:
+            r = js_bigint_logic(ctx, p1, p2, op);
+            break;
+        case OP_shl:
+        case OP_sar:
+            {
+                js_slimb_t shift;
+                shift = js_bigint_get_si_sat(p2);
+                if (shift > INT32_MAX)
+                    shift = INT32_MAX;
+                else if (shift < -INT32_MAX)
+                    shift = -INT32_MAX;
+                if (op == OP_sar)
+                    shift = -shift;
+                if (shift >= 0)
+                    r = js_bigint_shl(ctx, p1, shift);
+                else
+                    r = js_bigint_shr(ctx, p1, -shift);
+            }
+            break;
+        default:
+            abort();
+        }
+        JS_FreeValue(ctx, op1);
+        JS_FreeValue(ctx, op2);
+        if (!r)
+            goto exception;
+        sp[-2] = JS_CompactBigInt(ctx, r);
+    } else {
+        if (unlikely(JS_ToInt32Free(ctx, (int32_t *)&v1, op1))) {
+            JS_FreeValue(ctx, op2);
+            goto exception;
+        }
+        if (unlikely(JS_ToInt32Free(ctx, (int32_t *)&v2, op2)))
+            goto exception;
+        switch(op) {
+        case OP_shl:
+            r = v1 << (v2 & 0x1f);
+            break;
+        case OP_sar:
+            r = (int)v1 >> (v2 & 0x1f);
+            break;
+        case OP_and:
+            r = v1 & v2;
+            break;
+        case OP_or:
+            r = v1 | v2;
+            break;
+        case OP_xor:
+            r = v1 ^ v2;
+            break;
+        default:
+            abort();
+        }
+        sp[-2] = JS_NewInt32(ctx, r);
+    }
+    return 0;
+ exception:
+    sp[-2] = JS_UNDEFINED;
+    sp[-1] = JS_UNDEFINED;
+    return -1;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_get_si_sat(const JSBigInt *)";
+"js_bigint_get_si_sat(const JSBigInt *)" -> "js_bigint_sign(const JSBigInt *)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "__builtin_expect(long, long)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_new_di(JSContext *, js_sdlimb_t)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "abort()";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_ToNumericFree(JSContext *, JSValue)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_IsException(JSValue)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_logic(JSContext *, const JSBigInt *, const JSBigInt *, OPCodeEnum)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_get_si_sat(const JSBigInt *)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_CompactBigInt(JSContext *, JSBigInt *)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_ToInt32Free(JSContext *, int32_t *, JSValue)";
+"js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_NewInt32(JSContext *, int32_t)";
+}

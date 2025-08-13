@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8331,6 +8331,8 @@
+ /* return JS_ATOM_NULL in case of exception */
+ JSAtom JS_ValueToAtom(JSContext *ctx, JSValueConst val)
+ {
++    if (JS_IsException(val))
++        return JS_ATOM_NULL;
+     JSAtom atom;
+     uint32_t tag;
+     tag = JS_VALUE_GET_TAG(val);
+@@ -8339,6 +8341,8 @@
+         /* fast path for integer values */
+         atom = __JS_AtomFromUInt32(JS_VALUE_GET_INT(val));
+     } else if (tag == JS_TAG_SYMBOL) {
++        if (!JS_VALUE_GET_PTR(val))
++            return JS_ATOM_NULL;
+         JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+         atom = JS_DupAtom(ctx, js_get_atom_index(ctx->rt, p));
+     } else {
+@@ -8348,6 +8352,8 @@
+             return JS_ATOM_NULL;
+         if (JS_VALUE_GET_TAG(str) == JS_TAG_SYMBOL) {
+             atom = js_symbol_to_atom(ctx, str);
++            JS_FreeValue(ctx, str);
++            return atom;
+         } else {
+             atom = JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(str));
+         }

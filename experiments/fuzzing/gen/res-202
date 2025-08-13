@@ -1,0 +1,47 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_mul` function:
+
+:js_bigint_mul:11151
+:js_bigint_mul:11156
+:js_bigint_mul:11158
+
+---
+
+1. Line 11151: The function doesn't check for NULL input parameters (a or b)
+2. Line 11156: The mp_sub operation assumes a->len is valid when accessing r->tab + a->len
+3. Line 11158: The mp_sub operation assumes b->len is valid when accessing r->tab + b->len
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11151,6 +11151,9 @@
+ static JSBigInt *js_bigint_mul(JSContext *ctx, const JSBigInt *a,
+                                const JSBigInt *b)
+ {
++    if (!a || !b)
++        funlogline();
++
+     JSBigInt *r;
+     
+     r = js_bigint_new(ctx, a->len + b->len);
+@@ -11153,9 +11156,15 @@
+     /* correct the result if negative operands (no overflow is
+        possible) */
+     if (js_bigint_sign(a))
++        if (a->len > r->len)
++            funlogline();
+         mp_sub(r->tab + a->len, r->tab + a->len, b->tab, b->len, 0);
++
+     if (js_bigint_sign(b))
++        if (b->len > r->len)
++            funlogline();
+         mp_sub(r->tab + b->len, r->tab + b->len, a->tab, a->len, 0);
++
+     return js_bigint_normalize(ctx, r);
+ }
+```

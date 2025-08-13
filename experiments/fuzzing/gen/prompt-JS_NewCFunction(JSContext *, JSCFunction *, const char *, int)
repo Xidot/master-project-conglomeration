@@ -1,0 +1,110 @@
+Target function: "JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 350
+typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+/// Line number here: 1045
+static inline JSValue JS_NewCFunction(JSContext *ctx, JSCFunction *func, const char *name,
+                                      int length)
+{
+    return JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_generic, 0);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Note: at least 'length' arguments will be readable in 'argv' */
+/// Line number here: 5382
+JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
+                         const char *name,
+                         int length, JSCFunctionEnum cproto, int magic)
+{
+    return JS_NewCFunction3(ctx, func, name, length, cproto, magic,
+                            ctx->function_proto);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 4046
+void js_std_add_helpers(JSContext *ctx, int argc, char **argv)
+{
+    JSValue global_obj, console, args, performance;
+    int i;
+
+    /* XXX: should these global definitions be enumerable? */
+    global_obj = JS_GetGlobalObject(ctx);
+
+    console = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, console, "log",
+                      JS_NewCFunction(ctx, js_console_log, "log", 1));
+    JS_SetPropertyStr(ctx, global_obj, "console", console);
+
+    performance = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, performance, "now",
+                      JS_NewCFunction(ctx, js_os_now, "now", 0));
+    JS_SetPropertyStr(ctx, global_obj, "performance", performance);
+
+    /* same methods as the mozilla JS shell */
+    if (argc >= 0) {
+        args = JS_NewArray(ctx);
+        for(i = 0; i < argc; i++) {
+            JS_SetPropertyUint32(ctx, args, i, JS_NewString(ctx, argv[i]));
+        }
+        JS_SetPropertyStr(ctx, global_obj, "scriptArgs", args);
+    }
+
+    JS_SetPropertyStr(ctx, global_obj, "print",
+                      JS_NewCFunction(ctx, js_print, "print", 1));
+    JS_SetPropertyStr(ctx, global_obj, "__loadScript",
+                      JS_NewCFunction(ctx, js_loadScript, "__loadScript", 1));
+
+    JS_FreeValue(ctx, global_obj);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)" -> "JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_GetGlobalObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewArray(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewString(JSContext *, const char *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

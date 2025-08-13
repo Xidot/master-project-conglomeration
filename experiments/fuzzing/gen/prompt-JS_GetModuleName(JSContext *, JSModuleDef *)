@@ -1,0 +1,51 @@
+Target function: "JS_GetModuleName(JSContext *, JSModuleDef *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 29518
+JSAtom JS_GetModuleName(JSContext *ctx, JSModuleDef *m)
+{
+    return JS_DupAtom(ctx, m->module_name);
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 2597
+JSAtom JS_DupAtom(JSContext *ctx, JSAtom v)
+{
+    JSRuntime *rt;
+    JSAtomStruct *p;
+
+    if (!__JS_AtomIsConst(v)) {
+        rt = ctx->rt;
+        p = rt->atom_array[v];
+        p->header.ref_count++;
+    }
+    return v;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_GetModuleName(JSContext *, JSModuleDef *)";
+"JS_GetModuleName(JSContext *, JSModuleDef *)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"JS_DupAtom(JSContext *, JSAtom)";
+"JS_DupAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+}

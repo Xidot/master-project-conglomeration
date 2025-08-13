@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54667,6 +54667,8 @@
+     abuf = JS_GetOpaque(buffer, JS_CLASS_ARRAY_BUFFER);
+     if (typed_array_init(ctx, obj, buffer, 0, len))
+         goto fail;
+     if (p->class_id == classid) {
++        if (src_abuf->data == NULL)
++            funlogline();
+         /* same type: copy the content */
+         memcpy(abuf->data, src_abuf->data + ta->offset, abuf->byte_length);
+     } else {
+@@ -54686,6 +54688,8 @@
+             val = JS_GetPropertyUint32(ctx, src_obj, i);
+             if (JS_IsException(val))
+                 goto fail;
++            if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED)
++                funlogline();
+             if (JS_SetPropertyUint32(ctx, obj, i, val) < 0)
+                 goto fail;
+         }

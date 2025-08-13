@@ -1,0 +1,36 @@
+Target function: "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 771
+JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
+                               JSAtom prop, JSValueConst receiver,
+                               JS_BOOL throw_ref_error)
+
+/// Line number here: 774
+static js_force_inline JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj,
+                                              JSAtom prop)
+{
+    return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, 0);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)" -> "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)";
+}

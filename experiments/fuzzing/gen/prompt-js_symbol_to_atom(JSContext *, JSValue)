@@ -1,0 +1,141 @@
+Target function: "js_symbol_to_atom(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* val must be a symbol */
+/// Line number here: 8324
+static JSAtom js_symbol_to_atom(JSContext *ctx, JSValue val)
+{
+    JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+    return js_get_atom_index(ctx->rt, p);
+}
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 2639
+static JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
+{
+    uint32_t i = p->hash_next;  /* atom_index */
+    if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+        JSAtomStruct *p1;
+
+        i = rt->atom_hash[p->hash & (rt->atom_hash_size - 1)];
+        p1 = rt->atom_array[i];
+        while (p1 != p) {
+            assert(i != 0);
+            i = p1->hash_next;
+            p1 = rt->atom_array[i];
+        }
+    }
+    return i;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* return JS_ATOM_NULL in case of exception */
+/// Line number here: 8331
+JSAtom JS_ValueToAtom(JSContext *ctx, JSValueConst val)
+{
+    JSAtom atom;
+    uint32_t tag;
+    tag = JS_VALUE_GET_TAG(val);
+    if (tag == JS_TAG_INT &&
+        (uint32_t)JS_VALUE_GET_INT(val) <= JS_ATOM_MAX_INT) {
+        /* fast path for integer values */
+        atom = __JS_AtomFromUInt32(JS_VALUE_GET_INT(val));
+    } else if (tag == JS_TAG_SYMBOL) {
+        JSAtomStruct *p = JS_VALUE_GET_PTR(val);
+        atom = JS_DupAtom(ctx, js_get_atom_index(ctx->rt, p));
+    } else {
+        JSValue str;
+        str = JS_ToPropertyKey(ctx, val);
+        if (JS_IsException(str))
+            return JS_ATOM_NULL;
+        if (JS_VALUE_GET_TAG(str) == JS_TAG_SYMBOL) {
+            atom = js_symbol_to_atom(ctx, str);
+        } else {
+            atom = JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(str));
+        }
+    }
+    return atom;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_symbol_to_atom(JSContext *, JSValue)";
+"js_symbol_to_atom(JSContext *, JSValue)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"js_get_atom_index(JSRuntime *, JSAtomStruct *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_ValueToAtom(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "__JS_AtomFromUInt32(uint32_t)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_ToPropertyKey(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "js_symbol_to_atom(JSContext *, JSValue)";
+"JS_ValueToAtom(JSContext *, JSValue)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+}

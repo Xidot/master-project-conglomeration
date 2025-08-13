@@ -1,0 +1,205 @@
+Target function: "js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 49251
+typedef struct JSPromiseFunctionDataResolved {
+    int ref_count;
+    BOOL already_resolved;
+} JSPromiseFunctionDataResolved
+
+/// Line number here: 49416
+static void js_promise_resolve_function_free_resolved(JSRuntime *rt,
+                                                      JSPromiseFunctionDataResolved *sr)
+{
+    if (--sr->ref_count == 0) {
+        js_free_rt(rt, sr);
+    }
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+/// Line number here: 49256
+typedef struct JSPromiseFunctionData {
+    JSValue promise;
+    JSPromiseFunctionDataResolved *presolved;
+} JSPromiseFunctionData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 49424
+static int js_create_resolving_functions(JSContext *ctx,
+                                         JSValue *resolving_funcs,
+                                         JSValueConst promise)
+
+{
+    JSValue obj;
+    JSPromiseFunctionData *s;
+    JSPromiseFunctionDataResolved *sr;
+    int i, ret;
+
+    sr = js_malloc(ctx, sizeof(*sr));
+    if (!sr)
+        return -1;
+    sr->ref_count = 1;
+    sr->already_resolved = FALSE; /* must be shared between the two functions */
+    ret = 0;
+    for(i = 0; i < 2; i++) {
+        obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                     JS_CLASS_PROMISE_RESOLVE_FUNCTION + i);
+        if (JS_IsException(obj))
+            goto fail;
+        s = js_malloc(ctx, sizeof(*s));
+        if (!s) {
+            JS_FreeValue(ctx, obj);
+        fail:
+
+            if (i != 0)
+                JS_FreeValue(ctx, resolving_funcs[0]);
+            ret = -1;
+            break;
+        }
+        sr->ref_count++;
+        s->presolved = sr;
+        s->promise = JS_DupValue(ctx, promise);
+        JS_SetOpaque(obj, s);
+        js_function_set_properties(ctx, obj, JS_ATOM_empty_string, 1);
+        resolving_funcs[i] = obj;
+    }
+    js_promise_resolve_function_free_resolved(ctx->rt, sr);
+    return ret;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 49466
+static void js_promise_resolve_function_finalizer(JSRuntime *rt, JSValue val)
+{
+    JSPromiseFunctionData *s = JS_VALUE_GET_OBJ(val)->u.promise_function_data;
+    if (s) {
+        js_promise_resolve_function_free_resolved(rt, s->presolved);
+        JS_FreeValueRT(rt, s->promise);
+        js_free_rt(rt, s);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)";
+"js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "js_malloc(JSContext *, size_t)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "JS_IsException(JSValue)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "JS_SetOpaque(JSValue, void *)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "js_function_set_properties(JSContext *, JSValue, JSAtom, int)";
+"js_create_resolving_functions(JSContext *, JSValue *, JSValue)" -> "js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)";
+"js_promise_resolve_function_finalizer(JSRuntime *, JSValue)";
+"js_promise_resolve_function_finalizer(JSRuntime *, JSValue)" -> "js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)";
+"js_promise_resolve_function_finalizer(JSRuntime *, JSValue)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_promise_resolve_function_finalizer(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+}

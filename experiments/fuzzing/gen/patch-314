@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28342,6 +28342,9 @@
+     /* during the GC the finalizers are called in an arbitrary
+        order so the module may no longer be referenced by the JSContext list */
+     if (m->link.next) {
++        if (m->link.prev == NULL) {
++            funlogline();
++        }
+         list_del(&m->link);
+     }
+     remove_gc_object(&m->header);
+@@ -28349,6 +28352,9 @@
+         list_add_tail(&m->header.link, &rt->gc_zero_ref_count_list);
+     } else {
+         js_free_rt(rt, m);
+     }
++    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && m->header.ref_count == 0) {
++        funlogline();
++    }
+ }
+ 
+ /// Line number here: 3209

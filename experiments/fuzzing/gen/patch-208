@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10976,6 +10976,8 @@
+ static JSBigInt *js_bigint_new_ui64(JSContext *ctx, uint64_t a)
+ {
+     if (a <= INT64_MAX) {
++        if (a == INT64_MAX + 1)
++            funlogline();
+         return js_bigint_new_si64(ctx, a);
+     } else {
+         JSBigInt *r;
+@@ -10983,10 +10985,14 @@
+         if (!r)
+             return NULL;
+ #if JS_LIMB_BITS == 64
++        if (a == UINT64_MAX)
++            funlogline();
+         r->tab[0] = a;
+         r->tab[1] = 0;
+ #else
++        if (a > (UINT64_MAX >> 32))
++            funlogline();
+         r->tab[0] = a;
+         r->tab[1] = a >> 32;
+         r->tab[2] = 0;

@@ -1,0 +1,36 @@
+Target function: "list_add(struct list_head *, struct list_head *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/* add 'el' at the head of the list 'head' (= after element head) */
+/// Line number here: 57
+static inline void list_add(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head, head->next);
+}
+
+/* insert 'el' between 'prev' and 'next' */
+/// Line number here: 47
+static inline void __list_add(struct list_head *el,
+                              struct list_head *prev, struct list_head *next)
+{
+    prev->next = el;
+    el->prev = prev;
+    el->next = next;
+    next->prev = el;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"list_add(struct list_head *, struct list_head *)";
+"list_add(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+}

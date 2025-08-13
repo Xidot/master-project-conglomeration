@@ -1,0 +1,294 @@
+Target function: "mpb_renorm(mpb_t *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 213
+static void mpb_renorm(mpb_t *r)
+{
+    while (r->len > 1 && r->tab[r->len - 1] == 0)
+        r->len--;
+}
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* compute round(r / 2^shift). 'shift' can be negative */
+/// Line number here: 312
+static void mpb_shr_round(mpb_t *r, int shift, int rnd_mode)
+{
+    int l, i;
+
+    if (shift == 0)
+        return;
+    if (shift < 0) {
+        shift = -shift;
+        l = (unsigned)shift / LIMB_BITS;
+        shift = shift & (LIMB_BITS - 1);
+        if (shift != 0) {
+            r->tab[r->len] = mp_shl(r->tab, r->tab, r->len, shift, 0);
+            r->len++;
+            mpb_renorm(r);
+        }
+        if (l > 0) {
+            for(i = r->len - 1; i >= 0; i--)
+                r->tab[i + l] = r->tab[i];
+            for(i = 0; i < l; i++)
+                r->tab[i] = 0;
+            r->len += l;
+        }
+    } else {
+        limb_t bit1, bit2;
+        int k, add_one;
+        
+        switch(rnd_mode) {
+        default:
+        case JS_RNDZ:
+            add_one = 0;
+            break;
+        case JS_RNDN:
+        case JS_RNDNA:
+            bit1 = mpb_get_bit(r, shift - 1);
+            if (bit1) {
+                if (rnd_mode == JS_RNDNA) {
+                    bit2 = 1;
+                } else {
+                    /* bit2 = oring of all the bits after bit1 */
+                    bit2 = 0;
+                    if (shift >= 2) {
+                        k = shift - 1;
+                        l = (unsigned)k / LIMB_BITS;
+                        k = k & (LIMB_BITS - 1);
+                        for(i = 0; i < min_int(l, r->len); i++)
+                            bit2 |= r->tab[i];
+                        if (l < r->len)
+                            bit2 |= r->tab[l] & (((limb_t)1 << k) - 1);
+                    }
+                }
+                if (bit2) {
+                    add_one = 1;
+                } else {
+                    /* round to even */
+                    add_one = mpb_get_bit(r, shift);
+                }
+            } else {
+                add_one = 0;
+            }
+            break;
+        }
+
+        l = (unsigned)shift / LIMB_BITS;
+        shift = shift & (LIMB_BITS - 1);
+        if (l >= r->len) {
+            r->len = 1;
+            r->tab[0] = add_one;
+        } else {
+            if (l > 0) {
+                r->len -= l;
+                for(i = 0; i < r->len; i++)
+                    r->tab[i] = r->tab[i + l];
+            }
+            if (shift != 0) {
+                mp_shr(r->tab, r->tab, r->len, shift, 0);
+                mpb_renorm(r);
+            }
+            if (add_one) {
+                limb_t a;
+                a = mp_add_ui(r->tab, 1, r->len);
+                if (a)
+                    r->tab[r->len++] = a;
+            }
+        }
+    }
+}
+
+/* n_digits >= 1. 0 <= dot_pos <= n_digits. If dot_pos == n_digits,
+   the dot is not displayed. 'a' is modified. */
+/// Line number here: 846
+static int output_digits(char *buf,
+                         mpb_t *a, int radix, int n_digits1,
+                         int dot_pos)
+{
+    int n_digits, digits_per_limb, radix_bits, n, len;
+
+    n_digits = n_digits1;
+    if ((radix & (radix - 1)) == 0) {
+        /* radix = 2^radix_bits */
+        radix_bits = 31 - clz32(radix);
+    } else {
+        radix_bits = 0;
+    }
+    digits_per_limb = digits_per_limb_table[radix - 2];
+    if (radix_bits != 0) {
+        for(;;) {
+            n = min_int(n_digits, digits_per_limb);
+            n_digits -= n;
+            u64toa_bin_len(buf + n_digits, a->tab[0], radix_bits, n);
+            if (n_digits == 0)
+                break;
+            mpb_shr_round(a, digits_per_limb * radix_bits, JS_RNDZ);
+        }
+    } else {
+        limb_t r;
+        while (n_digits != 0) {
+            n = min_int(n_digits, digits_per_limb);
+            n_digits -= n;
+            r = mp_div1(a->tab, a->tab, a->len, radix_base_table[radix - 2], 0);
+            mpb_renorm(a);
+            limb_to_a(buf + n_digits, r, radix, n);
+        }
+    }
+
+    /* add the dot */
+    len = n_digits1;
+    if (dot_pos != n_digits1) {
+        memmove(buf + dot_pos + 1, buf + dot_pos, n_digits1 - dot_pos);
+        buf[dot_pos] = '.';
+        len++;
+    }
+    return len;
+}
+
+/* return (a, e_offset) such that a = a * (radix1*2^radix_shift)^f *
+   2^-e_offset. 'f' can be negative. */
+/// Line number here: 892
+static int mul_pow(mpb_t *a, int radix1, int radix_shift, int f, BOOL is_int, int e)
+{
+    int e_offset, d, n, n0;
+
+    e_offset = -f * radix_shift;
+    if (radix1 != 1) {
+        d = digits_per_limb_table[radix1 - 2];
+        if (f >= 0) {
+            limb_t h, b;
+            
+            b = 0;
+            n0 = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui(radix1, n);
+                    n0 = n;
+                }
+                h = mp_mul1(a->tab, a->tab, a->len, b, 0);
+                if (h != 0) {
+                    a->tab[a->len++] = h;
+                }
+                f -= n;
+            }
+        } else {
+            int extra_bits, l, shift;
+            limb_t r, rem, b, b_inv;
+            
+            f = -f;
+            l = (f + d - 1) / d; /* high bound for the number of limbs (XXX: make it better) */
+            e_offset += l * LIMB_BITS;
+            if (!is_int) {
+                /* at least 'e' bits are needed in the final result for rounding */
+                extra_bits = max_int(e - mpb_floor_log2(a), 0);
+            } else {
+                /* at least two extra bits are needed in the final result
+                   for rounding */
+                extra_bits = max_int(2 + e - e_offset, 0);
+            }
+            e_offset += extra_bits;
+            mpb_shr_round(a, -(l * LIMB_BITS + extra_bits), JS_RNDZ);
+            
+            b = 0;
+            b_inv = 0;
+            shift = 0;
+            n0 = 0;
+            rem = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui_inv(&b_inv, &shift, radix1, n);
+                    n0 = n;
+                }
+                r = mp_div1norm(a->tab, a->tab, a->len, b, 0, b_inv, shift);
+                rem |= r;
+                mpb_renorm(a);
+                f -= n;
+            }
+            /* if the remainder is non zero, use it for rounding */
+            a->tab[0] |= (rem != 0);
+        }
+    }
+    return e_offset;
+}
+
+/* r = r * radix_base + a. radix_base = 0 means radix_base = 2^32 */
+/// Line number here: 1332
+static void mpb_mul1_base(mpb_t *r, limb_t radix_base, limb_t a)
+{
+    int i;
+    if (r->tab[0] == 0 && r->len == 1) {
+        r->tab[0] = a;
+    } else {
+        if (radix_base == 0) {
+            for(i = r->len; i >= 0; i--) {
+                r->tab[i + 1] = r->tab[i];
+            }
+            r->tab[0] = a;
+        } else {
+            r->tab[r->len] = mp_mul1(r->tab, r->tab, r->len,
+                                     radix_base, a);
+        }
+        r->len++;
+        mpb_renorm(r);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"mpb_shr_round(mpb_t *, int, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mpb_renorm(mpb_t *)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mpb_get_bit(const mpb_t *, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "min_int(int, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_shr(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_add_ui(limb_t *, limb_t, size_t)";
+"output_digits(char *, mpb_t *, int, int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "clz32(unsigned int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "min_int(int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "u64toa_bin_len(char *, uint64_t, unsigned int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mp_div1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "mpb_renorm(mpb_t *)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "limb_to_a(char *, limb_t, unsigned int, int)";
+"output_digits(char *, mpb_t *, int, int, int)" -> "memmove(void *, const void *, size_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "min_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui(uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_mul1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "max_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_floor_log2(mpb_t *)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_renorm(mpb_t *)";
+"mpb_mul1_base(mpb_t *, limb_t, limb_t)";
+"mpb_mul1_base(mpb_t *, limb_t, limb_t)" -> "mp_mul1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"mpb_mul1_base(mpb_t *, limb_t, limb_t)" -> "mpb_renorm(mpb_t *)";
+}

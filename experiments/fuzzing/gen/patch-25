@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36996,6 +36996,9 @@
+ static int bc_get_sleb128(BCReaderState *s, int32_t *pval)
+ {
+     int ret;
++    if (s->ptr >= s->buf_end) {
++        funlogline();
++    }
+     ret = get_sleb128(pval, s->ptr, s->buf_end);
+     if (unlikely(ret < 0))
+         return bc_read_error_end(s);

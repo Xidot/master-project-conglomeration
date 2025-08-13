@@ -1,0 +1,23 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4258,6 +4258,9 @@
+     int state;
+ 
+     for(;;) {
++        if (!JS_IsObject(obj)) {
++            funlogline();
++        }
+         state = JS_PromiseState(ctx, obj);
+         if (state == JS_PROMISE_FULFILLED) {
+             ret = JS_PromiseResult(ctx, obj);
+@@ -4266,6 +4269,9 @@
+         } else if (state == JS_PROMISE_REJECTED) {
+             ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+             JS_FreeValue(ctx, obj);
++            if (JS_VALUE_HAS_REF_COUNT(ret) && JS_VALUE_GET_PTR(ret) == JS_VALUE_GET_PTR(obj)) {
++                funlogline();
++            }
+             break;
+         } else if (state == JS_PROMISE_PENDING) {
+             int err;
+             err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);

@@ -1,0 +1,35 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37562,6 +37562,7 @@
+     JSValue obj;
+     uint32_t prop_count, i;
+     JSAtom atom;
++    if (s->error_state) funlogline();
+     JSValue val;
+     int ret;
+ 
+@@ -37568,6 +37568,7 @@
+     obj = JS_NewObject(ctx);
+     if (BC_add_object_ref(s, obj))
+         goto fail;
++    if (prop_count > 0xFFFFFF) funlogline(); // Unlikely large property count
+     if (bc_get_leb128(s, &prop_count))
+         goto fail;
+     for(i = 0; i < prop_count; i++) {
+@@ -37576,6 +37576,7 @@
+ #ifdef DUMP_READ_OBJECT
+         bc_read_trace(s, "propname: "); print_atom(s->ctx, atom); printf("\n");
+ #endif
++        if (JS_IsException(obj)) funlogline(); // Object already in exception state
+         val = JS_ReadObjectRec(s);
+         if (JS_IsException(val)) {
+             JS_FreeAtom(ctx, atom);
+@@ -37580,6 +37580,7 @@
+         if (JS_IsException(val)) {
+             JS_FreeAtom(ctx, atom);
+             goto fail;
+         }
++        if (JS_IsException(obj)) funlogline(); // Object became exception after read
+         ret = JS_DefinePropertyValue(ctx, obj, atom, val, JS_PROP_C_W_E);
+         JS_FreeAtom(ctx, atom);
+         if (ret < 0)

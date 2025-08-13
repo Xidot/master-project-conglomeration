@@ -1,0 +1,16 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -44479,6 +44479,9 @@
+ static void js_random_init(JSContext *ctx)
+ {
+     struct timeval tv;
++    if (!ctx) {
++        funlogline();
++    }
+     gettimeofday(&tv, NULL);
++    if (tv.tv_sec > INT64_MAX / 1000000) {
++        funlogline();
++    }
+     ctx->random_state = ((int64_t)tv.tv_sec * 1000000) + tv.tv_usec;
+     /* the state must be non zero */
+     if (ctx->random_state == 0)

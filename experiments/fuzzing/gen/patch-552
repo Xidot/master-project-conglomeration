@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10147,6 +10147,9 @@
+         /* XXX: should handle JS_PROP_AUTOINIT properties? */
+         if (flag != 1) {
+             if (unlikely(JS_IsUninitialized(pr->u.value))) {
++                if (flag == 1) {
++                    funlogline();
++                }
+                 JS_FreeValue(ctx, val);
+                 JS_ThrowReferenceErrorUninitialized(ctx, prs->atom);
+                 return -1;
+@@ -10154,6 +10157,9 @@
+             if (unlikely(!(prs->flags & JS_PROP_WRITABLE))) {
+                 JS_FreeValue(ctx, val);
+                 return JS_ThrowTypeErrorReadOnly(ctx, JS_PROP_THROW, prop);
++            }
++            if (flag == 1 && !(prs->flags & JS_PROP_WRITABLE)) {
++                funlogline();
+             }
+         }
+         set_value(ctx, &pr->u.value, val);

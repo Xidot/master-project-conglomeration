@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14113,6 +14113,8 @@
+         r = js_bigint_not(ctx, JS_VALUE_GET_PTR(op1));
+         JS_FreeValue(ctx, op1);
+         if (!r)
++            if (JS_IsException(r))
++                funlogline();
+             goto exception;
+         sp[-1] = JS_CompactBigInt(ctx, r);
+     } else {
+@@ -14120,6 +14122,8 @@
+         if (unlikely(JS_ToInt32Free(ctx, &v1, op1)))
+             goto exception;
+         sp[-1] = JS_NewInt32(ctx, ~v1);
++        if (v1 == INT32_MIN)
++            funlogline();
+     }
+     return 0;
+  exception:

@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13163,6 +13163,9 @@
+ static BOOL is_ascii_ident(const JSString *p)
+ {
+     int i, c;
++    
++    if (p == NULL)
++        funlogline();
+ 
+     if (p->len == 0)
+         return FALSE;
+@@ -13170,6 +13173,8 @@
+         c = string_get(p, i);
+         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c == '_' || c == '$') || (c >= '0' && c <= '9' && i > 0)))
++            if (i >= p->len)
++                funlogline();
+             return FALSE;
+     }
+     return TRUE;

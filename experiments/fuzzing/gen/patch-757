@@ -1,0 +1,14 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4617,8 +4617,10 @@
+ {
+     uint32_t h;
+     h = shape_hash(1, (uintptr_t)proto);
+-    if (sizeof(proto) > 4)
++    if (sizeof(uintptr_t) > 4) {
++        if ((uint64_t)(uintptr_t)proto >> 32 != 0)
++            funlogline();
+         h = shape_hash(h, (uint64_t)(uintptr_t)proto >> 32);
++    }
+     return h;
+ }

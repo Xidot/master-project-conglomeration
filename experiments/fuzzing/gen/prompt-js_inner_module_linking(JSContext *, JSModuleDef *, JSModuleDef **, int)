@@ -1,0 +1,635 @@
+Target function: "js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 796
+typedef struct JSImportEntry {
+    int var_idx; /* closure variable index */
+    BOOL is_star; /* import_name = '*' is a valid import name, so need a flag */
+    JSAtom import_name;
+    int req_module_idx; /* in req_module_entries */
+} JSImportEntry
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 798
+enum {
+    JS_MODULE_STATUS_UNLINKED,
+    JS_MODULE_STATUS_LINKING,
+    JS_MODULE_STATUS_LINKED,
+    JS_MODULE_STATUS_EVALUATING,
+    JS_MODULE_STATUS_EVALUATING_ASYNC,
+    JS_MODULE_STATUS_EVALUATED,
+}
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 28714
+typedef enum JSResolveResultEnum {
+    JS_RESOLVE_RES_EXCEPTION = -1, /* memory alloc error */
+    JS_RESOLVE_RES_FOUND = 0,
+    JS_RESOLVE_RES_NOT_FOUND,
+    JS_RESOLVE_RES_CIRCULAR,
+    JS_RESOLVE_RES_AMBIGUOUS,
+} JSResolveResultEnum
+
+/* Prepare a module to be executed by resolving all the imported
+   variables. */
+/// Line number here: 29251
+static int js_inner_module_linking(JSContext *ctx, JSModuleDef *m,
+                                   JSModuleDef **pstack_top, int index)
+{
+    int i;
+    JSImportEntry *mi;
+    JSModuleDef *m1;
+    JSVarRef **var_refs, *var_ref;
+    JSObject *p;
+    BOOL is_c_module;
+    JSValue ret_val;
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        return -1;
+    }
+
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        printf("js_inner_module_linking '%s':\n", JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+    }
+#endif
+
+    if (m->status == JS_MODULE_STATUS_LINKING ||
+        m->status == JS_MODULE_STATUS_LINKED ||
+        m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+        m->status == JS_MODULE_STATUS_EVALUATED)
+        return index;
+
+    assert(m->status == JS_MODULE_STATUS_UNLINKED);
+    m->status = JS_MODULE_STATUS_LINKING;
+    m->dfs_index = index;
+    m->dfs_ancestor_index = index;
+    index++;
+    /* push 'm' on stack */
+    m->stack_prev = *pstack_top;
+    *pstack_top = m;
+
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        m1 = rme->module;
+        index = js_inner_module_linking(ctx, m1, pstack_top, index);
+        if (index < 0)
+            goto fail;
+        assert(m1->status == JS_MODULE_STATUS_LINKING ||
+               m1->status == JS_MODULE_STATUS_LINKED ||
+               m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+               m1->status == JS_MODULE_STATUS_EVALUATED);
+        if (m1->status == JS_MODULE_STATUS_LINKING) {
+            m->dfs_ancestor_index = min_int(m->dfs_ancestor_index,
+                                            m1->dfs_ancestor_index);
+        }
+    }
+
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        printf("instantiating module '%s':\n", JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+    }
+#endif
+    /* check the indirect exports */
+    for(i = 0; i < m->export_entries_count; i++) {
+        JSExportEntry *me = &m->export_entries[i];
+        if (me->export_type == JS_EXPORT_TYPE_INDIRECT &&
+            me->local_name != JS_ATOM__star_) {
+            JSResolveResultEnum ret;
+            JSExportEntry *res_me;
+            JSModuleDef *res_m, *m1;
+            m1 = m->req_module_entries[me->u.req_module_idx].module;
+            ret = js_resolve_export(ctx, &res_m, &res_me, m1, me->local_name);
+            if (ret != JS_RESOLVE_RES_FOUND) {
+                js_resolve_export_throw_error(ctx, ret, m, me->export_name);
+                goto fail;
+            }
+        }
+    }
+
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        printf("exported bindings:\n");
+        for(i = 0; i < m->export_entries_count; i++) {
+            JSExportEntry *me = &m->export_entries[i];
+            printf(" name="); print_atom(ctx, me->export_name);
+            printf(" local="); print_atom(ctx, me->local_name);
+            printf(" type=%d idx=%d\n", me->export_type, me->u.local.var_idx);
+        }
+    }
+#endif
+
+    is_c_module = (m->init_func != NULL);
+
+    if (!is_c_module) {
+        p = JS_VALUE_GET_OBJ(m->func_obj);
+        var_refs = p->u.func.var_refs;
+
+        for(i = 0; i < m->import_entries_count; i++) {
+            mi = &m->import_entries[i];
+#ifdef DUMP_MODULE_RESOLVE
+            printf("import var_idx=%d name=", mi->var_idx);
+            print_atom(ctx, mi->import_name);
+            printf(": ");
+#endif
+            m1 = m->req_module_entries[mi->req_module_idx].module;
+            if (mi->is_star) {
+                JSValue val;
+                /* name space import */
+                val = JS_GetModuleNamespace(ctx, m1);
+                if (JS_IsException(val))
+                    goto fail;
+                set_value(ctx, &var_refs[mi->var_idx]->value, val);
+#ifdef DUMP_MODULE_RESOLVE
+                printf("namespace\n");
+#endif
+            } else {
+                JSResolveResultEnum ret;
+                JSExportEntry *res_me;
+                JSModuleDef *res_m;
+                JSObject *p1;
+
+                ret = js_resolve_export(ctx, &res_m,
+                                        &res_me, m1, mi->import_name);
+                if (ret != JS_RESOLVE_RES_FOUND) {
+                    js_resolve_export_throw_error(ctx, ret, m1, mi->import_name);
+                    goto fail;
+                }
+                if (res_me->local_name == JS_ATOM__star_) {
+                    JSValue val;
+                    JSModuleDef *m2;
+                    /* name space import from */
+                    m2 = res_m->req_module_entries[res_me->u.req_module_idx].module;
+                    val = JS_GetModuleNamespace(ctx, m2);
+                    if (JS_IsException(val))
+                        goto fail;
+                    var_ref = js_create_module_var(ctx, TRUE);
+                    if (!var_ref) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                    set_value(ctx, &var_ref->value, val);
+                    var_refs[mi->var_idx] = var_ref;
+#ifdef DUMP_MODULE_RESOLVE
+                    printf("namespace from\n");
+#endif
+                } else {
+                    var_ref = res_me->u.local.var_ref;
+                    if (!var_ref) {
+                        p1 = JS_VALUE_GET_OBJ(res_m->func_obj);
+                        var_ref = p1->u.func.var_refs[res_me->u.local.var_idx];
+                    }
+                    var_ref->header.ref_count++;
+                    var_refs[mi->var_idx] = var_ref;
+#ifdef DUMP_MODULE_RESOLVE
+                    printf("local export (var_ref=%p)\n", var_ref);
+#endif
+                }
+            }
+        }
+
+        /* keep the exported variables in the module export entries (they
+           are used when the eval function is deleted and cannot be
+           initialized before in case imports are exported) */
+        for(i = 0; i < m->export_entries_count; i++) {
+            JSExportEntry *me = &m->export_entries[i];
+            if (me->export_type == JS_EXPORT_TYPE_LOCAL) {
+                var_ref = var_refs[me->u.local.var_idx];
+                var_ref->header.ref_count++;
+                me->u.local.var_ref = var_ref;
+            }
+        }
+
+        /* initialize the global variables */
+        ret_val = JS_Call(ctx, m->func_obj, JS_TRUE, 0, NULL);
+        if (JS_IsException(ret_val))
+            goto fail;
+        JS_FreeValue(ctx, ret_val);
+    }
+
+    assert(m->dfs_ancestor_index <= m->dfs_index);
+    if (m->dfs_index == m->dfs_ancestor_index) {
+        for(;;) {
+            /* pop m1 from stack */
+            m1 = *pstack_top;
+            *pstack_top = m1->stack_prev;
+            m1->status = JS_MODULE_STATUS_LINKED;
+            if (m1 == m)
+                break;
+        }
+    }
+
+#ifdef DUMP_MODULE_RESOLVE
+    printf("js_inner_module_linking done\n");
+#endif
+    return index;
+ fail:
+    return -1;
+}
+
+/// Line number here: 1568
+static inline BOOL js_check_stack_overflow(JSRuntime *rt, size_t alloca_size)
+{
+    uintptr_t sp;
+    sp = js_get_stack_pointer() - alloca_size;
+    return unlikely(sp < rt->stack_limit);
+}
+
+/// Line number here: 7156
+static JSValue JS_ThrowStackOverflow(JSContext *ctx)
+{
+    return JS_ThrowInternalError(ctx, "stack overflow");
+}
+
+/// Line number here: 28679
+typedef struct JSResolveState {
+    JSResolveEntry *array;
+    int size;
+    int count;
+} JSResolveState
+
+/* If the return value is JS_RESOLVE_RES_FOUND, return the module
+  (*pmodule) and the corresponding local export entry
+  (*pme). Otherwise return (NULL, NULL) */
+/// Line number here: 28793
+static JSResolveResultEnum js_resolve_export(JSContext *ctx,
+                                             JSModuleDef **pmodule,
+                                             JSExportEntry **pme,
+                                             JSModuleDef *m,
+                                             JSAtom export_name)
+{
+    JSResolveState ss, *s = &ss;
+    int i;
+    JSResolveResultEnum ret;
+
+    s->array = NULL;
+    s->size = 0;
+    s->count = 0;
+
+    ret = js_resolve_export1(ctx, pmodule, pme, m, export_name, s);
+
+    for(i = 0; i < s->count; i++)
+        JS_FreeAtom(ctx, s->array[i].name);
+    js_free(ctx, s->array);
+
+    return ret;
+}
+
+/// Line number here: 28816
+static void js_resolve_export_throw_error(JSContext *ctx,
+                                          JSResolveResultEnum res,
+                                          JSModuleDef *m, JSAtom export_name)
+{
+    char buf1[ATOM_GET_STR_BUF_SIZE];
+    char buf2[ATOM_GET_STR_BUF_SIZE];
+    switch(res) {
+    case JS_RESOLVE_RES_EXCEPTION:
+        break;
+    default:
+    case JS_RESOLVE_RES_NOT_FOUND:
+        JS_ThrowSyntaxError(ctx, "Could not find export '%s' in module '%s'",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    case JS_RESOLVE_RES_CIRCULAR:
+        JS_ThrowSyntaxError(ctx, "circular reference when looking for export '%s' in module '%s'",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    case JS_RESOLVE_RES_AMBIGUOUS:
+        JS_ThrowSyntaxError(ctx, "export '%s' in module '%s' is ambiguous",
+                            JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                            JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+        break;
+    }
+}
+
+/// Line number here: 29095
+JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m)
+{
+    if (JS_IsUndefined(m->module_ns)) {
+        JSValue val;
+        val = js_build_module_ns(ctx, m);
+        if (JS_IsException(val))
+            return JS_EXCEPTION;
+        m->module_ns = val;
+    }
+    return JS_DupValue(ctx, m->module_ns);
+}
+
+/* set the new value and free the old value after (freeing the value
+   can reallocate the object data) */
+/// Line number here: 2159
+static inline void set_value(JSContext *ctx, JSValue *pval, JSValue new_val)
+{
+    JSValue old_val;
+    old_val = *pval;
+    *pval = new_val;
+    JS_FreeValue(ctx, old_val);
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/// Line number here: 29139
+static JSVarRef *js_create_module_var(JSContext *ctx, BOOL is_lexical)
+{
+    JSVarRef *var_ref;
+    var_ref = js_malloc(ctx, sizeof(JSVarRef));
+    if (!var_ref)
+        return NULL;
+    var_ref->header.ref_count = 1;
+    if (is_lexical)
+        var_ref->value = JS_UNINITIALIZED;
+    else
+        var_ref->value = JS_UNDEFINED;
+    var_ref->pvalue = &var_ref->value;
+    var_ref->is_detached = TRUE;
+    add_gc_object(ctx->rt, &var_ref->header, JS_GC_OBJ_TYPE_VAR_REF);
+    return var_ref;
+}
+
+/// Line number here: 19378
+JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                int argc, JSValueConst *argv)
+{
+    return JS_CallInternal(ctx, func_obj, this_obj, JS_UNDEFINED,
+                           argc, (JSValue *)argv, JS_CALL_FLAG_COPY_ARGV);
+}
+
+/* Prepare a module to be executed by resolving all the imported
+   variables. */
+/// Line number here: 29450
+static int js_link_module(JSContext *ctx, JSModuleDef *m)
+{
+    JSModuleDef *stack_top, *m1;
+
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        printf("js_link_module '%s':\n", JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+    }
+#endif
+    assert(m->status == JS_MODULE_STATUS_UNLINKED ||
+           m->status == JS_MODULE_STATUS_LINKED ||
+           m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+           m->status == JS_MODULE_STATUS_EVALUATED);
+    stack_top = NULL;
+    if (js_inner_module_linking(ctx, m, &stack_top, 0) < 0) {
+        while (stack_top != NULL) {
+            m1 = stack_top;
+            assert(m1->status == JS_MODULE_STATUS_LINKING);
+            m1->status = JS_MODULE_STATUS_UNLINKED;
+            stack_top = m1->stack_prev;
+        }
+        return -1;
+    }
+    assert(stack_top == NULL);
+    assert(m->status == JS_MODULE_STATUS_LINKED ||
+           m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+           m->status == JS_MODULE_STATUS_EVALUATED);
+    return 0;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 87
+static inline int min_int(int a, int b)
+{
+    if (a < b)
+        return a;
+    else
+        return b;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "JS_ThrowStackOverflow(JSContext *)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "min_int(int, int)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "JS_GetModuleNamespace(JSContext *, JSModuleDef *)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "JS_IsException(JSValue)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "js_create_module_var(JSContext *, BOOL)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_check_stack_overflow(JSRuntime *, size_t)";
+"js_check_stack_overflow(JSRuntime *, size_t)" -> "js_get_stack_pointer()";
+"js_check_stack_overflow(JSRuntime *, size_t)" -> "__builtin_expect(long, long)";
+"JS_ThrowStackOverflow(JSContext *)";
+"JS_ThrowStackOverflow(JSContext *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)";
+"js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)" -> "js_resolve_export1(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom, JSResolveState *)";
+"js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)" -> "js_free(JSContext *, void *)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_GetModuleNamespace(JSContext *, JSModuleDef *)";
+"JS_GetModuleNamespace(JSContext *, JSModuleDef *)" -> "JS_IsUndefined(JSValue)";
+"JS_GetModuleNamespace(JSContext *, JSModuleDef *)" -> "js_build_module_ns(JSContext *, JSModuleDef *)";
+"JS_GetModuleNamespace(JSContext *, JSModuleDef *)" -> "JS_IsException(JSValue)";
+"JS_GetModuleNamespace(JSContext *, JSModuleDef *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"set_value(JSContext *, JSValue *, JSValue)";
+"set_value(JSContext *, JSValue *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_create_module_var(JSContext *, BOOL)";
+"js_create_module_var(JSContext *, BOOL)" -> "js_malloc(JSContext *, size_t)";
+"js_create_module_var(JSContext *, BOOL)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_CallInternal(JSContext *, JSValue, JSValue, JSValue, int, JSValue *, int)";
+"js_link_module(JSContext *, JSModuleDef *)";
+"js_link_module(JSContext *, JSModuleDef *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_link_module(JSContext *, JSModuleDef *)" -> "js_inner_module_linking(JSContext *, JSModuleDef *, JSModuleDef **, int)";
+}

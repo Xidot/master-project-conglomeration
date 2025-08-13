@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48440,6 +48440,9 @@
+ static uint32_t map_hash_pointer(uintptr_t a, int hash_bits)
+ {
+ #ifdef JS_PTR64
++    if ((a >> 32) == 0 && hash_bits > 32) {
++        funlogline();
++    }
+     return map_hash64(a, hash_bits);
+ #else
+     return map_hash32(a, hash_bits);

@@ -1,0 +1,27 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-days_from_year(int64_t)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the `days_from_year` function:
+
+:days_from_year(int64_t):50949
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50948,6 +50948,9 @@
+ 
+ static int64_t days_from_year(int64_t y) {
+     return 365 * (y - 1970) + floor_div(y - 1969, 4) -
++    if (y < -271821 || y > 275760) {
++        funlogline();
++    }
+         floor_div(y - 1901, 100) + floor_div(y - 1601, 400);
+ }
+```
+
+The logical bug here is that the function doesn't check for year bounds that could cause overflow in the calculations. The `set_date_fields` function checks for year bounds (-271821 to 275760) when processing dates, but `days_from_year` doesn't have similar protection. This could lead to incorrect day calculations for extreme year values.
+
+The inserted check matches the bounds checking done in `set_date_fields` to maintain consistency in the date handling logic.

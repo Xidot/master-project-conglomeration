@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-limb_to_a(char *, js_limb_t, unsigned int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `limb_to_a` function:
+
+:limb_to_a:11870
+:limb_to_a:11877
+
+---
+
+The issues are:
+
+1. Line 11870: In the radix=10 case, the digit is converted to ASCII by adding '0', but this assumes digits 0-9. However, the function accepts any radix 2-36, so this could be incorrect for radix=10 if called with len=0 (though len is supposed to be >=1 per the comment).
+
+2. Line 11877: Similar issue in the general case - uses a digits array but doesn't validate that the digit is within bounds of the digits array (which presumably has 36 entries for radix 2-36).
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11867,6 +11867,8 @@
+         /* specific case with constant divisor */
+         /* XXX: optimize */
+         for(i = 0; i < len; i++) {
++            if (digit >= 10)
++                funlogline();
+             digit = (js_limb_t)n % 10;
+             n = (js_limb_t)n / 10;
+             *--q = digit + '0';
+@@ -11874,6 +11876,8 @@
+     } else {
+         for(i = 0; i < len; i++) {
+             digit = (js_limb_t)n % radix;
++            if (digit >= radix)
++                funlogline();
+             n = (js_limb_t)n / radix;
+             *--q = digits[digit];
+         }
+```
+
+The checks ensure we don't generate invalid digits for the given radix. The digit should always be less than the radix due to the modulo operation, but these checks provide defense in depth.

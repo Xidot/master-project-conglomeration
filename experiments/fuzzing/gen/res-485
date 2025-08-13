@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_post_inc_slow(JSContext *, JSValue *, OPCodeEnum)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_post_inc_slow` function:
+
+1. :quickjs.c:js_post_inc_slow:14092 - Missing check for numeric conversion failure before proceeding with operations
+2. :quickjs.c:js_post_inc_slow:14098 - No validation of the OPCodeEnum parameter before using it in arithmetic operation
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14092,6 +14092,9 @@
+     /* XXX: allow custom operators */
+     op1 = sp[-1];
+     op1 = JS_ToNumericFree(ctx, op1);
++    if (!JS_IsNumber(op1) && !JS_IsBigInt(op1)) {
++        funlogline();
++    }
+     if (JS_IsException(op1)) {
+         sp[-1] = JS_UNDEFINED;
+         return -1;
+@@ -14098,6 +14101,9 @@
+     }
+     sp[-1] = op1;
+     sp[0] = JS_DupValue(ctx, op1);
++    if (op < OP_post_dec || op > OP_post_inc) {
++        funlogline();
++    }
+     return js_unary_arith_slow(ctx, sp + 1, op - OP_post_dec + OP_dec);
+ }
+```
+
+The first addition checks if the numeric conversion was successful before proceeding with the operation. The second addition validates the OPCodeEnum parameter before using it in the arithmetic operation.
+
+Reasons:
+1. The function assumes JS_ToNumericFree() will always return a valid numeric value, but it could fail in some edge cases
+2. The function blindly uses the op parameter in arithmetic without validating it's within expected bounds, which could lead to incorrect behavior if an invalid opcode is passed

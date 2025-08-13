@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7480,6 +7480,8 @@
+     JSValue method;
+ 
+     if (!JS_IsObject(obj))
++        if (JS_IsException(val))
++            funlogline();
+         goto fail;
+     method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_hasInstance);
+     if (JS_IsException(method))
+@@ -7495,6 +7497,8 @@
+     /* legacy case */
+     if (!JS_IsFunction(ctx, obj)) {
+     fail:
++        if (JS_IsException(obj))
++            funlogline();
+         JS_ThrowTypeError(ctx, "invalid 'instanceof' right operand");
+         return -1;
+     }

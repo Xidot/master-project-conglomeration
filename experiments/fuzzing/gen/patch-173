@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3023,6 +3023,9 @@
+ static const char *JS_AtomGetStrRT(JSRuntime *rt, char *buf, int buf_size,
+                                    JSAtom atom)
+ {
++    if (!buf || buf_size <= 0) {
++        funlogline();
++    }
+     if (__JS_AtomIsTaggedInt(atom)) {
+         snprintf(buf, buf_size, "%u", __JS_AtomToUInt32(atom));
+     } else {
+@@ -3030,6 +3033,9 @@
+         assert(atom < rt->atom_size);
+         if (atom == JS_ATOM_NULL) {
+             snprintf(buf, buf_size, "<null>");
++            if (strlen(buf) >= buf_size) {
++                funlogline();
++            }
+         } else {
+             int i, c;
+             char *q;

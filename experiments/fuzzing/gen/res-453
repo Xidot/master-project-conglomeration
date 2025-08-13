@@ -1,0 +1,36 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_new_string16_len(JSContext *, const uint16_t *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_new_string16_len`:
+
+:js_new_string16_len:3422
+:js_new_string16_len:3425
+
+---
+
+The logical bugs identified are:
+
+1. Line 3422: The function doesn't validate the input `len` parameter. A negative length could cause issues with memory allocation and copying.
+
+2. Line 3425: The memcpy operation assumes the buffer is large enough to hold `len * 2` bytes, but there's no validation of the input buffer size.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3419,6 +3419,9 @@
+ static JSValue js_new_string16_len(JSContext *ctx, const uint16_t *buf, int len)
+ {
+     JSString *str;
++    if (len < 0)
++        funlogline();
+     str = js_alloc_string(ctx, len, 1);
+     if (!str)
+         return JS_EXCEPTION;
++    funlogline(); // No way to validate buf size, so log before memcpy
+     memcpy(str->u.str16, buf, len * 2);
+     return JS_MKPTR(JS_TAG_STRING, str);
+ }
+```

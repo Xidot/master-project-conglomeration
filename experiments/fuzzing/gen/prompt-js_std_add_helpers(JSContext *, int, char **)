@@ -1,0 +1,284 @@
+Target function: "js_std_add_helpers(JSContext *, int, char **)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 350
+typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+/// Line number here: 1045
+static inline JSValue JS_NewCFunction(JSContext *ctx, JSCFunction *func, const char *name,
+                                      int length)
+{
+    return JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_generic, 0);
+}
+
+/// Line number here: 739
+static inline JSValue JS_NewString(JSContext *ctx, const char *str)
+{
+    return JS_NewStringLen(ctx, str, strlen(str));
+}
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 4046
+void js_std_add_helpers(JSContext *ctx, int argc, char **argv)
+{
+    JSValue global_obj, console, args, performance;
+    int i;
+
+    /* XXX: should these global definitions be enumerable? */
+    global_obj = JS_GetGlobalObject(ctx);
+
+    console = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, console, "log",
+                      JS_NewCFunction(ctx, js_console_log, "log", 1));
+    JS_SetPropertyStr(ctx, global_obj, "console", console);
+
+    performance = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, performance, "now",
+                      JS_NewCFunction(ctx, js_os_now, "now", 0));
+    JS_SetPropertyStr(ctx, global_obj, "performance", performance);
+
+    /* same methods as the mozilla JS shell */
+    if (argc >= 0) {
+        args = JS_NewArray(ctx);
+        for(i = 0; i < argc; i++) {
+            JS_SetPropertyUint32(ctx, args, i, JS_NewString(ctx, argv[i]));
+        }
+        JS_SetPropertyStr(ctx, global_obj, "scriptArgs", args);
+    }
+
+    JS_SetPropertyStr(ctx, global_obj, "print",
+                      JS_NewCFunction(ctx, js_print, "print", 1));
+    JS_SetPropertyStr(ctx, global_obj, "__loadScript",
+                      JS_NewCFunction(ctx, js_loadScript, "__loadScript", 1));
+
+    JS_FreeValue(ctx, global_obj);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 6726
+JSValue JS_GetGlobalObject(JSContext *ctx)
+{
+    return JS_DupValue(ctx, ctx->global_obj);
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 5250
+JSValue JS_NewObject(JSContext *ctx)
+{
+    /* inline JS_NewObjectClass(ctx, JS_CLASS_OBJECT); */
+    return JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT], JS_CLASS_OBJECT);
+}
+
+/// Line number here: 9310
+int JS_SetPropertyStr(JSContext *ctx, JSValueConst this_obj,
+                      const char *prop, JSValue val)
+{
+    JSAtom atom;
+    int ret;
+    atom = JS_NewAtom(ctx, prop);
+    if (atom == JS_ATOM_NULL) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    ret = JS_SetPropertyInternal(ctx, this_obj, atom, val, this_obj, JS_PROP_THROW);
+    JS_FreeAtom(ctx, atom);
+    return ret;
+}
+
+/// Line number here: 5244
+JSValue JS_NewArray(JSContext *ctx)
+{
+    return JS_NewObjectFromShape(ctx, js_dup_shape(ctx->array_shape),
+                                 JS_CLASS_ARRAY);
+}
+
+/// Line number here: 9282
+int JS_SetPropertyUint32(JSContext *ctx, JSValueConst this_obj,
+                         uint32_t idx, JSValue val)
+{
+    return JS_SetPropertyValue(ctx, this_obj, JS_NewUint32(ctx, idx), val,
+                               JS_PROP_THROW);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_add_helpers(JSContext *, int, char **)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_GetGlobalObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewArray(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewString(JSContext *, const char *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetGlobalObject(JSContext *)";
+"JS_GetGlobalObject(JSContext *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_NewObject(JSContext *)";
+"JS_NewObject(JSContext *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)";
+"JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)" -> "JS_SetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, JSValue, int)";
+"JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewArray(JSContext *)";
+"JS_NewArray(JSContext *)" -> "JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+"JS_NewArray(JSContext *)" -> "js_dup_shape(JSShape *)";
+"JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)";
+"JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)" -> "JS_SetPropertyValue(JSContext *, JSValue, JSValue, JSValue, int)";
+"JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"JS_NewString(JSContext *, const char *)";
+"JS_NewString(JSContext *, const char *)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewString(JSContext *, const char *)" -> "strlen(const char *)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+}

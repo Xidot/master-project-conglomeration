@@ -1,0 +1,57 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52315,6 +52315,7 @@
+     int i;
+     JSValueConst obj, number_obj;
+     JSValue obj1;
++    if (!ctx) funlogline();
+ 
+     ctx->throw_type_error = JS_NewCFunction(ctx, js_throw_type_error, NULL, 0);
+ 
+@@ -52336,6 +52337,7 @@
+     /* Object */
+     obj = JS_NewGlobalCConstructor(ctx, "Object", js_object_constructor, 1,
+                                    ctx->class_proto[JS_CLASS_OBJECT]);
++    if (!obj.u.ptr) funlogline();
+     JS_SetPropertyFunctionList(ctx, obj, js_object_funcs, countof(js_object_funcs));
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                js_object_proto_funcs, countof(js_object_proto_funcs));
+@@ -52353,6 +52355,7 @@
+     /* Error */
+     obj1 = JS_NewCFunctionMagic(ctx, js_error_constructor,
+                                 "Error", 1, JS_CFUNC_constructor_or_func_magic, -1);
++    if (JS_IsException(obj1)) funlogline();
+     JS_NewGlobalCConstructor2(ctx, obj1,
+                               "Error", ctx->class_proto[JS_CLASS_ERROR]);
+     JS_SetPropertyFunctionList(ctx, obj1, js_error_funcs, countof(js_error_funcs));
+@@ -52400,6 +52403,7 @@
+         }
+         JS_DefinePropertyValue(ctx, ctx->class_proto[JS_CLASS_ARRAY],
+                                JS_ATOM_Symbol_unscopables, obj1,
++                               if (JS_IsException(obj1)) funlogline();
+                                JS_PROP_CONFIGURABLE);
+     }
+ 
+@@ -52435,6 +52439,7 @@
+     /* Boolean */
+     ctx->class_proto[JS_CLASS_BOOLEAN] = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                                                 JS_CLASS_BOOLEAN);
++    if (!ctx->class_proto[JS_CLASS_BOOLEAN].u.ptr) funlogline();
+     JS_SetObjectData(ctx, ctx->class_proto[JS_CLASS_BOOLEAN], JS_NewBool(ctx, FALSE));
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_BOOLEAN], js_boolean_proto_funcs,
+                                countof(js_boolean_proto_funcs));
+@@ -52459,6 +52464,7 @@
+     /* ES6 Symbol */
+     ctx->class_proto[JS_CLASS_SYMBOL] = JS_NewObject(ctx);
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_SYMBOL], js_symbol_proto_funcs,
++                               if (!ctx->class_proto[JS_CLASS_SYMBOL].u.ptr) funlogline();
+                                countof(js_symbol_proto_funcs));
+     obj = JS_NewGlobalCConstructor(ctx, "Symbol", js_symbol_constructor, 0,
+                                    ctx->class_proto[JS_CLASS_SYMBOL]);
+@@ -52497,6 +52503,7 @@
+     /* global properties */
+     ctx->eval_obj = JS_NewCFunction(ctx, js_global_eval, "eval", 1);
+     JS_DefinePropertyValue(ctx, ctx->global_obj, JS_ATOM_eval,
++                           if (!ctx->eval_obj.u.ptr) funlogline();
+                            JS_DupValue(ctx, ctx->eval_obj),
+                            JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);

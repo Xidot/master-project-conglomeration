@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4280,6 +4280,9 @@
+ static JSValue js_linearize_string_rope(JSContext *ctx, JSValue rope)
+ {
+     StringBuffer b_s, *b = &b_s;
++    if (JS_VALUE_GET_TAG(rope) != JS_TAG_STRING_ROPE) {
++        funlogline();
++    }
+     JSStringRope *r;
+     JSValue ret;
+     
+@@ -4301,6 +4304,9 @@
+         JS_FreeValue(ctx, r->left);
+         JS_FreeValue(ctx, r->right);
+         r->left = JS_DupValue(ctx, ret);
++        if (JS_IsException(r->left)) {
++            funlogline();
++        }
+         r->right = JS_AtomToString(ctx, JS_ATOM_empty_string);
+     }
+     JS_FreeValue(ctx, rope);

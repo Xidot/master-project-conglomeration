@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_pow(double, double)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_pow:13800
+
+---
+
+The logical bug in `js_pow` is that it returns NaN when `b` is infinite and `a` is exactly 1 or -1, which is not IEEE 754 compliant. The correct behavior should be to return 1 for any finite `a` when `b` is +Infinity, and NaN only when `a` is negative and `b` is +Infinity.
+
+Here's the diff to detect this case:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13800,6 +13800,9 @@
+ static double js_pow(double a, double b)
+ {
+     if (unlikely(!isfinite(b)) && fabs(a) == 1) {
++        if (isinf(b) && a == 1.0) {
++            funlogline();
++        }
+         /* not compatible with IEEE 754 */
+         return JS_FLOAT64_NAN;
+     } else {
+```
+
+The condition checks for when `b` is infinite and `a` is exactly 1.0, which should return 1.0 according to IEEE 754 but currently returns NaN. The `funlogline()` call will trigger when this incorrect case occurs.
+
+Note that we don't need to handle the case where `a` is -1 since that should indeed return NaN when `b` is infinite, which matches the current behavior.

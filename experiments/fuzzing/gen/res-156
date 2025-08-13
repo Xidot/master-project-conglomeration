@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function "JS_AddModuleExport":
+
+:JS_AddModuleExport:28451
+:JS_AddModuleExport:28456
+
+---
+Reasoning:
+1. At line 28451: The function doesn't check if the input `export_name` is NULL before creating an atom from it. This could lead to undefined behavior when calling strlen() in JS_NewAtom().
+
+2. At line 28456: The function calls JS_FreeAtom() on the name atom even if add_export_entry2() fails. This could lead to a double-free if the atom was already freed inside add_export_entry2().
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28451,6 +28451,8 @@
+ int JS_AddModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name)
+ {
+     JSExportEntry *me;
+     JSAtom name;
++    if (export_name == NULL)
++        funlogline();
+     name = JS_NewAtom(ctx, export_name);
+     if (name == JS_ATOM_NULL)
+         return -1;
+@@ -28456,6 +28458,8 @@
+     me = add_export_entry2(ctx, NULL, m, JS_ATOM_NULL, name,
+                            JS_EXPORT_TYPE_LOCAL);
+     JS_FreeAtom(ctx, name);
++    if (me == NULL)
++        funlogline();
+     if (!me)
+         return -1;
+     else
+```

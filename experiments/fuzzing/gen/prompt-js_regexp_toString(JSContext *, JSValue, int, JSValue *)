@@ -1,0 +1,252 @@
+Target function: "js_regexp_toString(JSContext *, JSValue, int, JSValue *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 663
+static inline JS_BOOL JS_IsObject(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_OBJECT;
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 774
+static js_force_inline JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj,
+                                              JSAtom prop)
+{
+    return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, 0);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 45068
+static JSValue js_regexp_toString(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+{
+    JSValue pattern, flags;
+    StringBuffer b_s, *b = &b_s;
+
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    string_buffer_init(ctx, b, 0);
+    string_buffer_putc8(b, '/');
+    pattern = JS_GetProperty(ctx, this_val, JS_ATOM_source);
+    if (string_buffer_concat_value_free(b, pattern))
+        goto fail;
+    string_buffer_putc8(b, '/');
+    flags = JS_GetProperty(ctx, this_val, JS_ATOM_flags);
+    if (string_buffer_concat_value_free(b, flags))
+        goto fail;
+    return string_buffer_end(b);
+
+fail:
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 7161
+static JSValue JS_ThrowTypeErrorNotAnObject(JSContext *ctx)
+{
+    return JS_ThrowTypeError(ctx, "not an object");
+}
+
+/// Line number here: 3505
+static inline int string_buffer_init(JSContext *ctx, StringBuffer *s, int size)
+{
+    return string_buffer_init2(ctx, s, size, 0);
+}
+
+/* 0 <= c <= 0xff */
+/// Line number here: 3593
+static int string_buffer_putc8(StringBuffer *s, uint32_t c)
+{
+    if (unlikely(s->len >= s->size)) {
+        if (string_buffer_realloc(s, s->len + 1, c))
+            return -1;
+    }
+    if (s->is_wide_char) {
+        s->str->u.str16[s->len++] = c;
+    } else {
+        s->str->u.str8[s->len++] = c;
+    }
+    return 0;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 3748
+static int string_buffer_concat_value_free(StringBuffer *s, JSValue v)
+{
+    JSString *p;
+    int res;
+
+    if (s->error_status) {
+        /* prevent exception overload */
+        JS_FreeValue(s->ctx, v);
+        return -1;
+    }
+    if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
+        v = JS_ToStringFree(s->ctx, v);
+        if (JS_IsException(v))
+            return string_buffer_set_error(s);
+    }
+    p = JS_VALUE_GET_STRING(v);
+    res = string_buffer_concat(s, p, 0, p->len);
+    JS_FreeValue(s->ctx, v);
+    return res;
+}
+
+/// Line number here: 3783
+static JSValue string_buffer_end(StringBuffer *s)
+{
+    JSString *str;
+    str = s->str;
+    if (s->error_status)
+        return JS_EXCEPTION;
+    if (s->len == 0) {
+        js_free(s->ctx, str);
+        s->str = NULL;
+        return JS_AtomToString(s->ctx, JS_ATOM_empty_string);
+    }
+    if (s->len < s->size) {
+        /* smaller size so js_realloc should not fail, but OK if it does */
+        /* XXX: should add some slack to avoid unnecessary calls */
+        /* XXX: might need to use malloc+free to ensure smaller size */
+        str = js_realloc_rt(s->ctx->rt, str, sizeof(JSString) +
+                            (s->len << s->is_wide_char) + 1 - s->is_wide_char);
+        if (str == NULL)
+            str = s->str;
+        s->str = str;
+    }
+    if (!s->is_wide_char)
+        str->u.str8[s->len] = 0;
+#ifdef DUMP_LEAKS
+    list_add_tail(&str->link, &s->ctx->rt->string_list);
+#endif
+    str->is_wide_char = s->is_wide_char;
+    str->len = s->len;
+    s->str = NULL;
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3510
+static void string_buffer_free(StringBuffer *s)
+{
+    js_free(s->ctx, s->str);
+    s->str = NULL;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_IsObject(JSValue)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc8(StringBuffer *, uint32_t)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat_value_free(StringBuffer *, JSValue)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_regexp_toString(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_free(StringBuffer *)";
+"JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_ThrowTypeErrorNotAnObject(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"string_buffer_init(JSContext *, StringBuffer *, int)";
+"string_buffer_init(JSContext *, StringBuffer *, int)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"string_buffer_putc8(StringBuffer *, uint32_t)";
+"string_buffer_putc8(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc8(StringBuffer *, uint32_t)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)" -> "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "__builtin_expect(long, long)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_IsException(JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"string_buffer_end(StringBuffer *)";
+"string_buffer_end(StringBuffer *)" -> "js_free(JSContext *, void *)";
+"string_buffer_end(StringBuffer *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"string_buffer_end(StringBuffer *)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"string_buffer_free(StringBuffer *)";
+"string_buffer_free(StringBuffer *)" -> "js_free(JSContext *, void *)";
+}

@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:JS_AddModuleExportList:38167
+:JS_AddModuleExportList:38170
+
+----------
+
+1. Line 38167: The function doesn't check if `tab` is NULL before accessing it in the loop. This could lead to a NULL pointer dereference if `tab` is NULL while `len` > 0.
+
+2. Line 38170: The function doesn't check if `tab[i].name` is NULL before passing it to JS_AddModuleExport. This could lead to a NULL pointer dereference in JS_NewAtom.
+
+Here are the proposed changes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38167,6 +38167,9 @@
+ int JS_AddModuleExportList(JSContext *ctx, JSModuleDef *m,
+                            const JSCFunctionListEntry *tab, int len)
+ {
++    if (tab == NULL && len > 0) {
++        funlogline();
++    }
+     int i;
+     for(i = 0; i < len; i++) {
++        if (tab[i].name == NULL) funlogline();
+         if (JS_AddModuleExport(ctx, m, tab[i].name))
+             return -1;
+     }
+```
+
+The changes add checks for:
+1. NULL tab pointer when len > 0
+2. NULL name entries in the function list table
+
+Both conditions would lead to NULL pointer dereferences in the called functions.

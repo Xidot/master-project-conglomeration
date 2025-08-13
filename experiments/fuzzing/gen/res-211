@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_not(JSContext *, const JSBigInt *)
+-------------------------
+Let me analyze the `js_bigint_not` function for logical bugs.
+
+:js_bigint_not:11325
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11331,6 +11331,9 @@
+     r = js_bigint_new(ctx, a->len);
+     if (!r)
+         return NULL;
++    if (a->len == 0) {
++        funlogline();
++    }
+     for(i = 0; i < a->len; i++) {
+         r->tab[i] = ~a->tab[i];
+     }
+```
+
+The logical bug is that the function assumes `a->len` is always >= 1, but there's no check for this. While the struct comment says len >= 1, this isn't enforced in the code. If somehow a JSBigInt with len=0 was passed in, it would:
+
+1. Allocate a new bigint with len=0 (which js_bigint_new allows)
+2. Then proceed to loop from 0 to 0 (no iterations)
+3. Return an empty bigint which violates the struct's invariant
+
+The added check catches this case before the loop. While the struct comment says len >= 1, defensive programming suggests we should handle this case since there's no enforcement of the invariant.
+
+Note: The bug would only trigger if some other part of the code created an invalid JSBigInt with len=0, which should never happen according to the struct definition, but since we can't guarantee all code paths enforce this, the check is warranted.

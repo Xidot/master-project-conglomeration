@@ -1,0 +1,62 @@
+Target function: "js_get_stack_pointer()"
+
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Note: OS and CPU dependent */
+/// Line number here: 1563
+static inline uintptr_t js_get_stack_pointer(void)
+{
+    return (uintptr_t)__builtin_frame_address(0);
+}
+
+/// Line number here: 1568
+static inline BOOL js_check_stack_overflow(JSRuntime *rt, size_t alloca_size)
+{
+    uintptr_t sp;
+    sp = js_get_stack_pointer() - alloca_size;
+    return unlikely(sp < rt->stack_limit);
+}
+
+/* should be called when changing thread to update the stack top value
+   used to check stack overflow. */
+/// Line number here: 2335
+void JS_UpdateStackTop(JSRuntime *rt)
+{
+    rt->stack_top = js_get_stack_pointer();
+    update_stack_limit(rt);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_get_stack_pointer()";
+"js_get_stack_pointer()" -> "__builtin_frame_address(unsigned int)";
+"js_check_stack_overflow(JSRuntime *, size_t)";
+"js_check_stack_overflow(JSRuntime *, size_t)" -> "js_get_stack_pointer()";
+"js_check_stack_overflow(JSRuntime *, size_t)" -> "__builtin_expect(long, long)";
+"JS_UpdateStackTop(JSRuntime *)";
+"JS_UpdateStackTop(JSRuntime *)" -> "js_get_stack_pointer()";
+"JS_UpdateStackTop(JSRuntime *)" -> "update_stack_limit(JSRuntime *)";
+}

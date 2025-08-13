@@ -1,0 +1,229 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_ThrowTypeErrorDetachedArrayBuffer` function and related calls:
+
+:quickjs.c:JS_ThrowTypeErrorDetachedArrayBuffer:52719
+:quickjs.c:js_array_buffer_slice:52796
+:quickjs.c:validate_typed_array:52921
+:quickjs.c:js_typed_array_get_byteLength:52956
+:quickjs.c:js_typed_array_get_byteOffset:52976
+:quickjs.c:JS_GetTypedArrayBuffer:53009
+:quickjs.c:js_typed_array_set_internal:53045
+:quickjs.c:js_typed_array_at:53123
+:quickjs.c:js_typed_array_with:53149
+:quickjs.c:js_typed_array_get_length_internal:53209
+:quickjs.c:js_typed_array_copyWithin:53407
+:quickjs.c:js_typed_array_fill:53442
+:quickjs.c:js_typed_array_constructor_ta:54643
+:quickjs.c:js_typed_array_constructor:54700
+:quickjs.c:js_dataview_constructor:54793
+:quickjs.c:js_dataview_getValue:54852
+:quickjs.c:js_dataview_setValue:54958
+:quickjs.c:js_atomics_get_ptr:55090
+:quickjs.c:js_atomics_op:55154
+:quickjs.c:js_atomics_store:55299
+:quickjs.c:js_atomics_notify:55458
+
+Here are the suggested modifications in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52718,6 +52718,7 @@
+ 
+ static JSValue JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *ctx)
+ {
++    funlogline();
+     return JS_ThrowTypeError(ctx, "ArrayBuffer is detached");
+ }
+ 
+@@ -52795,6 +52796,7 @@
+     if (!abuf)
+         return JS_EXCEPTION;
+     if (abuf->detached)
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     len = abuf->byte_length;
+ 
+@@ -52920,6 +52922,7 @@
+     if (!p)
+         return -1;
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         return -1;
+     }
+@@ -52955,6 +52958,7 @@
+     if (!p)
+         return JS_EXCEPTION;
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         if (is_dataview) {
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         } else {
+@@ -52975,6 +52979,7 @@
+     if (!p)
+         return JS_EXCEPTION;
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         if (is_dataview) {
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         } else {
+@@ -53008,6 +53013,7 @@
+     if (!p)
+         return JS_EXCEPTION;
+     if (typed_array_is_detached(ctx, p))
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     ta = p->u.typed_array;
+     if (pbyte_offset)
+@@ -53044,6 +53050,7 @@
+         goto range_error;
+     if (typed_array_is_detached(ctx, p)) {
+     detached:
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         goto fail;
+     }
+@@ -53122,6 +53129,7 @@
+         return JS_EXCEPTION;
+ 
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         return JS_EXCEPTION;
+     }
+@@ -53148,6 +53156,7 @@
+     if (!p)
+         return JS_EXCEPTION;
+     if (typed_array_is_detached(ctx, p))
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+ 
+     if (JS_ToInt64Sat(ctx, &idx, argv[0]))
+@@ -53208,6 +53217,7 @@
+     if (!p)
+         return -1;
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         return -1;
+     }
+@@ -53406,6 +53416,7 @@
+     if (count > 0) {
+         p = JS_VALUE_GET_OBJ(this_val);
+         if (typed_array_is_detached(ctx, p))
++            funlogline();
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         shift = typed_array_size_log2(p->class_id);
+         memmove(p->u.array.u.uint8_ptr + (to << shift),
+@@ -53441,6 +53452,7 @@
+     }
+ 
+     if (typed_array_is_detached(ctx, p))
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+ 
+     shift = typed_array_size_log2(p->class_id);
+@@ -54642,6 +54654,7 @@
+     if (JS_IsException(obj))
+         return obj;
+     if (typed_array_is_detached(ctx, p)) {
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         goto fail;
+     }
+@@ -54699,6 +54712,7 @@
+             if (JS_ToIndex(ctx, &offset, argv[1]))
+                 return JS_EXCEPTION;
+             if (abuf->detached)
++                funlogline();
+                 return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+             if ((offset & ((1 << size_log2) - 1)) != 0 ||
+                 offset > abuf->byte_length)
+@@ -54708,6 +54722,7 @@
+                 if (JS_ToIndex(ctx, &len, argv[2]))
+                     return JS_EXCEPTION;
+                 if (abuf->detached)
++                    funlogline();
+                     return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+                 if ((offset + (len << size_log2)) > abuf->byte_length) {
+                 invalid_length:
+@@ -54792,6 +54807,7 @@
+     if (JS_ToIndex(ctx, &offset, argv[1]))
+         return JS_EXCEPTION;
+     if (abuf->detached)
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     if (offset > abuf->byte_length)
+         return JS_ThrowRangeError(ctx, "invalid byteOffset");
+     len = abuf->byte_length - offset;
+@@ -54805,6 +54821,7 @@
+         return JS_EXCEPTION;
+     if (abuf->detached) {
+         /* could have been detached in js_create_from_ctor() */
++        funlogline();
+         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         goto fail;
+     }
+@@ -54851,6 +54868,7 @@
+     littleEndian = argc > 1 && JS_ToBool(ctx, argv[1]);
+     is_swap = littleEndian ^ !is_be();
+     abuf = ta->buffer->u.array_buffer;
++    funlogline();
+     if (abuf->detached)
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     if ((pos + size) > ta->length)
+@@ -54957,6 +54975,7 @@
+     littleEndian = argc > 2 && JS_ToBool(ctx, argv[2]);
+     is_swap = littleEndian ^ !is_be();
+     abuf = ta->buffer->u.array_buffer;
++    funlogline();
+     if (abuf->detached)
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     if ((pos + size) > ta->length)
+@@ -55089,6 +55108,7 @@
+         if (is_waitable == 2) {
+             JS_ThrowTypeError(ctx, "not a SharedArrayBuffer TypedArray");
+             return NULL;
++        funlogline();
+         }
+         if (abuf->detached) {
+             JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+@@ -55153,6 +55173,7 @@
+                 return JS_EXCEPTION;
+         }
+         if (abuf->detached)
++            funlogline();
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+    }
+ 
+@@ -55298,6 +55319,7 @@
+             return JS_EXCEPTION;
+         }
+         if (abuf->detached)
++            funlogline();
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         atomic_store((_Atomic(uint64_t) *)ptr, v64);
+     } else {
+@@ -55308,6 +55330,7 @@
+             return JS_EXCEPTION;
+         }
+         if (abuf->detached)
++            funlogline();
+             return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+         switch(size_log2) {
+         case 0:
+@@ -55457,6 +55480,7 @@
+     if (JS_ToInt32Clamp(ctx, &count, argv[2], 0, INT32_MAX, 0))
+         return JS_EXCEPTION;
+     if (abuf->detached)
++        funlogline();
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+ 
+     n = 0;
+```
+
+The modifications add `funlogline()` calls before each potential logical error condition where a detached ArrayBuffer could cause issues. The instrumentation is placed right before the error handling code that deals with detached ArrayBuffers.

@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ToIndex(JSContext *, uint64_t *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_ToIndex` function:
+
+:quickjs.c:JS_ToIndex:12784
+:quickjs.c:JS_ToIndex:12788
+
+--- 
+The main logical issue is that the function doesn't properly handle the case where the input value is exactly MAX_SAFE_INTEGER (2^53 - 1). The check `v > MAX_SAFE_INTEGER` would fail for MAX_SAFE_INTEGER itself, but this is actually a safe value that should be allowed. The condition should be `v >= MAX_SAFE_INTEGER` to properly catch unsafe values.
+
+Here's the diff to fix this:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12785,6 +12785,9 @@
+     int64_t v;
+     if (JS_ToInt64Sat(ctx, &v, val))
+         return -1;
++    if (v == MAX_SAFE_INTEGER) {
++        funlogline();
++    }
+     if (v < 0 || v > MAX_SAFE_INTEGER) {
+         JS_ThrowRangeError(ctx, "invalid array index");
+         *plen = 0;
+```
+
+The instrumentation checks for the exact MAX_SAFE_INTEGER case which would be incorrectly rejected by the current logic. The actual fix would be to change the condition to `v >= MAX_SAFE_INTEGER`, but we're just adding instrumentation here.

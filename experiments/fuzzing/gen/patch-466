@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9916,10 +9916,13 @@
+     JSValueConst val;
+     JSString *p;
+ 
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
++        funlogline();
+     prs = find_own_property(&pr, JS_VALUE_GET_OBJ(obj), JS_ATOM_name);
+     if (!prs)
+         return FALSE;
+     if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL)
++        funlogline();
+         return TRUE;
+     val = pr->u.value;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING)
++        funlogline();
+         return TRUE;
+     p = JS_VALUE_GET_STRING(val);
+     return (p->len != 0);

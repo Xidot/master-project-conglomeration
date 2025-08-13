@@ -1,0 +1,285 @@
+Target function: "JS_WriteObjectAtoms(BCWriterState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36071
+typedef struct BCWriterState {
+    JSContext *ctx;
+    DynBuf dbuf;
+    BOOL allow_bytecode : 8;
+    BOOL allow_sab : 8;
+    BOOL allow_reference : 8;
+    uint32_t first_atom;
+    uint32_t *atom_to_idx;
+    int atom_to_idx_size;
+    JSAtom *idx_to_atom;
+    int idx_to_atom_count;
+    int idx_to_atom_size;
+    uint8_t **sab_tab;
+    int sab_tab_len;
+    int sab_tab_size;
+    /* list of referenced objects (used if allow_reference = TRUE) */
+    JSObjectList object_list;
+} BCWriterState
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* create the atom table */
+/// Line number here: 36782
+static int JS_WriteObjectAtoms(BCWriterState *s)
+{
+    JSRuntime *rt = s->ctx->rt;
+    DynBuf dbuf1;
+    int i, atoms_size;
+
+    dbuf1 = s->dbuf;
+    js_dbuf_init(s->ctx, &s->dbuf);
+    bc_put_u8(s, BC_VERSION);
+
+    bc_put_leb128(s, s->idx_to_atom_count);
+    for(i = 0; i < s->idx_to_atom_count; i++) {
+        JSAtomStruct *p = rt->atom_array[s->idx_to_atom[i]];
+        JS_WriteString(s, p);
+    }
+    /* XXX: should check for OOM in above phase */
+
+    /* move the atoms at the start */
+    /* XXX: could just append dbuf1 data, but it uses more memory if
+       dbuf1 is larger than dbuf */
+    atoms_size = s->dbuf.size;
+    if (dbuf_realloc(&dbuf1, dbuf1.size + atoms_size))
+        goto fail;
+    memmove(dbuf1.buf + atoms_size, dbuf1.buf, dbuf1.size);
+    memcpy(dbuf1.buf, s->dbuf.buf, atoms_size);
+    dbuf1.size += atoms_size;
+    dbuf_free(&s->dbuf);
+    s->dbuf = dbuf1;
+    return 0;
+ fail:
+    dbuf_free(&dbuf1);
+    return -1;
+}
+
+/// Line number here: 1467
+static inline void js_dbuf_init(JSContext *ctx, DynBuf *s)
+{
+    dbuf_init2(s, ctx->rt, (DynBufReallocFunc *)js_realloc_rt);
+}
+
+/// Line number here: 36107
+static void bc_put_u8(BCWriterState *s, uint8_t v)
+{
+    dbuf_putc(&s->dbuf, v);
+}
+
+/// Line number here: 36133
+static void bc_put_leb128(BCWriterState *s, uint32_t v)
+{
+    dbuf_put_leb128(&s->dbuf, v);
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 36310
+static void JS_WriteString(BCWriterState *s, JSString *p)
+{
+    int i;
+    bc_put_leb128(s, ((uint32_t)p->len << 1) | p->is_wide_char);
+    if (p->is_wide_char) {
+        for(i = 0; i < p->len; i++)
+            bc_put_u16(s, p->u.str16[i]);
+    } else {
+        dbuf_put(&s->dbuf, p->u.str8, p->len);
+    }
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 36816
+uint8_t *JS_WriteObject2(JSContext *ctx, size_t *psize, JSValueConst obj,
+                         int flags, uint8_t ***psab_tab, size_t *psab_tab_len)
+{
+    BCWriterState ss, *s = &ss;
+
+    memset(s, 0, sizeof(*s));
+    s->ctx = ctx;
+    s->allow_bytecode = ((flags & JS_WRITE_OBJ_BYTECODE) != 0);
+    s->allow_sab = ((flags & JS_WRITE_OBJ_SAB) != 0);
+    s->allow_reference = ((flags & JS_WRITE_OBJ_REFERENCE) != 0);
+    /* XXX: could use a different version when bytecode is included */
+    if (s->allow_bytecode)
+        s->first_atom = JS_ATOM_END;
+    else
+        s->first_atom = 1;
+    js_dbuf_init(ctx, &s->dbuf);
+    js_object_list_init(&s->object_list);
+
+    if (JS_WriteObjectRec(s, obj))
+        goto fail;
+    if (JS_WriteObjectAtoms(s))
+        goto fail;
+    js_object_list_end(ctx, &s->object_list);
+    js_free(ctx, s->atom_to_idx);
+    js_free(ctx, s->idx_to_atom);
+    *psize = s->dbuf.size;
+    if (psab_tab)
+        *psab_tab = s->sab_tab;
+    if (psab_tab_len)
+        *psab_tab_len = s->sab_tab_len;
+    return s->dbuf.buf;
+ fail:
+    js_object_list_end(ctx, &s->object_list);
+    js_free(ctx, s->atom_to_idx);
+    js_free(ctx, s->idx_to_atom);
+    dbuf_free(&s->dbuf);
+    *psize = 0;
+    if (psab_tab)
+        *psab_tab = NULL;
+    if (psab_tab_len)
+        *psab_tab_len = 0;
+    return NULL;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+/* XXX: should take an extra argument to pass slack information to the caller */
+/// Line number here: 253
+typedef void *DynBufReallocFunc(void *opaque, void *ptr, size_t size)
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* return < 0 if error */
+/// Line number here: 103
+int dbuf_realloc(DynBuf *s, size_t new_size)
+{
+    size_t size;
+    uint8_t *new_buf;
+    if (new_size > s->allocated_size) {
+        if (s->error)
+            return -1;
+        size = s->allocated_size * 3 / 2;
+        if (size > new_size)
+            new_size = size;
+        new_buf = s->realloc_func(s->opaque, s->buf, new_size);
+        if (!new_buf) {
+            s->error = TRUE;
+            return -1;
+        }
+        s->buf = new_buf;
+        s->allocated_size = new_size;
+    }
+    return 0;
+}
+
+/// Line number here: 195
+void dbuf_free(DynBuf *s)
+{
+    /* we test s->buf as a fail safe to avoid crashing if dbuf_free()
+       is called twice */
+    if (s->buf) {
+        s->realloc_func(s->opaque, s->buf, 0);
+    }
+    memset(s, 0, sizeof(*s));
+}
+
+---- File: /usr/include/string.h
+
+/// Line number here: 46
+extern void *memmove (void *__dest, const void *__src, size_t __n)
+     __THROW __nonnull ((1, 2))
+
+/// Line number here: 42
+extern void *memcpy (void *__restrict __dest, const void *__restrict __src,
+		     size_t __n) __THROW __nonnull ((1, 2))
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_WriteObjectAtoms(BCWriterState *)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "js_dbuf_init(JSContext *, DynBuf *)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "bc_put_u8(BCWriterState *, uint8_t)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "bc_put_leb128(BCWriterState *, uint32_t)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "JS_WriteString(BCWriterState *, JSString *)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "dbuf_realloc(DynBuf *, size_t)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "memmove(void *, const void *, size_t)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_WriteObjectAtoms(BCWriterState *)" -> "dbuf_free(DynBuf *)";
+"js_dbuf_init(JSContext *, DynBuf *)";
+"js_dbuf_init(JSContext *, DynBuf *)" -> "dbuf_init2(DynBuf *, void *, DynBufReallocFunc *)";
+"bc_put_u8(BCWriterState *, uint8_t)";
+"bc_put_u8(BCWriterState *, uint8_t)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"bc_put_leb128(BCWriterState *, uint32_t)";
+"bc_put_leb128(BCWriterState *, uint32_t)" -> "dbuf_put_leb128(DynBuf *, uint32_t)";
+"JS_WriteString(BCWriterState *, JSString *)";
+"JS_WriteString(BCWriterState *, JSString *)" -> "bc_put_leb128(BCWriterState *, uint32_t)";
+"JS_WriteString(BCWriterState *, JSString *)" -> "bc_put_u16(BCWriterState *, uint16_t)";
+"JS_WriteString(BCWriterState *, JSString *)" -> "dbuf_put(DynBuf *, const uint8_t *, size_t)";
+"dbuf_realloc(DynBuf *, size_t)";
+"dbuf_realloc(DynBuf *, size_t)" -> "DynBuf::realloc_func";
+"dbuf_free(DynBuf *)";
+"dbuf_free(DynBuf *)" -> "DynBuf::realloc_func";
+"dbuf_free(DynBuf *)" -> "memset(void *, int, size_t)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "memset(void *, int, size_t)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_dbuf_init(JSContext *, DynBuf *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_object_list_init(JSObjectList *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "JS_WriteObjectRec(BCWriterState *, JSValue)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "JS_WriteObjectAtoms(BCWriterState *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_object_list_end(JSContext *, JSObjectList *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "js_free(JSContext *, void *)";
+"JS_WriteObject2(JSContext *, size_t *, JSValue, int, uint8_t ***, size_t *)" -> "dbuf_free(DynBuf *)";
+}

@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3661,6 +3661,9 @@
+             return -1;
+     }
+     if (s->is_wide_char) {
++        if (len < 0) {
++            funlogline();
++        }
+         for (i = 0; i < len; i++) {
+             s->str->u.str16[s->len + i] = p[i];
+         }
+@@ -3668,6 +3671,9 @@
+     } else {
+         memcpy(&s->str->u.str8[s->len], p, len);
+         s->len += len;
++        if (len < 0) {
++            funlogline();
++        }
+     }
+     return 0;
+ }

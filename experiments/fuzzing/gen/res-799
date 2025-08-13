@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-update_stack_limit(JSRuntime *)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:update_stack_limit:2324
+
+---
+
+The logical bug occurs when `stack_top` is less than `stack_size`, which would cause `stack_limit` to wrap around due to unsigned arithmetic. This could lead to incorrect stack overflow checks.
+
+Here's the diff to detect this condition:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2321,6 +2321,9 @@
+     if (rt->stack_size == 0) {
+         rt->stack_limit = 0; /* no limit */
+     } else {
++        if (rt->stack_top < rt->stack_size) {
++            funlogline();
++        }
+         rt->stack_limit = rt->stack_top - rt->stack_size;
+     }
+ }
+```
+
+The bug occurs when the stack size is set larger than the current stack top pointer, which would cause the subtraction to wrap around and potentially set an incorrect stack limit. This could lead to either false positives or negatives in stack overflow detection.
+
+Note that this is a logical error because it affects the correctness of the stack limit calculation, not just a memory safety issue. The function's purpose is to correctly set the stack limit for overflow checking, and this case isn't properly handled.

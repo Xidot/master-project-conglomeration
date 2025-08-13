@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_hash_pointer(uintptr_t, int)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:map_hash_pointer:48440
+
+---
+
+Reasoning:
+1. The function `map_hash_pointer` takes a `uintptr_t` parameter but passes it directly to either `map_hash64` or `map_hash32` depending on the platform. This could lead to incorrect hashing if the pointer value exceeds 32 bits on a 32-bit system (though uintptr_t should handle this) or if the pointer's bits don't distribute well for hashing purposes.
+
+Here's the suggested modification:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48440,6 +48440,9 @@
+ static uint32_t map_hash_pointer(uintptr_t a, int hash_bits)
+ {
+ #ifdef JS_PTR64
++    if ((a >> 32) == 0 && hash_bits > 32) {
++        funlogline();
++    }
+     return map_hash64(a, hash_bits);
+ #else
+     return map_hash32(a, hash_bits);
+```
+
+The condition checks if we're using a 64-bit system but the pointer value fits in 32 bits while requesting more than 32 hash bits, which could lead to poor hash distribution. This is a subtle logical issue rather than a direct bug.

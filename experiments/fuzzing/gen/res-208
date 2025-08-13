@@ -1,0 +1,50 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_new_ui64(JSContext *, uint64_t)
+-------------------------
+Here are the potential logical bugs in the target function "js_bigint_new_ui64(JSContext *, uint64_t)":
+
+:js_bigint_new_ui64:10979
+:js_bigint_new_ui64:10986
+:js_bigint_new_ui64:10989
+
+----------
+
+1. Line 10979: The condition `a <= INT64_MAX` may incorrectly handle the case where `a == INT64_MAX + 1` since this value would be representable as a uint64_t but not as an int64_t.
+
+2. Lines 10986/10989: The limb size calculation `(65 + JS_LIMB_BITS - 1) / JS_LIMB_BITS` may not correctly handle all possible uint64_t values, particularly near the boundaries of limb representations.
+
+Here's the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10976,6 +10976,8 @@
+ static JSBigInt *js_bigint_new_ui64(JSContext *ctx, uint64_t a)
+ {
+     if (a <= INT64_MAX) {
++        if (a == INT64_MAX + 1)
++            funlogline();
+         return js_bigint_new_si64(ctx, a);
+     } else {
+         JSBigInt *r;
+@@ -10983,10 +10985,14 @@
+         if (!r)
+             return NULL;
+ #if JS_LIMB_BITS == 64
++        if (a == UINT64_MAX)
++            funlogline();
+         r->tab[0] = a;
+         r->tab[1] = 0;
+ #else
++        if (a > (UINT64_MAX >> 32))
++            funlogline();
+         r->tab[0] = a;
+         r->tab[1] = a >> 32;
+         r->tab[2] = 0;
+```
+
+The modifications add checks for boundary conditions where the logic might fail:
+1. When the input is exactly INT64_MAX + 1 (which can't be represented as int64_t)
+2. When the input is UINT64_MAX (maximum value case)
+3. When the input exceeds 32-bit limb boundaries (for non-64-bit systems)

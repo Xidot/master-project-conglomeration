@@ -1,0 +1,228 @@
+Target function: "js_default_module_normalize_name(JSContext *, const char *, const char *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* default module filename normalizer */
+/// Line number here: 28522
+static char *js_default_module_normalize_name(JSContext *ctx,
+                                              const char *base_name,
+                                              const char *name)
+{
+    char *filename, *p;
+    const char *r;
+    int cap;
+    int len;
+
+    if (name[0] != '.') {
+        /* if no initial dot, the module name is not modified */
+        return js_strdup(ctx, name);
+    }
+
+    p = strrchr(base_name, '/');
+    if (p)
+        len = p - base_name;
+    else
+        len = 0;
+
+    cap = len + strlen(name) + 1 + 1;
+    filename = js_malloc(ctx, cap);
+    if (!filename)
+        return NULL;
+    memcpy(filename, base_name, len);
+    filename[len] = '\0';
+
+    /* we only normalize the leading '..' or '.' */
+    r = name;
+    for(;;) {
+        if (r[0] == '.' && r[1] == '/') {
+            r += 2;
+        } else if (r[0] == '.' && r[1] == '.' && r[2] == '/') {
+            /* remove the last path element of filename, except if "."
+               or ".." */
+            if (filename[0] == '\0')
+                break;
+            p = strrchr(filename, '/');
+            if (!p)
+                p = filename;
+            else
+                p++;
+            if (!strcmp(p, ".") || !strcmp(p, ".."))
+                break;
+            if (p > filename)
+                p--;
+            *p = '\0';
+            r += 3;
+        } else {
+            break;
+        }
+    }
+    if (filename[0] != '\0')
+        pstrcat(filename, cap, "/");
+    pstrcat(filename, cap, r);
+    //    printf("normalize: %s %s -> %s\n", base_name, name, filename);
+    return filename;
+}
+
+/// Line number here: 1435
+char *js_strdup(JSContext *ctx, const char *str)
+{
+    return js_strndup(ctx, str, strlen(str));
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1362
+void *js_malloc(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_malloc_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/* return NULL in case of exception (e.g. module could not be loaded) */
+/// Line number here: 28596
+static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
+                                                    const char *base_cname,
+                                                    const char *cname1,
+                                                    JSValueConst attributes)
+{
+    JSRuntime *rt = ctx->rt;
+    JSModuleDef *m;
+    char *cname;
+    JSAtom module_name;
+
+    if (!rt->module_normalize_func) {
+        cname = js_default_module_normalize_name(ctx, base_cname, cname1);
+    } else {
+        cname = rt->module_normalize_func(ctx, base_cname, cname1,
+                                          rt->module_loader_opaque);
+    }
+    if (!cname)
+        return NULL;
+
+    module_name = JS_NewAtom(ctx, cname);
+    if (module_name == JS_ATOM_NULL) {
+        js_free(ctx, cname);
+        return NULL;
+    }
+
+    /* first look at the loaded modules */
+    m = js_find_loaded_module(ctx, module_name);
+    if (m) {
+        js_free(ctx, cname);
+        JS_FreeAtom(ctx, module_name);
+        return m;
+    }
+
+    JS_FreeAtom(ctx, module_name);
+
+    /* load the module */
+    if (!rt->u.module_loader_func) {
+        /* XXX: use a syntax error ? */
+        JS_ThrowReferenceError(ctx, "could not load module '%s'",
+                               cname);
+        js_free(ctx, cname);
+        return NULL;
+    }
+    if (rt->module_loader_has_attr) {
+        m = rt->u.module_loader_func2(ctx, cname, rt->module_loader_opaque, attributes);
+    } else {
+        m = rt->u.module_loader_func(ctx, cname, rt->module_loader_opaque);
+    }
+    js_free(ctx, cname);
+    return m;
+}
+
+---- File: /usr/include/string.h
+
+/// Line number here: 272
+extern char *strrchr (const char *__s, int __c)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+/// Line number here: 406
+extern size_t strlen (const char *__s)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+/// Line number here: 42
+extern void *memcpy (void *__restrict __dest, const void *__restrict __src,
+		     size_t __n) __THROW __nonnull ((1, 2))
+
+/// Line number here: 155
+extern int strcmp (const char *__s1, const char *__s2)
+     __THROW __attribute_pure__ __nonnull ((1, 2))
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* strcat and truncate. */
+/// Line number here: 49
+char *pstrcat(char *buf, int buf_size, const char *s)
+{
+    int len;
+    len = strlen(buf);
+    if (len < buf_size)
+        pstrcpy(buf + len, buf_size - len, s);
+    return buf;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "js_strdup(JSContext *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strrchr(const char *, int)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strlen(const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "js_malloc(JSContext *, size_t)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "strcmp(const char *, const char *)";
+"js_default_module_normalize_name(JSContext *, const char *, const char *)" -> "pstrcat(char *, int, const char *)";
+"js_strdup(JSContext *, const char *)";
+"js_strdup(JSContext *, const char *)" -> "js_strndup(JSContext *, const char *, size_t)";
+"js_strdup(JSContext *, const char *)" -> "strlen(const char *)";
+"js_malloc(JSContext *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"js_malloc(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_malloc(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"pstrcat(char *, int, const char *)";
+"pstrcat(char *, int, const char *)" -> "strlen(const char *)";
+"pstrcat(char *, int, const char *)" -> "pstrcpy(char *, int, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::module_normalize_func";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_free(JSContext *, void *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_find_loaded_module(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func2";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func";
+}

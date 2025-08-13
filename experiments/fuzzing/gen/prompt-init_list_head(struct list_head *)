@@ -1,0 +1,126 @@
+Target function: "init_list_head(struct list_head *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 40
+static inline void init_list_head(struct list_head *head)
+{
+    head->prev = head;
+    head->next = head;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 130
+typedef struct {
+    int ref_count;
+#ifdef USE_WORKER
+    pthread_mutex_t mutex;
+#endif
+    struct list_head msg_queue; /* list of JSWorkerMessage.link */
+    JSWaker waker;
+} JSWorkerMessagePipe
+
+/// Line number here: 3483
+static JSWorkerMessagePipe *js_new_message_pipe(void)
+{
+    JSWorkerMessagePipe *ps;
+
+    ps = malloc(sizeof(*ps));
+    if (!ps)
+        return NULL;
+    if (js_waker_init(&ps->waker)) {
+        free(ps);
+        return NULL;
+    }
+    ps->ref_count = 1;
+    init_list_head(&ps->msg_queue);
+    pthread_mutex_init(&ps->mutex, NULL);
+    return ps;
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 4081
+void js_std_init_handlers(JSRuntime *rt)
+{
+    JSThreadState *ts;
+
+    ts = malloc(sizeof(*ts));
+    if (!ts) {
+        fprintf(stderr, "Could not allocate memory for the worker");
+        exit(1);
+    }
+    memset(ts, 0, sizeof(*ts));
+    init_list_head(&ts->os_rw_handlers);
+    init_list_head(&ts->os_signal_handlers);
+    init_list_head(&ts->os_timers);
+    init_list_head(&ts->port_list);
+    init_list_head(&ts->rejected_promise_list);
+    ts->next_timer_id = 1;
+
+    JS_SetRuntimeOpaque(rt, ts);
+
+#ifdef USE_WORKER
+    /* set the SharedArrayBuffer memory handlers */
+    {
+        JSSharedArrayBufferFunctions sf;
+        memset(&sf, 0, sizeof(sf));
+        sf.sab_alloc = js_sab_alloc;
+        sf.sab_free = js_sab_free;
+        sf.sab_dup = js_sab_dup;
+        JS_SetSharedArrayBufferFunctions(rt, &sf);
+    }
+#endif
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 899
+typedef struct {
+    void *(*sab_alloc)(void *opaque, size_t size);
+    void (*sab_free)(void *opaque, void *ptr);
+    void (*sab_dup)(void *opaque, void *ptr);
+    void *sab_opaque;
+} JSSharedArrayBufferFunctions
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_new_message_pipe()";
+"js_new_message_pipe()" -> "malloc(size_t)";
+"js_new_message_pipe()" -> "js_waker_init(JSWaker *)";
+"js_new_message_pipe()" -> "free(void *)";
+"js_new_message_pipe()" -> "init_list_head(struct list_head *)";
+"js_new_message_pipe()" -> "pthread_mutex_init(pthread_mutex_t *, const pthread_mutexattr_t *)";
+"js_std_init_handlers(JSRuntime *)";
+"js_std_init_handlers(JSRuntime *)" -> "malloc(size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_init_handlers(JSRuntime *)" -> "exit(int)";
+"js_std_init_handlers(JSRuntime *)" -> "memset(void *, int, size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "init_list_head(struct list_head *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetRuntimeOpaque(JSRuntime *, void *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetSharedArrayBufferFunctions(JSRuntime *, const JSSharedArrayBufferFunctions *)";
+}

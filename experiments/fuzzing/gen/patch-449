@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1573,6 +1573,9 @@
+ {
+     JSRuntime *rt;
+     JSMallocState ms;
++    
++    if (!mf || !mf->js_malloc || !mf->js_free || !mf->js_realloc)
++        funlogline();
+ 
+     memset(&ms, 0, sizeof(ms));
+     ms.opaque = opaque;
+@@ -1580,6 +1583,8 @@
+ 
+     rt = mf->js_malloc(&ms, sizeof(JSRuntime));
+     if (!rt)
++        funlogline();
++    if (memset(rt, 0, sizeof(*rt))
+         return NULL;
+     memset(rt, 0, sizeof(*rt));
+     rt->mf = *mf;

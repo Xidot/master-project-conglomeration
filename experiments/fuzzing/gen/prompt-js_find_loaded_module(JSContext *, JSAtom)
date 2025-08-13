@@ -1,0 +1,186 @@
+Target function: "js_find_loaded_module(JSContext *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 28581
+static JSModuleDef *js_find_loaded_module(JSContext *ctx, JSAtom name)
+{
+    struct list_head *el;
+    JSModuleDef *m;
+
+    /* first look at the loaded modules */
+    list_for_each(el, &ctx->loaded_modules) {
+        m = list_entry(el, JSModuleDef, link);
+        if (m->module_name == name)
+            return m;
+    }
+    return NULL;
+}
+
+/* return NULL in case of exception (e.g. module could not be loaded) */
+/// Line number here: 28596
+static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
+                                                    const char *base_cname,
+                                                    const char *cname1,
+                                                    JSValueConst attributes)
+{
+    JSRuntime *rt = ctx->rt;
+    JSModuleDef *m;
+    char *cname;
+    JSAtom module_name;
+
+    if (!rt->module_normalize_func) {
+        cname = js_default_module_normalize_name(ctx, base_cname, cname1);
+    } else {
+        cname = rt->module_normalize_func(ctx, base_cname, cname1,
+                                          rt->module_loader_opaque);
+    }
+    if (!cname)
+        return NULL;
+
+    module_name = JS_NewAtom(ctx, cname);
+    if (module_name == JS_ATOM_NULL) {
+        js_free(ctx, cname);
+        return NULL;
+    }
+
+    /* first look at the loaded modules */
+    m = js_find_loaded_module(ctx, module_name);
+    if (m) {
+        js_free(ctx, cname);
+        JS_FreeAtom(ctx, module_name);
+        return m;
+    }
+
+    JS_FreeAtom(ctx, module_name);
+
+    /* load the module */
+    if (!rt->u.module_loader_func) {
+        /* XXX: use a syntax error ? */
+        JS_ThrowReferenceError(ctx, "could not load module '%s'",
+                               cname);
+        js_free(ctx, cname);
+        return NULL;
+    }
+    if (rt->module_loader_has_attr) {
+        m = rt->u.module_loader_func2(ctx, cname, rt->module_loader_opaque, attributes);
+    } else {
+        m = rt->u.module_loader_func(ctx, cname, rt->module_loader_opaque);
+    }
+    js_free(ctx, cname);
+    return m;
+}
+
+/// Line number here: 29537
+static JSValue js_import_meta(JSContext *ctx)
+{
+    JSAtom filename;
+    JSModuleDef *m;
+
+    filename = JS_GetScriptOrModuleName(ctx, 0);
+    if (filename == JS_ATOM_NULL)
+        goto fail;
+
+    /* XXX: inefficient, need to add a module or script pointer in
+       JSFunctionBytecode */
+    m = js_find_loaded_module(ctx, filename);
+    JS_FreeAtom(ctx, filename);
+    if (!m) {
+    fail:
+        JS_ThrowTypeError(ctx, "import.meta not supported in this context");
+        return JS_EXCEPTION;
+    }
+    return JS_GetImportMeta(ctx, m);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_default_module_normalize_name(JSContext *, const char *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::module_normalize_func";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_free(JSContext *, void *)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "js_find_loaded_module(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JS_ThrowReferenceError(JSContext *, const char *, ...)";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func2";
+"js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)" -> "JSRuntime::union (unnamed at /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c:285:5)::module_loader_func";
+"js_import_meta(JSContext *)";
+"js_import_meta(JSContext *)" -> "JS_GetScriptOrModuleName(JSContext *, int)";
+"js_import_meta(JSContext *)" -> "js_find_loaded_module(JSContext *, JSAtom)";
+"js_import_meta(JSContext *)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_import_meta(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_import_meta(JSContext *)" -> "JS_GetImportMeta(JSContext *, JSModuleDef *)";
+}

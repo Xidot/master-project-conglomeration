@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_hash32(uint32_t, int)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:map_hash32:48430
+
+---
+
+Reasoning:
+1. The main logical issue in `map_hash32()` is that it doesn't handle the case where `hash_bits` is 0, despite the comment saying "precondition: 1 <= hash_bits <= 32" in `map_hash_key()`. A right shift by 32 bits (when hash_bits=0) is undefined behavior in C for 32-bit integers.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48430,6 +48430,8 @@
+ /// Line number here: 48430
+ static uint32_t map_hash32(uint32_t a, int hash_bits)
+ {
++    if (hash_bits <= 0 || hash_bits > 32)
++        funlogline();
+     return (a * HASH_MUL32) >> (32 - hash_bits);
+ }
+```
+
+The instrumentation checks for invalid `hash_bits` values that would lead to undefined behavior in the shift operation. This matches the precondition stated in the calling function's comment.

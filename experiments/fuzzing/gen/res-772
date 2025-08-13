@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-string_buffer_write16(StringBuffer *, const uint16_t *, int)
+-------------------------
+Here are the potential logical bugs in the target function "string_buffer_write16":
+
+:string_buffer_write16:3680
+:string_buffer_write16:3684
+
+---
+
+1. Line 3680: The condition `if (s->len + len > s->size)` checks if the buffer needs reallocation, but it doesn't account for integer overflow when adding `s->len + len`. This could lead to incorrect buffer size calculations.
+
+2. Line 3684: The condition `else if (!s->is_wide_char && c >= 0x100)` uses `c` which was calculated by OR-ing all characters together. This means a single high character will trigger widening, but the check happens after the buffer size check, potentially causing buffer overflow if the string contains mixed-width characters.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3677,6 +3677,9 @@
+     for (i = 0; i < len; i++) {
+         c |= p[i];
+     }
++    if (s->len > INT_MAX - len) {
++        funlogline();
++    }
+     if (s->len + len > s->size) {
+         if (string_buffer_realloc(s, s->len + len, c))
+             return -1;
+@@ -3684,6 +3687,9 @@
+         if (string_buffer_widen(s, s->size))
+             return -1;
+     }
++    if (!s->is_wide_char && c >= 0x100 && s->len + len > s->size) {
++        funlogline();
++    }
+     if (s->is_wide_char) {
+         memcpy(&s->str->u.str16[s->len], p, len << 1);
+         s->len += len;
+```
+
+The first addition checks for integer overflow before buffer size calculation. The second addition checks if we should have widened the buffer before checking its size.

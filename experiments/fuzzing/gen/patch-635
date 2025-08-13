@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12659,6 +12659,8 @@
+ 
+ int JS_ToInt32(JSContext *ctx, int32_t *pres, JSValueConst val)
+ {
++    if (!pres)
++        funlogline();
+     return JS_ToInt32Free(ctx, pres, JS_DupValue(ctx, val));
+ }
+ 
+@@ -12617,6 +12619,8 @@
+     case JS_TAG_BOOL:
+     case JS_TAG_NULL:
+     case JS_TAG_UNDEFINED:
++        if (tag == JS_TAG_NULL || tag == JS_TAG_UNDEFINED)
++            funlogline();
+         ret = JS_VALUE_GET_INT(val);
+         break;
+     case JS_TAG_FLOAT64:

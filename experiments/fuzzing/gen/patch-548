@@ -1,0 +1,15 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15137,6 +15137,12 @@
+ static BOOL js_same_value(JSContext *ctx, JSValueConst op1, JSValueConst op2)
+ {
+     return js_strict_eq2(ctx,
+                          JS_DupValue(ctx, op1), JS_DupValue(ctx, op2),
+                          JS_EQ_SAME_VALUE);
++    JSValue dup1 = JS_DupValue(ctx, op1);
++    JSValue dup2 = JS_DupValue(ctx, op2);
++    if (JS_IsException(dup1) || JS_IsException(dup2)) {
++        funlogline();
++    }
++    return js_strict_eq2(ctx, dup1, dup2, JS_EQ_SAME_VALUE);
+ }

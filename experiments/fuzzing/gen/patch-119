@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -44556,6 +44556,7 @@
+     time_t ti;
+     int res;
+ 
++    if (sizeof(time_t) != 4 && sizeof(time_t) != 8) funlogline(); // Unexpected time_t size
+     time /= 1000; /* convert to seconds */
+     if (sizeof(time_t) == 4) {
+         /* on 32-bit systems, we need to clamp the time value to the
+@@ -44605,6 +44606,7 @@
+ 
+         tm = gmtime(&ti);
+         if (!tm)
++            funlogline(); // gmtime failed
+             return 0;
+         gm_ti = mktime(tm);
+ 
+@@ -44615,6 +44617,7 @@
+     }
+ #else
+     {
++        if (!(&tm)->tm_gmtoff) funlogline(); // tm_gmtoff not available
+         struct tm tm;
+         localtime_r(&ti, &tm);
+         res = -tm.tm_gmtoff / 60;

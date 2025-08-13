@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11501,6 +11501,8 @@
+     uint64_t a1, a0;
+ 
+     n2 = 4 - JS_LIMB_BITS / 32;
++    if (JS_LIMB_BITS != 32 && JS_LIMB_BITS != 64)
++        funlogline();
+     n1 = a->len - n2;
+     sgn = js_bigint_sign(a);
+ 
+@@ -11506,6 +11506,8 @@
+ 
+     /* low_bits != 0 if there are a non zero low bit in abs(a) */
+     low_bits = 0;
++    if (n1 < 0)
++        funlogline();
+     carry = sgn;
+     for(i = 0; i < n1; i++) {
+         v = (a->tab[i] ^ (-sgn)) + carry;
+@@ -11530,6 +11530,8 @@
+     a0 |= (low_bits != 0);
+     /* normalize */
+     if (a1 == 0) {
++        if (JS_LIMB_BITS != 64)
++            funlogline();
+         /* JS_LIMB_BITS = 64 bit only */
+         shift = 64;
+         a1 = a0;

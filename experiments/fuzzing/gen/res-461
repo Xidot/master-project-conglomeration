@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewSymbol(JSContext *, JSString *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function "JS_NewSymbol":
+
+:JS_NewSymbol:3006
+:JS_NewSymbol:3007
+
+---
+
+Reasons:
+1. At line 3006, there's no check for NULL ctx or p pointers before using them, which could lead to crashes.
+2. At line 3007, the function assumes rt->atom_array[atom] is valid after __JS_NewAtom succeeds, but there's no validation that the atom index is within bounds of the atom_array.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2995,6 +2995,9 @@
+ static JSValue JS_NewSymbol(JSContext *ctx, JSString *p, int atom_type)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!ctx || !rt) {
++        funlogline();
++    }
+     JSAtom atom;
+     atom = __JS_NewAtom(rt, p, atom_type);
+     if (atom == JS_ATOM_NULL)
+@@ -3002,6 +3005,9 @@
+     return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+ }
+ 
++    if (atom >= rt->atom_size) {
++        funlogline();
++    }
+     return JS_MKPTR(JS_TAG_SYMBOL, rt->atom_array[atom]);
+ }
+```

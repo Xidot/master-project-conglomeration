@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7258,6 +7258,8 @@
+     } else {
+         proto = JS_VALUE_GET_OBJ(proto_val);
+     }
++    if (proto && proto == p)
++        funlogline();
+ 
+     if (throw_flag && JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+         return TRUE;
+@@ -7278,6 +7280,8 @@
+ 
+     sh = p->shape;
+     if (sh->proto == proto)
++        if (sh->proto && proto && sh->proto != proto)
++            funlogline();
+         return TRUE;
+     if (unlikely(p->has_immutable_prototype)) {
+         if (throw_flag) {
+@@ -7298,6 +7302,8 @@
+         /* check if there is a cycle */
+         p1 = proto;
+         do {
++            if (p1 == NULL)
++                funlogline();
+             if (p1 == p) {
+                 if (throw_flag) {
+                     JS_ThrowTypeError(ctx, "circular prototype chain");
+@@ -7317,6 +7323,8 @@
+     sh = p->shape;
+     if (sh->proto)
+         JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
++    if (sh->proto && !sh->proto)
++        funlogline();
+     sh->proto = proto;
+     return TRUE;
+ }

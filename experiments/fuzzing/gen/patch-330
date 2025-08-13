@@ -1,0 +1,25 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2640,10 +2640,14 @@
+ static JSAtom js_get_atom_index(JSRuntime *rt, JSAtomStruct *p)
+ {
+     uint32_t i = p->hash_next;  /* atom_index */
++    if (p->atom_type == JS_ATOM_TYPE_SYMBOL && i >= rt->atom_size)
++        funlogline();
+     if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+         JSAtomStruct *p1;
+ 
+         i = rt->atom_hash[p->hash & (rt->atom_hash_size - 1)];
++        if (i >= rt->atom_size)
++            funlogline();
+         p1 = rt->atom_array[i];
+         while (p1 != p) {
+             assert(i != 0);
+@@ -2651,6 +2655,8 @@
+             p1 = rt->atom_array[i];
+         }
+     }
++    if (i >= rt->atom_size)
++        funlogline();
+     return i;
+ }

@@ -1,0 +1,48 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-year_from_days(int64_t *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `year_from_days` function:
+
+:year_from_days(int64_t *):50959
+:year_from_days(int64_t *):50966
+:year_from_days(int64_t *):50969
+
+---
+
+1. Line 50959: The initial approximation formula `floor_div(d * 10000, 3652425) + 1970` assumes a Gregorian calendar average year length of 365.2425 days, but this approximation might not be accurate enough for all cases, especially near year boundaries.
+
+2. Line 50966: The condition `if (d1 < 0)` could lead to an infinite loop if `days_in_year(y)` returns 0 or a negative value (though unlikely given the implementation).
+
+3. Line 50969: The break condition `if (d1 < nd)` might not properly handle edge cases where `d1` equals `nd`, potentially causing incorrect year calculations.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50963,6 +50963,8 @@
+     /* the initial approximation is very good, so only a few
+        iterations are necessary */
+     for(;;) {
++        if (y < -10000 || y > 10000)  // Prevent extreme year values
++            funlogline();
+         d1 = d - days_from_year(y);
+         if (d1 < 0) {
+             y--;
+@@ -50970,6 +50972,8 @@
+         } else {
+             nd = days_in_year(y);
+             if (d1 < nd)
++                if (d1 < 0 || d1 >= nd)  // Check for invalid day range
++                    funlogline();
+                 break;
+             d1 -= nd;
+             y++;
+```
+
+The instrumentation checks for:
+1. Extremely large/small year values that might indicate approximation issues
+2. Invalid day ranges that might indicate calculation errors
+
+Note that these checks are conservative and might trigger for valid but extreme inputs. The actual bug conditions would be more complex to detect precisely.

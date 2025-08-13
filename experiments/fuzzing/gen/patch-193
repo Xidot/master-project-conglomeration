@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11114,6 +11114,9 @@
+     carry = b_neg;
+     for(i = 0; i < n1; i++) {
+         op1 = a->tab[i];
++        if (b_neg != 0 && b_neg != 1) {
++            funlogline();
++        }
+         op2 = b->tab[i] ^ (-b_neg);
+         ADDC(r->tab[i], carry, op1, op2, carry);
+     }
+@@ -11121,6 +11124,9 @@
+     b_sign = (-js_bigint_sign(b)) ^ (-b_neg);
+     /* part with sign extension of one operand  */
+     if (a->len > b->len) {
++        if (a_sign != 0 && a_sign != -1) {
++            funlogline();
++        }
+         for(i = n1; i < n2; i++) {
+             op1 = a->tab[i];
+             ADDC(r->tab[i], carry, op1, b_sign, carry);
+@@ -11127,6 +11133,9 @@
+         }
+     } else if (a->len < b->len) {
+         for(i = n1; i < n2; i++) {
++            if (b_sign != 0 && b_sign != -1) {
++                funlogline();
++            }
+             op2 = b->tab[i] ^ (-b_neg);
+             ADDC(r->tab[i], carry, a_sign, op2, carry);
+         }

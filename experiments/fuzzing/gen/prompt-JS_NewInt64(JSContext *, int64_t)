@@ -1,0 +1,438 @@
+Target function: "JS_NewInt64(JSContext *, int64_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 571
+static js_force_inline JSValue JS_NewInt64(JSContext *ctx, int64_t val)
+{
+    JSValue v;
+    if (val == (int32_t)val) {
+        v = JS_NewInt32(ctx, val);
+    } else {
+        v = __JS_NewFloat64(ctx, val);
+    }
+    return v;
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 561
+static js_force_inline JSValue JS_NewInt32(JSContext *ctx, int32_t val)
+{
+    return JS_MKVAL(JS_TAG_INT, val);
+}
+
+/// Line number here: 254
+static inline JSValue __JS_NewFloat64(JSContext *ctx, double d)
+{
+    JSValue v;
+    v.tag = JS_TAG_FLOAT64;
+    v.u.float64 = d;
+    return v;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 1218
+static JSValue js_std_file_tell(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv, int is_bigint)
+{
+    FILE *f = js_std_file_get(ctx, this_val);
+    int64_t pos;
+    if (!f)
+        return JS_EXCEPTION;
+#if defined(__linux__) || defined(__GLIBC__)
+    pos = ftello(f);
+#else
+    pos = ftell(f);
+#endif
+    if (is_bigint)
+        return JS_NewBigInt64(ctx, pos);
+    else
+        return JS_NewInt64(ctx, pos);
+}
+
+/// Line number here: 1295
+static JSValue js_std_file_read_write(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv, int magic)
+{
+    FILE *f = js_std_file_get(ctx, this_val);
+    uint64_t pos, len;
+    size_t size, ret;
+    uint8_t *buf;
+
+    if (!f)
+        return JS_EXCEPTION;
+    if (JS_ToIndex(ctx, &pos, argv[1]))
+        return JS_EXCEPTION;
+    if (JS_ToIndex(ctx, &len, argv[2]))
+        return JS_EXCEPTION;
+    buf = JS_GetArrayBuffer(ctx, &size, argv[0]);
+    if (!buf)
+        return JS_EXCEPTION;
+    if (pos + len > size)
+        return JS_ThrowRangeError(ctx, "read/write array buffer overflow");
+    if (magic)
+        ret = fwrite(buf + pos, 1, len, f);
+    else
+        ret = fread(buf + pos, 1, len, f);
+    return JS_NewInt64(ctx, ret);
+}
+
+/// Line number here: 1767
+static JSValue js_os_seek(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    int fd, whence;
+    int64_t pos, ret;
+    BOOL is_bigint;
+
+    if (JS_ToInt32(ctx, &fd, argv[0]))
+        return JS_EXCEPTION;
+    is_bigint = JS_IsBigInt(ctx, argv[1]);
+    if (JS_ToInt64Ext(ctx, &pos, argv[1]))
+        return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &whence, argv[2]))
+        return JS_EXCEPTION;
+    ret = lseek(fd, pos, whence);
+    if (ret == -1)
+        ret = -errno;
+    if (is_bigint)
+        return JS_NewBigInt64(ctx, ret);
+    else
+        return JS_NewInt64(ctx, ret);
+}
+
+/// Line number here: 1790
+static JSValue js_os_read_write(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv, int magic)
+{
+    int fd;
+    uint64_t pos, len;
+    size_t size;
+    ssize_t ret;
+    uint8_t *buf;
+
+    if (JS_ToInt32(ctx, &fd, argv[0]))
+        return JS_EXCEPTION;
+    if (JS_ToIndex(ctx, &pos, argv[2]))
+        return JS_EXCEPTION;
+    if (JS_ToIndex(ctx, &len, argv[3]))
+        return JS_EXCEPTION;
+    buf = JS_GetArrayBuffer(ctx, &size, argv[1]);
+    if (!buf)
+        return JS_EXCEPTION;
+    if (pos + len > size)
+        return JS_ThrowRangeError(ctx, "read/write array buffer overflow");
+    if (magic)
+        ret = js_get_errno(write(fd, buf + pos, len));
+    else
+        ret = js_get_errno(read(fd, buf + pos, len));
+    return JS_NewInt64(ctx, ret);
+}
+
+/* return [obj, errcode] */
+/// Line number here: 2753
+static JSValue js_os_stat(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv, int is_lstat)
+{
+    const char *path;
+    int err, res;
+    struct stat st;
+    JSValue obj;
+
+    path = JS_ToCString(ctx, argv[0]);
+    if (!path)
+        return JS_EXCEPTION;
+#if defined(_WIN32)
+    res = stat(path, &st);
+#else
+    if (is_lstat)
+        res = lstat(path, &st);
+    else
+        res = stat(path, &st);
+#endif
+    if (res < 0)
+        err = errno;
+    else
+        err = 0;
+    JS_FreeCString(ctx, path);
+    if (res < 0) {
+        obj = JS_NULL;
+    } else {
+        obj = JS_NewObject(ctx);
+        if (JS_IsException(obj))
+            return JS_EXCEPTION;
+        JS_DefinePropertyValueStr(ctx, obj, "dev",
+                                  JS_NewInt64(ctx, st.st_dev),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "ino",
+                                  JS_NewInt64(ctx, st.st_ino),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "mode",
+                                  JS_NewInt32(ctx, st.st_mode),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "nlink",
+                                  JS_NewInt64(ctx, st.st_nlink),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "uid",
+                                  JS_NewInt64(ctx, st.st_uid),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "gid",
+                                  JS_NewInt64(ctx, st.st_gid),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "rdev",
+                                  JS_NewInt64(ctx, st.st_rdev),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "size",
+                                  JS_NewInt64(ctx, st.st_size),
+                                  JS_PROP_C_W_E);
+#if !defined(_WIN32)
+        JS_DefinePropertyValueStr(ctx, obj, "blocks",
+                                  JS_NewInt64(ctx, st.st_blocks),
+                                  JS_PROP_C_W_E);
+#endif
+#if defined(_WIN32)
+        JS_DefinePropertyValueStr(ctx, obj, "atime",
+                                  JS_NewInt64(ctx, (int64_t)st.st_atime * 1000),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "mtime",
+                                  JS_NewInt64(ctx, (int64_t)st.st_mtime * 1000),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "ctime",
+                                  JS_NewInt64(ctx, (int64_t)st.st_ctime * 1000),
+                                  JS_PROP_C_W_E);
+#elif defined(__APPLE__)
+        JS_DefinePropertyValueStr(ctx, obj, "atime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_atimespec)),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "mtime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_mtimespec)),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "ctime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_ctimespec)),
+                                  JS_PROP_C_W_E);
+#else
+        JS_DefinePropertyValueStr(ctx, obj, "atime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_atim)),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "mtime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_mtim)),
+                                  JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "ctime",
+                                  JS_NewInt64(ctx, timespec_to_ms(&st.st_ctim)),
+                                  JS_PROP_C_W_E);
+#endif
+    }
+    return make_obj_error(ctx, obj, err);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/sys/types.h
+
+/// Line number here: 107
+typedef __ssize_t ssize_t
+
+---- File: /usr/include/bits/struct_stat.h
+
+/// Line number here: 25
+struct stat
+  {
+#ifdef __USE_TIME64_REDIRECTS
+# include <bits/struct_stat_time64_helper.h>
+#else
+    __dev_t st_dev;		/* Device.  */
+# ifndef __x86_64__
+    unsigned short int __pad1;
+# endif
+# if defined __x86_64__ || !defined __USE_FILE_OFFSET64
+    __ino_t st_ino;		/* File serial number.	*/
+# else
+    __ino_t __st_ino;			/* 32bit file serial number.	*/
+# endif
+# ifndef __x86_64__
+    __mode_t st_mode;			/* File mode.  */
+    __nlink_t st_nlink;			/* Link count.  */
+# else
+    __nlink_t st_nlink;		/* Link count.  */
+    __mode_t st_mode;		/* File mode.  */
+# endif
+    __uid_t st_uid;		/* User ID of the file's owner.	*/
+    __gid_t st_gid;		/* Group ID of the file's group.*/
+# ifdef __x86_64__
+    int __pad0;
+# endif
+    __dev_t st_rdev;		/* Device number, if device.  */
+# ifndef __x86_64__
+    unsigned short int __pad2;
+# endif
+# if defined __x86_64__ || !defined __USE_FILE_OFFSET64
+    __off_t st_size;			/* Size of file, in bytes.  */
+# else
+    __off64_t st_size;			/* Size of file, in bytes.  */
+# endif
+    __blksize_t st_blksize;	/* Optimal block size for I/O.  */
+# if defined __x86_64__  || !defined __USE_FILE_OFFSET64
+    __blkcnt_t st_blocks;		/* Number 512-byte blocks allocated. */
+# else
+    __blkcnt64_t st_blocks;		/* Number 512-byte blocks allocated. */
+# endif
+# ifdef __USE_XOPEN2K8
+    /* Nanosecond resolution timestamps are stored in a format
+       equivalent to 'struct timespec'.  This is the type used
+       whenever possible but the Unix namespace rules do not allow the
+       identifier 'timespec' to appear in the <sys/stat.h> header.
+       Therefore we have to handle the use of this header in strictly
+       standard-compliant sources special.  */
+    struct timespec st_atim;		/* Time of last access.  */
+    struct timespec st_mtim;		/* Time of last modification.  */
+    struct timespec st_ctim;		/* Time of last status change.  */
+#  define st_atime st_atim.tv_sec	/* Backward compatibility.  */
+#  define st_mtime st_mtim.tv_sec
+#  define st_ctime st_ctim.tv_sec
+# else
+    __time_t st_atime;			/* Time of last access.  */
+    __syscall_ulong_t st_atimensec;	/* Nscecs of last access.  */
+    __time_t st_mtime;			/* Time of last modification.  */
+    __syscall_ulong_t st_mtimensec;	/* Nsecs of last modification.  */
+    __time_t st_ctime;			/* Time of last status change.  */
+    __syscall_ulong_t st_ctimensec;	/* Nsecs of last status change.  */
+# endif
+# ifdef __x86_64__
+    __syscall_slong_t __glibc_reserved[3];
+# else
+#  ifndef __USE_FILE_OFFSET64
+    unsigned long int __glibc_reserved4;
+    unsigned long int __glibc_reserved5;
+#  else
+    __ino64_t st_ino;			/* File serial number.	*/
+#  endif
+# endif
+#endif /* __USE_TIME64_REDIRECTS  */
+  }
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewInt64(JSContext *, int64_t)";
+"JS_NewInt64(JSContext *, int64_t)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_NewInt64(JSContext *, int64_t)" -> "__JS_NewFloat64(JSContext *, double)";
+"js_std_file_tell(JSContext *, JSValue, int, JSValue *, int)";
+"js_std_file_tell(JSContext *, JSValue, int, JSValue *, int)" -> "js_std_file_get(JSContext *, JSValue)";
+"js_std_file_tell(JSContext *, JSValue, int, JSValue *, int)" -> "ftello(FILE *)";
+"js_std_file_tell(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewBigInt64(JSContext *, int64_t)";
+"js_std_file_tell(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "js_std_file_get(JSContext *, JSValue)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetArrayBuffer(JSContext *, size_t *, JSValue)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "fwrite(const void *restrict, size_t, size_t, FILE *restrict)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "fread(void *restrict, size_t, size_t, FILE *restrict)";
+"js_std_file_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "JS_IsBigInt(JSContext *, JSValue)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Ext(JSContext *, int64_t *, JSValue)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "lseek(int, __off_t, int)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "__errno_location()";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "JS_NewBigInt64(JSContext *, int64_t)";
+"js_os_seek(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetArrayBuffer(JSContext *, size_t *, JSValue)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "js_get_errno(ssize_t)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "write(int, const void *, size_t)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "read(int, void *, size_t)";
+"js_os_read_write(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "lstat(const char *restrict, struct stat *restrict)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "stat(const char *restrict, struct stat *restrict)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "__errno_location()";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewObject(JSContext *)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "timespec_to_ms(const struct timespec *)";
+"js_os_stat(JSContext *, JSValue, int, JSValue *, int)" -> "make_obj_error(JSContext *, JSValue, int)";
+}

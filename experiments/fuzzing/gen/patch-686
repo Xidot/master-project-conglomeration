@@ -1,0 +1,19 @@
+--- a/list.h
++++ b/list.h
+@@ -44,6 +44,8 @@
+ static inline void __list_add(struct list_head *el,
+                              struct list_head *prev, struct list_head *next)
+ {
++    if (!el || !prev || !next)
++        funlogline();
+     prev->next = el;
+     el->prev = prev;
+     el->next = next;
+@@ -61,5 +63,7 @@
+  */
+ static inline void list_add_tail(struct list_head *el, struct list_head *head)
+ {
++    if (!el || !head || !head->prev)
++        funlogline();
+     __list_add(el, head->prev, head);
+ }

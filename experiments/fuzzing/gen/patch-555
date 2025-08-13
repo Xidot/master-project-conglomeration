@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2326,6 +2326,9 @@
+ /* use 0 to disable maximum stack size check */
+ void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size)
+ {
++    if (rt->stack_top != NULL && stack_size > (size_t)(rt->stack_top - (void *)0)) {
++        funlogline();
++    }
+     rt->stack_size = stack_size;
+     update_stack_limit(rt);
+ }

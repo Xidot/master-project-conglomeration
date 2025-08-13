@@ -1,0 +1,58 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_hash_key(JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `map_hash_key` function:
+
+:quickjs.c:map_hash_key:48451
+:quickjs.c:map_hash_key:48451
+:quickjs.c:map_hash_key:48451
+
+---
+
+1. The first issue is in the handling of JS_TAG_FLOAT64 case where NaN values are normalized but there's no check for infinity values which could lead to inconsistent hashing.
+
+2. The second issue is in the JS_TAG_BIG_INT case where the hash calculation could overflow since there's no bounds checking on the limb values.
+
+3. The third issue is in the default case where h=0 is returned for unknown tags, which could lead to hash collisions for different types.
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48451,6 +48451,8 @@
+         d = JS_VALUE_GET_FLOAT64(key);
+         /* normalize the NaN */
+         if (isnan(d))
++            funlogline();
++        if (isinf(d))
+             d = JS_FLOAT64_NAN;
+     hash_float64:
+         h = map_hash64(float64_as_uint64(d) ^ JS_TAG_FLOAT64, hash_bits);
+@@ -48463,6 +48465,8 @@
+         {
+             int i;
+             h = 1;
++            if (p->len == 0)
++                funlogline();
+             for(i = p->len - 1; i >= 0; i--) {
+                 h = h * 263 + p->tab[i];
+             }
+@@ -48472,6 +48476,8 @@
+         }
+         break;
+     default:
++        if (tag != JS_TAG_NULL && tag != JS_TAG_UNDEFINED && tag != JS_TAG_UNINITIALIZED)
++            funlogline();
+         h = 0;
+         break;
+     }
+```
+
+The changes add checks for:
+1. Infinity values in float64 case
+2. Empty bigint case
+3. Unexpected tag values in default case
+
+Each condition will call funlogline() when the problematic case is encountered.

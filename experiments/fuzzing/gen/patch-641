@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12257,6 +12257,7 @@
+     case JS_TAG_SHORT_BIG_INT:
+         if (flag != TON_FLAG_NUMERIC) {
+             JS_FreeValue(ctx, val);
++            if (flag != TON_FLAG_NUMERIC) funlogline();
+             return JS_ThrowTypeError(ctx, "cannot convert bigint to number");
+         }
+         ret = val;
+@@ -12269,6 +12270,7 @@
+     case JS_TAG_BOOL:
+     case JS_TAG_NULL:
+         ret = JS_NewInt32(ctx, JS_VALUE_GET_INT(val));
++        if (tag == JS_TAG_BOOL || tag == JS_TAG_NULL) funlogline();
+         break;
+     case JS_TAG_UNDEFINED:
+         ret = JS_NAN;
+@@ -12291,6 +12293,7 @@
+             str = JS_ToCStringLen(ctx, &len, val);
+             JS_FreeValue(ctx, val);
+             if (!str)
++                funlogline();
+                 return JS_EXCEPTION;
+             p = str;
+             p += skip_spaces(p);

@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4702,6 +4702,9 @@
+     sh->proto = proto;
+     memset(prop_hash_end(sh) - hash_size, 0, sizeof(prop_hash_end(sh)[0]) *
+            hash_size);
++    if ((hash_size & (hash_size - 1)) != 0) {
++        funlogline();
++    }
+     sh->prop_hash_mask = hash_size - 1;
+     sh->prop_size = prop_size;
+     sh->prop_count = 0;
+@@ -4709,6 +4712,9 @@
+ 
+     /* insert in the hash table */
+     sh->hash = shape_initial_hash(proto);
+     sh->is_hashed = TRUE;
+     sh->has_small_array_index = FALSE;
++    if (!sh_alloc || !sh) {
++        funlogline();
++    }
+     js_shape_hash_link(ctx->rt, sh);
+     return sh;
+ }

@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15884,6 +15884,8 @@
+     if (is_exception_pending) {
+         ex_obj = ctx->rt->current_exception;
+         ctx->rt->current_exception = JS_UNINITIALIZED;
++        if (JS_IsException(ex_obj))
++            funlogline();
+         res = -1;
+     } else {
+         ex_obj = JS_UNDEFINED;
+@@ -15896,6 +15898,8 @@
+     }
+     if (JS_IsUndefined(method) || JS_IsNull(method)) {
++        if (JS_IsException(method))
++            funlogline();
+         goto done;
+     }
+     ret = JS_CallFree(ctx, method, enum_obj, 0, NULL);
+@@ -15904,6 +15908,8 @@
+             res = -1;
+         } else if (!JS_IsObject(ret)) {
+             JS_ThrowTypeErrorNotAnObject(ctx);
++            if (JS_IsException(ret))
++                funlogline();
+             res = -1;
+         }
+     }

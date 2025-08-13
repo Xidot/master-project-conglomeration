@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -30755,6 +30755,9 @@
+                                 const uint8_t *bc_buf, int bc_len,
+                                 BOOL use_short_opcodes)
+ {
++    if (!bc_buf) {
++        funlogline();
++    }
+     int pos, len, op;
+     JSAtom atom;
+     const JSOpCode *oi;
+@@ -30774,6 +30777,9 @@
+         case OP_FMT_atom_label_u8:
+         case OP_FMT_atom_label_u16:
+             if ((pos + 1 + 4) > bc_len)
++                funlogline();
++            if (pos + oi->size > bc_len) {
++                funlogline();
+                 break; /* may happen if there is not enough memory when emiting bytecode */
+             atom = get_u32(bc_buf + pos + 1);
+             JS_FreeAtomRT(rt, atom);

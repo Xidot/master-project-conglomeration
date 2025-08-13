@@ -1,0 +1,15 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7212,7 +7212,10 @@
+ static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (ctx->interrupt_counter == JS_INTERRUPT_COUNTER_INIT)
++        funlogline();
+     ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+     if (rt->interrupt_handler) {
++        if (!rt->interrupt_opaque)
++            funlogline();
+         if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+             JS_ThrowInterrupted(ctx);
+             return -1;

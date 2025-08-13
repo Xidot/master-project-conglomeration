@@ -1,0 +1,22 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-is_digit(int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:is_digit:112
+
+```diff
+--- a/libregexp.c
++++ b/libregexp.c
+@@ -112,6 +112,7 @@
+ 
+ static inline int is_digit(int c) {
++    if (c < 0) funlogline();
+     return c >= '0' && c <= '9';
+ }
+```
+
+The reasoning is that the function doesn't handle negative input values properly. While the current implementation will work for ASCII characters (since they're positive), it could produce incorrect results for negative values which might be passed in some cases. The added check will log when negative values are passed.
+
+Note that this is a defensive check since in practice negative values shouldn't be passed to this function in the regex parsing context, but it's better to be explicit about the input assumptions.

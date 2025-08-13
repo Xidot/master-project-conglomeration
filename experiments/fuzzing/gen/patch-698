@@ -1,0 +1,34 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5976,6 +5976,7 @@
+             /* mark all the fields */
+             prs = get_shape_prop(sh);
+             for(i = 0; i < sh->prop_count; i++) {
++                if (i >= p->prop_count) { funlogline(); break; }
+                 JSProperty *pr = &p->prop[i];
+                 if (prs->atom != JS_ATOM_NULL) {
+                     if (prs->flags & JS_PROP_TMASK) {
+@@ -6003,6 +6004,7 @@
+             JSFunctionBytecode *b = (JSFunctionBytecode *)gp;
+             int i;
+             for(i = 0; i < b->cpool_count; i++) {
++                if (i >= b->cpool_count) { funlogline(); break; }
+                 JS_MarkValue(rt, b->cpool[i], mark_func);
+             }
+             if (b->realm)
+@@ -6013,6 +6015,7 @@
+         {
+             JSVarRef *var_ref = (JSVarRef *)gp;
+             if (var_ref->is_detached) {
++                if (!var_ref->pvalue) funlogline();
+                 JS_MarkValue(rt, *var_ref->pvalue, mark_func);
+             } else if (var_ref->async_func) {
+                 mark_func(rt, &var_ref->async_func->header);
+@@ -6035,6 +6038,7 @@
+                        cannot mark the stack. Marking the variables is not needed
+                        because a running function cannot be part of a removable
+                        cycle */
++                    if (!sf->arg_buf) funlogline();
+                     for(sp = sf->arg_buf; sp < sf->cur_sp; sp++)
+                         JS_MarkValue(rt, *sp, mark_func);
+                 }

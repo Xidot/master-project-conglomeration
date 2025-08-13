@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19977,6 +19977,9 @@
+     JSValue promise;
+     JSAsyncFunctionState *s;
+ 
++    if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT || !JS_IsFunction(ctx, func_obj))
++        funlogline();
++
+     s = async_func_init(ctx, func_obj, this_obj, argc, argv);
+     if (!s)
+         return JS_EXCEPTION;
+@@ -19987,6 +19990,9 @@
+         return JS_EXCEPTION;
+     }
+ 
++    if (s->is_completed)
++        funlogline();
++
+     js_async_function_resume(ctx, s);
+ 
+     async_func_free(ctx->rt, s);

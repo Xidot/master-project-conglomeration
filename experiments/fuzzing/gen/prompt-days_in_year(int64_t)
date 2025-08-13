@@ -1,0 +1,197 @@
+Target function: "days_in_year(int64_t)"
+
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 50954
+static int64_t days_in_year(int64_t y) {
+    return 365 + !(y % 4) - !(y % 100) + !(y % 400);
+}
+
+/* return the year, update days */
+/// Line number here: 50959
+static int64_t year_from_days(int64_t *days) {
+    int64_t y, d1, nd, d = *days;
+    y = floor_div(d * 10000, 3652425) + 1970;
+    /* the initial approximation is very good, so only a few
+       iterations are necessary */
+    for(;;) {
+        d1 = d - days_from_year(y);
+        if (d1 < 0) {
+            y--;
+            d1 += days_in_year(y);
+        } else {
+            nd = days_in_year(y);
+            if (d1 < nd)
+                break;
+            d1 -= nd;
+            y++;
+        }
+    }
+    *days = d1;
+    return y;
+}
+
+/// Line number here: 50985
+static __exception int get_date_fields(JSContext *ctx, JSValueConst obj,
+                                       double fields[minimum_length(9)], int is_local, int force)
+{
+    double dval;
+    int64_t d, days, wd, y, i, md, h, m, s, ms, tz = 0;
+
+    if (JS_ThisTimeValue(ctx, &dval, obj))
+        return -1;
+
+    if (isnan(dval)) {
+        if (!force)
+            return FALSE; /* NaN */
+        d = 0;        /* initialize all fields to 0 */
+    } else {
+        d = dval;     /* assuming -8.64e15 <= dval <= -8.64e15 */
+        if (is_local) {
+            tz = -getTimezoneOffset(d);
+            d += tz * 60000;
+        }
+    }
+
+    /* result is >= 0, we can use % */
+    h = math_mod(d, 86400000);
+    days = (d - h) / 86400000;
+    ms = h % 1000;
+    h = (h - ms) / 1000;
+    s = h % 60;
+    h = (h - s) / 60;
+    m = h % 60;
+    h = (h - m) / 60;
+    wd = math_mod(days + 4, 7); /* week day */
+    y = year_from_days(&days);
+
+    for(i = 0; i < 11; i++) {
+        md = month_days[i];
+        if (i == 1)
+            md += days_in_year(y) - 365;
+        if (days < md)
+            break;
+        days -= md;
+    }
+    fields[0] = y;
+    fields[1] = i;
+    fields[2] = days + 1;
+    fields[3] = h;
+    fields[4] = m;
+    fields[5] = s;
+    fields[6] = ms;
+    fields[7] = wd;
+    fields[8] = tz;
+    return TRUE;
+}
+
+/* The spec mandates the use of 'double' and it specifies the order
+   of the operations */
+/// Line number here: 51047
+static double set_date_fields(double fields[minimum_length(7)], int is_local) {
+    double y, m, dt, ym, mn, day, h, s, milli, time, tv;
+    int yi, mi, i;
+    int64_t days;
+    volatile double temp;  /* enforce evaluation order */
+
+    /* emulate 21.4.1.15 MakeDay ( year, month, date ) */
+    y = fields[0];
+    m = fields[1];
+    dt = fields[2];
+    ym = y + floor(m / 12);
+    mn = fmod(m, 12);
+    if (mn < 0)
+        mn += 12;
+    if (ym < -271821 || ym > 275760)
+        return NAN;
+
+    yi = ym;
+    mi = mn;
+    days = days_from_year(yi);
+    for(i = 0; i < mi; i++) {
+        days += month_days[i];
+        if (i == 1)
+            days += days_in_year(yi) - 365;
+    }
+    day = days + dt - 1;
+
+    /* emulate 21.4.1.14 MakeTime ( hour, min, sec, ms ) */
+    h = fields[3];
+    m = fields[4];
+    s = fields[5];
+    milli = fields[6];
+    /* Use a volatile intermediary variable to ensure order of evaluation
+     * as specified in ECMA. This fixes a test262 error on
+     * test262/test/built-ins/Date/UTC/fp-evaluation-order.js.
+     * Without the volatile qualifier, the compile can generate code
+     * that performs the computation in a different order or with instructions
+     * that produce a different result such as FMA (float multiply and add).
+     */
+    time = h * 3600000;
+    time += (temp = m * 60000);
+    time += (temp = s * 1000);
+    time += milli;
+
+    /* emulate 21.4.1.16 MakeDate ( day, time ) */
+    tv = (temp = day * 86400000) + time;   /* prevent generation of FMA */
+    if (!isfinite(tv))
+        return NAN;
+
+    /* adjust for local time and clip */
+    if (is_local) {
+        int64_t ti = tv < INT64_MIN ? INT64_MIN : tv >= 0x1p63 ? INT64_MAX : (int64_t)tv;
+        tv += getTimezoneOffset(ti) * 60000;
+    }
+    return time_clip(tv);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"year_from_days(int64_t *)";
+"year_from_days(int64_t *)" -> "floor_div(int64_t, int64_t)";
+"year_from_days(int64_t *)" -> "days_from_year(int64_t)";
+"year_from_days(int64_t *)" -> "days_in_year(int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "__builtin_isnan()";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "getTimezoneOffset(int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "math_mod(int64_t, int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "year_from_days(int64_t *)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)";
+"set_date_fields(double *, int)" -> "floor(double)";
+"set_date_fields(double *, int)" -> "fmod(double, double)";
+"set_date_fields(double *, int)" -> "__builtin_nanf(const char *)";
+"set_date_fields(double *, int)" -> "days_from_year(int64_t)";
+"set_date_fields(double *, int)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)" -> "__builtin_isfinite()";
+"set_date_fields(double *, int)" -> "getTimezoneOffset(int64_t)";
+"set_date_fields(double *, int)" -> "time_clip(double)";
+}

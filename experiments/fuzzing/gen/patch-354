@@ -1,0 +1,129 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8428,6 +8428,8 @@
+ JSValue JS_GetPropertyUint32(JSContext *ctx, JSValueConst this_obj,
+                              uint32_t idx)
+ {
++    if (JS_VALUE_GET_TAG(this_obj) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     return JS_GetPropertyValue(ctx, this_obj, JS_NewUint32(ctx, idx));
+ }
+ 
+@@ -8356,6 +8358,8 @@
+ static JSValue JS_GetPropertyValue(JSContext *ctx, JSValueConst this_obj,
+                                    JSValue prop)
+ {
++    if (JS_VALUE_GET_TAG(prop) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSAtom atom;
+     JSValue ret;
+ 
+@@ -36514,6 +36518,8 @@
+ static int JS_WriteArray(BCWriterState *s, JSValueConst obj)
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     uint32_t i, len;
+     JSValue val;
+     int ret;
+@@ -39152,6 +39158,8 @@
+                                      int argc, JSValueConst *argv)
+ {
+     JSValue obj, iter, next_method = JS_UNDEFINED;
++    if (JS_VALUE_GET_TAG(argv[0]) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSValueConst iterable;
+     BOOL done;
+ 
+@@ -39661,6 +39669,8 @@
+                                JSValueConst array_arg)
+ {
+     uint32_t len, i;
++    if (JS_VALUE_GET_TAG(array_arg) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     int64_t len64;
+     JSValue *tab, ret;
+     JSObject *p;
+@@ -41106,6 +41116,8 @@
+                              int argc, JSValueConst *argv, int toLocaleString)
+ {
+     JSValue obj, sep = JS_UNDEFINED, el;
++    if (JS_VALUE_GET_TAG(this_val) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     StringBuffer b_s, *b = &b_s;
+     JSString *p = NULL;
+     int64_t i, n;
+@@ -42015,6 +42027,8 @@
+                                       int magic)
+ {
+     JSArrayIteratorData *it;
++    if (JS_VALUE_GET_TAG(this_val) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     uint32_t len, idx;
+     JSValue val, obj;
+     JSObject *p;
+@@ -47777,6 +47791,8 @@
+                                            uint32_t *plen,
+                                            JSValueConst obj)
+ {
++    if (JS_VALUE_GET_TAG(obj) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSProxyData *s;
+     JSValue method, prop_array, val;
+     uint32_t len, i, len2;
+@@ -48302,6 +48318,8 @@
+                                   int argc, JSValueConst *argv, int magic)
+ {
+     JSMapState *s;
++    if (JS_VALUE_GET_TAG(new_target) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSValue obj, adder = JS_UNDEFINED, iter = JS_UNDEFINED, next_method = JS_UNDEFINED;
+     JSValueConst arr;
+     BOOL is_set, is_weak;
+@@ -49775,6 +49793,8 @@
+                                                   JSValueConst resolve_element_env,
+                                                   int addend)
+ {
+     JSValue val;
++    if (JS_VALUE_GET_TAG(resolve_element_env) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     int remainingElementsCount;
+ 
+     val = JS_GetPropertyUint32(ctx, resolve_element_env, 0);
+@@ -53044,6 +53064,8 @@
+                                            JSValueConst off)
+ {
+     JSObject *p;
++    if (JS_VALUE_GET_TAG(dst) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSObject *src_p;
+     uint32_t i;
+     int64_t src_len, offset;
+@@ -53879,6 +53901,8 @@
+                                    int argc, JSValueConst *argv, int toLocaleString)
+ {
+     JSValue sep = JS_UNDEFINED, el;
++    if (JS_VALUE_GET_TAG(this_val) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     StringBuffer b_s, *b = &b_s;
+     JSString *p = NULL;
+     int i, n;
+@@ -54589,6 +54613,8 @@
+                                               int classid)
+ {
+     JSValue iter, ret, arr = JS_UNDEFINED, val, buffer;
++    if (JS_VALUE_GET_TAG(new_target) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     uint32_t i;
+     int size_log2;
+     int64_t len;
+@@ -54642,6 +54668,8 @@
+                                              int classid)
+ {
+     JSObject *p, *src_buffer;
++    if (JS_VALUE_GET_TAG(new_target) == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JSTypedArray *ta;
+     JSValue obj, buffer;
+     uint32_t len, i;

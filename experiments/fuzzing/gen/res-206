@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_new_si64(JSContext *, int64_t)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:js_bigint_new_si64:10960
+
+---
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10967,6 +10967,9 @@
+         r = js_bigint_new(ctx, 2);
+         if (!r)
+             return NULL;
++        if (a < INT32_MIN || a > INT32_MAX) {
++            funlogline();
++        }
+         r->tab[0] = a;
+         r->tab[1] = a >> 32;
+         return r;
+```
+
+The logical bug is in the handling of negative numbers when JS_LIMB_BITS != 64. The code stores the negative value directly into the limb array without properly handling the sign extension. The condition checks if the value is outside 32-bit range, which is when this bug would manifest. The fix adds a check that calls funlogline() when this problematic case occurs.
+
+Note that this doesn't fix the underlying issue (which would require proper sign extension handling), but properly identifies when the problematic case occurs.

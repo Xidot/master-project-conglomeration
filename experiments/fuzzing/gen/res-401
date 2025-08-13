@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_malloc_usable_size_rt(JSRuntime *, const void *)
+-------------------------
+Based on the code provided, I'll analyze the target function `js_malloc_usable_size_rt` for logical errors.
+
+:quickjs.c:js_malloc_usable_size_rt:1347
+
+\pagebreak
+
+The logical error in this function is that it doesn't check if `ptr` is NULL before calling the memory function. While this might be handled by the underlying allocator, it's generally good practice to handle NULL pointers explicitly in wrapper functions.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1346,6 +1346,9 @@
+ /* return the usable size of a memory block */
+ size_t js_malloc_usable_size_rt(JSRuntime *rt, const void *ptr)
+ {
++    if (ptr == NULL) {
++        funlogline();
++    }
+     return rt->mf.js_malloc_usable_size(ptr);
+ }
+```
+
+The reasoning is that while passing NULL to malloc_usable_size might be technically valid (returning 0), it's often a sign of a logical error in the calling code when checking memory sizes. The instrumentation will help detect when this occurs.
+
+Note that this is a defensive programming check rather than a strict logical error in the current implementation, but it helps catch potential issues in calling code.

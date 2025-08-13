@@ -1,0 +1,481 @@
+Target function: "js_alloc_string(JSContext *, int, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 1875
+static JSString *js_alloc_string(JSContext *ctx, int max_len, int is_wide_char)
+{
+    JSString *p;
+    p = js_alloc_string_rt(ctx->rt, max_len, is_wide_char);
+    if (unlikely(!p)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return p;
+}
+
+/* Note: the string contents are uninitialized */
+/// Line number here: 1857
+static JSString *js_alloc_string_rt(JSRuntime *rt, int max_len, int is_wide_char)
+{
+    JSString *str;
+    str = js_malloc_rt(rt, sizeof(JSString) + (max_len << is_wide_char) + 1 - is_wide_char);
+    if (unlikely(!str))
+        return NULL;
+    str->header.ref_count = 1;
+    str->is_wide_char = is_wide_char;
+    str->len = max_len;
+    str->atom_type = 0;
+    str->hash = 0;          /* optional but costless */
+    str->hash_next = 0;     /* optional */
+#ifdef DUMP_LEAKS
+    list_add_tail(&str->link, &rt->string_list);
+#endif
+    return str;
+}
+
+/// Line number here: 7145
+JSValue JS_ThrowOutOfMemory(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    if (!rt->in_out_of_memory) {
+        rt->in_out_of_memory = TRUE;
+        JS_ThrowInternalError(ctx, "out of memory");
+        rt->in_out_of_memory = FALSE;
+    }
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 3402
+static JSValue js_new_string8_len(JSContext *ctx, const char *buf, int len)
+{
+    JSString *str;
+
+    if (len <= 0) {
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    str = js_alloc_string(ctx, len, 0);
+    if (!str)
+        return JS_EXCEPTION;
+    memcpy(str->u.str8, buf, len);
+    str->u.str8[len] = '\0';
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3422
+static JSValue js_new_string16_len(JSContext *ctx, const uint16_t *buf, int len)
+{
+    JSString *str;
+    str = js_alloc_string(ctx, len, 1);
+    if (!str)
+        return JS_EXCEPTION;
+    memcpy(str->u.str16, buf, len * 2);
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3443
+static JSValue js_sub_string(JSContext *ctx, JSString *p, int start, int end)
+{
+    int len = end - start;
+    if (start == 0 && end == p->len) {
+        return JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+    }
+    if (p->is_wide_char && len > 0) {
+        JSString *str;
+        int i;
+        uint16_t c = 0;
+        for (i = start; i < end; i++) {
+            c |= p->u.str16[i];
+        }
+        if (c > 0xFF)
+            return js_new_string16_len(ctx, p->u.str16 + start, len);
+
+        str = js_alloc_string(ctx, len, 0);
+        if (!str)
+            return JS_EXCEPTION;
+        for (i = 0; i < len; i++) {
+            str->u.str8[i] = p->u.str16[start + i];
+        }
+        str->u.str8[len] = '\0';
+        return JS_MKPTR(JS_TAG_STRING, str);
+    } else {
+        return js_new_string8_len(ctx, (const char *)(p->u.str8 + start), len);
+    }
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/* It is valid to call string_buffer_end() and all string_buffer functions even
+   if string_buffer_init() or another string_buffer function returns an error.
+   If the error_status is set, string_buffer_end() returns JS_EXCEPTION.
+ */
+/// Line number here: 3485
+static int string_buffer_init2(JSContext *ctx, StringBuffer *s, int size,
+                               int is_wide)
+{
+    s->ctx = ctx;
+    s->size = size;
+    s->len = 0;
+    s->is_wide_char = is_wide;
+    s->error_status = 0;
+    s->str = js_alloc_string(ctx, size, is_wide);
+    if (unlikely(!s->str)) {
+        s->size = 0;
+        return s->error_status = -1;
+    }
+#ifdef DUMP_LEAKS
+    /* the StringBuffer may reallocate the JSString, only link it at the end */
+    list_del(&s->str->link);
+#endif
+    return 0;
+}
+
+/* return (NULL, 0) if exception. */
+/* return pointer into a JSString with a live ref_count */
+/* cesu8 determines if non-BMP1 codepoints are encoded as 1 or 2 utf-8 sequences */
+/// Line number here: 3917
+const char *JS_ToCStringLen2(JSContext *ctx, size_t *plen, JSValueConst val1, BOOL cesu8)
+{
+    JSValue val;
+    JSString *str, *str_new;
+    int pos, len, c, c1;
+    uint8_t *q;
+
+    if (JS_VALUE_GET_TAG(val1) != JS_TAG_STRING) {
+        val = JS_ToString(ctx, val1);
+        if (JS_IsException(val))
+            goto fail;
+    } else {
+        val = JS_DupValue(ctx, val1);
+    }
+
+    str = JS_VALUE_GET_STRING(val);
+    len = str->len;
+    if (!str->is_wide_char) {
+        const uint8_t *src = str->u.str8;
+        int count;
+
+        /* count the number of non-ASCII characters */
+        /* Scanning the whole string is required for ASCII strings,
+           and computing the number of non-ASCII bytes is less expensive
+           than testing each byte, hence this method is faster for ASCII
+           strings, which is the most common case.
+         */
+        count = 0;
+        for (pos = 0; pos < len; pos++) {
+            count += src[pos] >> 7;
+        }
+        if (count == 0) {
+            if (plen)
+                *plen = len;
+            return (const char *)src;
+        }
+        str_new = js_alloc_string(ctx, len + count, 0);
+        if (!str_new)
+            goto fail;
+        q = str_new->u.str8;
+        for (pos = 0; pos < len; pos++) {
+            c = src[pos];
+            if (c < 0x80) {
+                *q++ = c;
+            } else {
+                *q++ = (c >> 6) | 0xc0;
+                *q++ = (c & 0x3f) | 0x80;
+            }
+        }
+    } else {
+        const uint16_t *src = str->u.str16;
+        /* Allocate 3 bytes per 16 bit code point. Surrogate pairs may
+           produce 4 bytes but use 2 code points.
+         */
+        str_new = js_alloc_string(ctx, len * 3, 0);
+        if (!str_new)
+            goto fail;
+        q = str_new->u.str8;
+        pos = 0;
+        while (pos < len) {
+            c = src[pos++];
+            if (c < 0x80) {
+                *q++ = c;
+            } else {
+                if (is_hi_surrogate(c)) {
+                    if (pos < len && !cesu8) {
+                        c1 = src[pos];
+                        if (is_lo_surrogate(c1)) {
+                            pos++;
+                            c = from_surrogate(c, c1);
+                        } else {
+                            /* Keep unmatched surrogate code points */
+                            /* c = 0xfffd; */ /* error */
+                        }
+                    } else {
+                        /* Keep unmatched surrogate code points */
+                        /* c = 0xfffd; */ /* error */
+                    }
+                }
+                q += unicode_to_utf8(q, c);
+            }
+        }
+    }
+
+    *q = '\0';
+    str_new->len = q - str_new->u.str8;
+    JS_FreeValue(ctx, val);
+    if (plen)
+        *plen = str_new->len;
+    return (const char *)str_new->u.str8;
+ fail:
+    if (plen)
+        *plen = 0;
+    return NULL;
+}
+
+/// Line number here: 4095
+static JSValue JS_ConcatString1(JSContext *ctx,
+                                const JSString *p1, const JSString *p2)
+{
+    JSString *p;
+    uint32_t len;
+    int is_wide_char;
+
+    len = p1->len + p2->len;
+    if (len > JS_STRING_LEN_MAX)
+        return JS_ThrowInternalError(ctx, "string too long");
+    is_wide_char = p1->is_wide_char | p2->is_wide_char;
+    p = js_alloc_string(ctx, len, is_wide_char);
+    if (!p)
+        return JS_EXCEPTION;
+    if (!is_wide_char) {
+        memcpy(p->u.str8, p1->u.str8, p1->len);
+        memcpy(p->u.str8 + p1->len, p2->u.str8, p2->len);
+        p->u.str8[len] = '\0';
+    } else {
+        copy_str16(p->u.str16, p1, 0, p1->len);
+        copy_str16(p->u.str16 + p1->len, p2, 0, p2->len);
+    }
+    return JS_MKPTR(JS_TAG_STRING, p);
+}
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 37069
+static JSString *JS_ReadString(BCReaderState *s)
+{
+    uint32_t len;
+    size_t size;
+    BOOL is_wide_char;
+    JSString *p;
+
+    if (bc_get_leb128(s, &len))
+        return NULL;
+    is_wide_char = len & 1;
+    len >>= 1;
+    if (len > JS_STRING_LEN_MAX) {
+        JS_ThrowInternalError(s->ctx, "string too long");
+        return NULL;
+    }
+    p = js_alloc_string(s->ctx, len, is_wide_char);
+    if (!p) {
+        s->error_state = -1;
+        return NULL;
+    }
+    size = (size_t)len << is_wide_char;
+    if ((s->buf_end - s->ptr) < size) {
+        bc_read_error_end(s);
+        js_free_string(s->ctx->rt, p);
+        return NULL;
+    }
+    memcpy(p->u.str8, s->ptr, size);
+    s->ptr += size;
+    if (is_wide_char) {
+        if (is_be()) {
+            uint32_t i;
+            for (i = 0; i < len; i++)
+                p->u.str16[i] = bswap16(p->u.str16[i]);
+        }
+    } else {
+        p->u.str8[size] = '\0'; /* add the trailing zero for 8 bit strings */
+    }
+#ifdef DUMP_READ_OBJECT
+    JS_DumpString(s->ctx->rt, p); printf("\n");
+#endif
+    return p;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_alloc_string(JSContext *, int, int)";
+"js_alloc_string(JSContext *, int, int)" -> "js_alloc_string_rt(JSRuntime *, int, int)";
+"js_alloc_string(JSContext *, int, int)" -> "__builtin_expect(long, long)";
+"js_alloc_string(JSContext *, int, int)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_alloc_string_rt(JSRuntime *, int, int)";
+"js_alloc_string_rt(JSRuntime *, int, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"js_alloc_string_rt(JSRuntime *, int, int)" -> "__builtin_expect(long, long)";
+"JS_ThrowOutOfMemory(JSContext *)";
+"JS_ThrowOutOfMemory(JSContext *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"js_new_string8_len(JSContext *, const char *, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_new_string16_len(JSContext *, const uint16_t *, int)";
+"js_new_string16_len(JSContext *, const uint16_t *, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_new_string16_len(JSContext *, const uint16_t *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_sub_string(JSContext *, JSString *, int, int)";
+"js_sub_string(JSContext *, JSString *, int, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_sub_string(JSContext *, JSString *, int, int)" -> "js_new_string16_len(JSContext *, const uint16_t *, int)";
+"js_sub_string(JSContext *, JSString *, int, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_sub_string(JSContext *, JSString *, int, int)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)" -> "js_alloc_string(JSContext *, int, int)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)" -> "__builtin_expect(long, long)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "JS_IsException(JSValue)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "js_alloc_string(JSContext *, int, int)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "is_hi_surrogate(uint32_t)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "is_lo_surrogate(uint32_t)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "from_surrogate(uint32_t, uint32_t)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "unicode_to_utf8(uint8_t *, unsigned int)";
+"JS_ToCStringLen2(JSContext *, size_t *, JSValue, BOOL)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "js_alloc_string(JSContext *, int, int)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ConcatString1(JSContext *, const JSString *, const JSString *)" -> "copy_str16(uint16_t *, const JSString *, int, int)";
+"JS_ReadString(BCReaderState *)";
+"JS_ReadString(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadString(BCReaderState *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ReadString(BCReaderState *)" -> "js_alloc_string(JSContext *, int, int)";
+"JS_ReadString(BCReaderState *)" -> "bc_read_error_end(BCReaderState *)";
+"JS_ReadString(BCReaderState *)" -> "js_free_string(JSRuntime *, JSString *)";
+"JS_ReadString(BCReaderState *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ReadString(BCReaderState *)" -> "is_be()";
+"JS_ReadString(BCReaderState *)" -> "bswap16(uint16_t)";
+}

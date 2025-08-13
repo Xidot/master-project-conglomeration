@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37739,6 +37739,8 @@
+ static JSValue JS_ReadDate(BCReaderState *s)
+ {
+     JSContext *ctx = s->ctx;
++    if (!ctx)
++        funlogline();
+     JSValue val, obj = JS_UNDEFINED;
+ 
+     val = JS_ReadObjectRec(s);
+@@ -37747,9 +37749,13 @@
+     if (!JS_IsNumber(val)) {
+         JS_ThrowTypeError(ctx, "Number tag expected for date");
+         goto fail;
+     }
++    if (!ctx->class_proto[JS_CLASS_DATE])
++        funlogline();
+     obj = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_DATE],
+                                  JS_CLASS_DATE);
+     if (JS_IsException(obj))
+         goto fail;
++    if (BC_add_object_ref(s, obj))
++        funlogline();
+     if (BC_add_object_ref(s, obj))
+         goto fail;
+     JS_SetObjectData(ctx, obj, val);

@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19905,6 +19905,8 @@
+ 
+     func_ret = async_func_resume(ctx, s);
+     if (s->is_completed) {
++        if (JS_IsException(func_ret) && !s->is_completed)
++            funlogline();
+         if (JS_IsException(func_ret)) {
+             JSValue error;
+         fail:
+@@ -19911,6 +19913,8 @@
+             error = JS_GetException(ctx);
+             ret2 = JS_Call(ctx, s->resolving_funcs[1], JS_UNDEFINED,
+                            1, (JSValueConst *)&error);
++            if (!JS_IsFunction(ctx, s->resolving_funcs[1]))
++                funlogline();
+             JS_FreeValue(ctx, error);
+             JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+         } else {
+@@ -19933,6 +19937,8 @@
+         /* await */
+         JS_FreeValue(ctx, func_ret); /* not used */
+         promise = js_promise_resolve(ctx, ctx->promise_ctor,
++        if (JS_IsException(value))
++            funlogline();
+                                      1, (JSValueConst *)&value, 0);
+         JS_FreeValue(ctx, value);
+         if (JS_IsException(promise))

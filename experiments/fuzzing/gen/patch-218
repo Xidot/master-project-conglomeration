@@ -1,0 +1,56 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11914,6 +11914,7 @@
+ static JSValue js_bigint_to_string1(JSContext *ctx, JSValueConst val, int radix)
+ {
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
++        if (radix < 2 || radix > 36) funlogline();
+         char buf[66];
+         int len;
+         len = i64toa_radix(buf, JS_VALUE_GET_SHORT_BIG_INT(val), radix);
+@@ -11928,6 +11929,7 @@
+         JSValue res;
+         
+         assert(JS_VALUE_GET_TAG(val) == JS_TAG_BIG_INT);
++        if (radix < 2 || radix > 36) funlogline();
+         r = JS_VALUE_GET_PTR(val);
+         if (r->len == 1 && r->tab[0] == 0) {
+             /* '0' case */
+@@ -11952,6 +11954,7 @@
+             r = tmp;
+         }
+         log2_radix = 31 - clz32(radix); /* floor(log2(radix)) */
++        if (log2_radix < 0) funlogline();
+         n_bits = r->len * JS_LIMB_BITS - js_limb_safe_clz(r->tab[r->len - 1]);
+         /* n_digits is exact only if radix is a power of
+            two. Otherwise it is >= the exact number of digits */
+@@ -11962,6 +11965,7 @@
+             js_free(ctx, tmp);
+             return JS_EXCEPTION;
+         }
++        if (n_digits <= 0) funlogline();
+         q = buf + n_digits + is_neg + 1;
+         *--q = '\0';
+         buf_end = q;
+@@ -11980,6 +11984,7 @@
+                     break;
+                 } else {
+                     v = mp_div1(r->tab, r->tab, len, radix_base, 0);
++                    if (v >= radix_base) funlogline();
+                     q = limb_to_a(q, v, radix, digits_per_limb_table[radix - 2]);
+                 }
+             }
+@@ -12000,6 +12005,7 @@
+                 }
+                 c &= (radix - 1);
+                 *--q = digits[c];
++                if (c >= radix) funlogline();
+             }
+         }
+         if (is_neg)
+             *--q = '-';
+@@ -12012,6 +12018,7 @@
+         return res;
+     }
+ }
++        if (buf_end < q) funlogline();

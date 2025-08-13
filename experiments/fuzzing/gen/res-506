@@ -1,0 +1,34 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_promise_resolve_function_free_resolved(JSRuntime *, JSPromiseFunctionDataResolved *)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs:
+
+:js_promise_resolve_function_free_resolved:49416
+
+---
+
+The logical bug is in `js_promise_resolve_function_free_resolved()` where the function decrements `ref_count` and frees the structure if it reaches 0, but there's no check for negative ref_count which could happen if the function is called more times than the ref_count was incremented. This could lead to memory corruption.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49416,6 +49416,8 @@
+ static void js_promise_resolve_function_free_resolved(JSRuntime *rt,
+                                                       JSPromiseFunctionDataResolved *sr)
+ {
++    if (sr->ref_count <= 0)
++        funlogline();
+     if (--sr->ref_count == 0) {
+         js_free_rt(rt, sr);
+     }
+```
+
+The bug could trigger if:
+1. `js_create_resolving_functions()` fails after incrementing `ref_count` but before setting up the objects
+2. If there's a double-free scenario where the finalizer and another path both try to free the same structure
+3. If the ref_count management elsewhere in the code is incorrect
+
+The added check will catch cases where the ref_count goes negative before the decrement happens.

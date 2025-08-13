@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-memcmp16(const uint16_t *, const uint16_t *, int)
+-------------------------
+Here are the potential logical bugs in the target function "memcmp16":
+
+:quickjs.c:memcmp16:4038
+
+---
+
+The logical bug is in the comparison logic where integer overflow can occur when subtracting two uint16_t values. The subtraction `src1[i] - src2[i]` can produce incorrect results if the difference is outside the range of int (e.g., when src1[i] is small and src2[i] is large).
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4035,6 +4035,9 @@
+ {
+     int c, i;
+     for(i = 0; i < len; i++) {
++        if ((src1[i] > INT16_MAX && src2[i] < INT16_MIN) || 
++            (src1[i] < INT16_MIN && src2[i] > INT16_MAX)) {
++            funlogline();
++        }
+         c = src1[i] - src2[i];
+         if (c != 0)
+             return c;
+     }
+```

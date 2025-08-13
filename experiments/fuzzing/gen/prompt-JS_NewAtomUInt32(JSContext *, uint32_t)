@@ -1,0 +1,578 @@
+Target function: "JS_NewAtomUInt32(JSContext *, uint32_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 2961
+JSAtom JS_NewAtomUInt32(JSContext *ctx, uint32_t n)
+{
+    if (n <= JS_ATOM_MAX_INT) {
+        return __JS_AtomFromUInt32(n);
+    } else {
+        char buf[11];
+        JSValue val;
+        size_t len;
+        len = u32toa(buf, n);
+        val = js_new_string8_len(ctx, buf, len);
+        if (JS_IsException(val))
+            return JS_ATOM_NULL;
+        return __JS_NewAtom(ctx->rt, JS_VALUE_GET_STRING(val),
+                            JS_ATOM_TYPE_STRING);
+    }
+}
+
+/// Line number here: 2370
+static inline JSAtom __JS_AtomFromUInt32(uint32_t v)
+{
+    return v | JS_ATOM_TAG_INT;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 3402
+static JSValue js_new_string8_len(JSContext *ctx, const char *buf, int len)
+{
+    JSString *str;
+
+    if (len <= 0) {
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    str = js_alloc_string(ctx, len, 0);
+    if (!str)
+        return JS_EXCEPTION;
+    memcpy(str->u.str8, buf, len);
+    str->u.str8[len] = '\0';
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* string case (internal). Return JS_ATOM_NULL if error. 'str' is
+   freed. */
+/// Line number here: 2658
+static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+    int len;
+
+#if 0
+    printf("__JS_NewAtom: ");  JS_DumpString(rt, str); printf("\n");
+#endif
+    if (atom_type < JS_ATOM_TYPE_SYMBOL) {
+        /* str is not NULL */
+        if (str->atom_type == atom_type) {
+            /* str is the atom, return its index */
+            i = js_get_atom_index(rt, str);
+            /* reduce string refcount and increase atom's unless constant */
+            if (__JS_AtomIsConst(i))
+                str->header.ref_count--;
+            return i;
+        }
+        /* try and locate an already registered atom */
+        len = str->len;
+        h = hash_string(str, atom_type);
+        h &= JS_ATOM_HASH_MASK;
+        h1 = h & (rt->atom_hash_size - 1);
+        i = rt->atom_hash[h1];
+        while (i != 0) {
+            p = rt->atom_array[i];
+            if (p->hash == h &&
+                p->atom_type == atom_type &&
+                p->len == len &&
+                js_string_memcmp(p, 0, str, 0, len) == 0) {
+                if (!__JS_AtomIsConst(i))
+                    p->header.ref_count++;
+                goto done;
+            }
+            i = p->hash_next;
+        }
+    } else {
+        h1 = 0; /* avoid warning */
+        if (atom_type == JS_ATOM_TYPE_SYMBOL) {
+            h = 0;
+        } else {
+            h = JS_ATOM_HASH_PRIVATE;
+            atom_type = JS_ATOM_TYPE_SYMBOL;
+        }
+    }
+
+    if (rt->atom_free_index == 0) {
+        /* allow new atom entries */
+        uint32_t new_size, start;
+        JSAtomStruct **new_array;
+
+        /* alloc new with size progression 3/2:
+           4 6 9 13 19 28 42 63 94 141 211 316 474 711 1066 1599 2398 3597 5395 8092
+           preallocating space for predefined atoms (at least 195).
+         */
+        new_size = max_int(211, rt->atom_size * 3 / 2);
+        if (new_size > JS_ATOM_MAX)
+            goto fail;
+        /* XXX: should use realloc2 to use slack space */
+        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        if (!new_array)
+            goto fail;
+        /* Note: the atom 0 is not used */
+        start = rt->atom_size;
+        if (start == 0) {
+            /* JS_ATOM_NULL entry */
+            p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+            if (!p) {
+                js_free_rt(rt, new_array);
+                goto fail;
+            }
+            p->header.ref_count = 1;  /* not refcounted */
+            p->atom_type = JS_ATOM_TYPE_SYMBOL;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            new_array[0] = p;
+            rt->atom_count++;
+            start = 1;
+        }
+        rt->atom_size = new_size;
+        rt->atom_array = new_array;
+        rt->atom_free_index = start;
+        for(i = start; i < new_size; i++) {
+            uint32_t next;
+            if (i == (new_size - 1))
+                next = 0;
+            else
+                next = i + 1;
+            rt->atom_array[i] = atom_set_free(next);
+        }
+    }
+
+    if (str) {
+        if (str->atom_type == 0) {
+            p = str;
+            p->atom_type = atom_type;
+        } else {
+            p = js_malloc_rt(rt, sizeof(JSString) +
+                             (str->len << str->is_wide_char) +
+                             1 - str->is_wide_char);
+            if (unlikely(!p))
+                goto fail;
+            p->header.ref_count = 1;
+            p->is_wide_char = str->is_wide_char;
+            p->len = str->len;
+#ifdef DUMP_LEAKS
+            list_add_tail(&p->link, &rt->string_list);
+#endif
+            memcpy(p->u.str8, str->u.str8, (str->len << str->is_wide_char) +
+                   1 - str->is_wide_char);
+            js_free_string(rt, str);
+        }
+    } else {
+        p = js_malloc_rt(rt, sizeof(JSAtomStruct)); /* empty wide string */
+        if (!p)
+            return JS_ATOM_NULL;
+        p->header.ref_count = 1;
+        p->is_wide_char = 1;    /* Hack to represent NULL as a JSString */
+        p->len = 0;
+#ifdef DUMP_LEAKS
+        list_add_tail(&p->link, &rt->string_list);
+#endif
+    }
+
+    /* use an already free entry */
+    i = rt->atom_free_index;
+    rt->atom_free_index = atom_get_free(rt->atom_array[i]);
+    rt->atom_array[i] = p;
+
+    p->hash = h;
+    p->hash_next = i;   /* atom_index */
+    p->atom_type = atom_type;
+
+    rt->atom_count++;
+
+    if (atom_type != JS_ATOM_TYPE_SYMBOL) {
+        p->hash_next = rt->atom_hash[h1];
+        rt->atom_hash[h1] = i;
+        if (unlikely(rt->atom_count >= rt->atom_count_resize))
+            JS_ResizeAtomHash(rt, rt->atom_hash_size * 2);
+    }
+
+    //    JS_DumpAtoms(rt);
+    return i;
+
+ fail:
+    i = JS_ATOM_NULL;
+ done:
+    if (str)
+        js_free_string(rt, str);
+    return i;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/* set the array length and remove the array elements if necessary. */
+/// Line number here: 8693
+static int set_array_length(JSContext *ctx, JSObject *p, JSValue val,
+                            int flags)
+{
+    uint32_t len, idx, cur_len;
+    int i, ret;
+
+    /* Note: this call can reallocate the properties of 'p' */
+    ret = JS_ToArrayLengthFree(ctx, &len, val, FALSE);
+    if (ret)
+        return -1;
+    /* JS_ToArrayLengthFree() must be done before the read-only test */
+    if (unlikely(!(p->shape->prop[0].flags & JS_PROP_WRITABLE)))
+        return JS_ThrowTypeErrorReadOnly(ctx, flags, JS_ATOM_length);
+
+    if (likely(p->fast_array)) {
+        uint32_t old_len = p->u.array.count;
+        if (len < old_len) {
+            for(i = len; i < old_len; i++) {
+                JS_FreeValue(ctx, p->u.array.u.values[i]);
+            }
+            p->u.array.count = len;
+        }
+        p->prop[0].u.value = JS_NewUint32(ctx, len);
+    } else {
+        /* Note: length is always a uint32 because the object is an
+           array */
+        JS_ToUint32(ctx, &cur_len, p->prop[0].u.value);
+        if (len < cur_len) {
+            uint32_t d;
+            JSShape *sh;
+            JSShapeProperty *pr;
+
+            d = cur_len - len;
+            sh = p->shape;
+            if (d <= sh->prop_count) {
+                JSAtom atom;
+
+                /* faster to iterate */
+                while (cur_len > len) {
+                    atom = JS_NewAtomUInt32(ctx, cur_len - 1);
+                    ret = delete_property(ctx, p, atom);
+                    JS_FreeAtom(ctx, atom);
+                    if (unlikely(!ret)) {
+                        /* unlikely case: property is not
+                           configurable */
+                        break;
+                    }
+                    cur_len--;
+                }
+            } else {
+                /* faster to iterate thru all the properties. Need two
+                   passes in case one of the property is not
+                   configurable */
+                cur_len = len;
+                for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count;
+                    i++, pr++) {
+                    if (pr->atom != JS_ATOM_NULL &&
+                        JS_AtomIsArrayIndex(ctx, &idx, pr->atom)) {
+                        if (idx >= cur_len &&
+                            !(pr->flags & JS_PROP_CONFIGURABLE)) {
+                            cur_len = idx + 1;
+                        }
+                    }
+                }
+
+                for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count;
+                    i++, pr++) {
+                    if (pr->atom != JS_ATOM_NULL &&
+                        JS_AtomIsArrayIndex(ctx, &idx, pr->atom)) {
+                        if (idx >= cur_len) {
+                            /* remove the property */
+                            delete_property(ctx, p, pr->atom);
+                            /* WARNING: the shape may have been modified */
+                            sh = p->shape;
+                            pr = get_shape_prop(sh) + i;
+                        }
+                    }
+                }
+            }
+        } else {
+            cur_len = len;
+        }
+        set_value(ctx, &p->prop[0].u.value, JS_NewUint32(ctx, cur_len));
+        if (unlikely(cur_len > len)) {
+            return JS_ThrowTypeErrorOrFalse(ctx, flags, "not configurable");
+        }
+    }
+    return TRUE;
+}
+
+/// Line number here: 46446
+static JSValue internalize_json_property(JSContext *ctx, JSValueConst holder,
+                                         JSAtom name, JSValueConst reviver)
+{
+    JSValue val, new_el, name_val, res;
+    JSValueConst args[2];
+    int ret, is_array;
+    uint32_t i, len = 0;
+    JSAtom prop;
+    JSPropertyEnum *atoms = NULL;
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        return JS_ThrowStackOverflow(ctx);
+    }
+
+    val = JS_GetProperty(ctx, holder, name);
+    if (JS_IsException(val))
+        return val;
+    if (JS_IsObject(val)) {
+        is_array = JS_IsArray(ctx, val);
+        if (is_array < 0)
+            goto fail;
+        if (is_array) {
+            if (js_get_length32(ctx, &len, val))
+                goto fail;
+        } else {
+            ret = JS_GetOwnPropertyNamesInternal(ctx, &atoms, &len, JS_VALUE_GET_OBJ(val), JS_GPN_ENUM_ONLY | JS_GPN_STRING_MASK);
+            if (ret < 0)
+                goto fail;
+        }
+        for(i = 0; i < len; i++) {
+            if (is_array) {
+                prop = JS_NewAtomUInt32(ctx, i);
+                if (prop == JS_ATOM_NULL)
+                    goto fail;
+            } else {
+                prop = JS_DupAtom(ctx, atoms[i].atom);
+            }
+            new_el = internalize_json_property(ctx, val, prop, reviver);
+            if (JS_IsException(new_el)) {
+                JS_FreeAtom(ctx, prop);
+                goto fail;
+            }
+            if (JS_IsUndefined(new_el)) {
+                ret = JS_DeleteProperty(ctx, val, prop, 0);
+            } else {
+                ret = JS_DefinePropertyValue(ctx, val, prop, new_el, JS_PROP_C_W_E);
+            }
+            JS_FreeAtom(ctx, prop);
+            if (ret < 0)
+                goto fail;
+        }
+    }
+    JS_FreePropertyEnum(ctx, atoms, len);
+    atoms = NULL;
+    name_val = JS_AtomToValue(ctx, name);
+    if (JS_IsException(name_val))
+        goto fail;
+    args[0] = name_val;
+    args[1] = val;
+    res = JS_Call(ctx, reviver, holder, 2, args);
+    JS_FreeValue(ctx, name_val);
+    JS_FreeValue(ctx, val);
+    return res;
+ fail:
+    JS_FreePropertyEnum(ctx, atoms, len);
+    JS_FreeValue(ctx, val);
+    return JS_EXCEPTION;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* additional exported functions */
+/// Line number here: 589
+size_t u32toa(char *buf, uint32_t n)
+{
+    char buf1[10], *q;
+    size_t len;
+    
+    q = buf1 + sizeof(buf1);
+    do {
+        *--q = n % 10 + '0';
+        n /= 10;
+    } while (n != 0);
+    len = buf1 + sizeof(buf1) - q;
+    memcpy(buf, q, len);
+    return len;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewAtomUInt32(JSContext *, uint32_t)";
+"JS_NewAtomUInt32(JSContext *, uint32_t)" -> "__JS_AtomFromUInt32(uint32_t)";
+"JS_NewAtomUInt32(JSContext *, uint32_t)" -> "u32toa(char *, uint32_t)";
+"JS_NewAtomUInt32(JSContext *, uint32_t)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"JS_NewAtomUInt32(JSContext *, uint32_t)" -> "JS_IsException(JSValue)";
+"JS_NewAtomUInt32(JSContext *, uint32_t)" -> "__JS_NewAtom(JSRuntime *, JSString *, int)";
+"u32toa(char *, uint32_t)";
+"u32toa(char *, uint32_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_new_string8_len(JSContext *, const char *, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_get_atom_index(JSRuntime *, JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__JS_AtomIsConst(JSAtom)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "hash_string(const JSString *, uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_string_memcmp(const JSString *, int, const JSString *, int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "max_int(int, int)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_set_free(uint32_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_malloc_rt(JSRuntime *, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "__builtin_expect(long, long)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "js_free_string(JSRuntime *, JSString *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "atom_get_free(const JSAtomStruct *)";
+"__JS_NewAtom(JSRuntime *, JSString *, int)" -> "JS_ResizeAtomHash(JSRuntime *, int)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_ToArrayLengthFree(JSContext *, uint32_t *, JSValue, BOOL)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "__builtin_expect(long, long)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_ThrowTypeErrorReadOnly(JSContext *, int, JSAtom)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_NewAtomUInt32(JSContext *, uint32_t)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "delete_property(JSContext *, JSObject *, JSAtom)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "get_shape_prop(JSShape *)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_AtomIsArrayIndex(JSContext *, uint32_t *, JSAtom)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"set_array_length(JSContext *, JSObject *, JSValue, int)" -> "JS_ThrowTypeErrorOrFalse(JSContext *, int, const char *, ...)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_ThrowStackOverflow(JSContext *)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_IsException(JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_IsObject(JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_IsArray(JSContext *, JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "js_get_length32(JSContext *, uint32_t *, JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_NewAtomUInt32(JSContext *, uint32_t)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_IsUndefined(JSValue)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_DeleteProperty(JSContext *, JSValue, JSAtom, int)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_AtomToValue(JSContext *, JSAtom)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"internalize_json_property(JSContext *, JSValue, JSAtom, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

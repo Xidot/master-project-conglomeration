@@ -1,0 +1,47 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewContext(JSRuntime *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewContext` function:
+
+:JS_NewContext:2125
+:JS_NewContextRaw:2095
+
+---
+
+The main logical issue appears to be in `JS_NewContext` where it calls multiple intrinsic initialization functions without checking if the context creation succeeded first. While `JS_NewContextRaw` does return NULL on failure, the subsequent intrinsic initialization calls would proceed with a NULL context if that happened.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2125,6 +2125,9 @@
+ 
+     ctx = JS_NewContextRaw(rt);
+     if (!ctx)
+         return NULL;
++    if (!ctx) {
++        funlogline();
++    }
+ 
+     JS_AddIntrinsicBaseObjects(ctx);
+     JS_AddIntrinsicDate(ctx);
+```
+
+The second potential issue is in `JS_NewContextRaw` where it allocates memory for `class_proto` but doesn't check if `rt->class_count` is valid before using it in the allocation size calculation. While this would likely crash rather than cause a logical error, it's worth noting.
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2095,6 +2095,9 @@
+     ctx->header.ref_count = 1;
+     add_gc_object(rt, &ctx->header, JS_GC_OBJ_TYPE_JS_CONTEXT);
+ 
++    if (rt->class_count <= 0) {
++        funlogline();
++    }
+     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
+                                     rt->class_count);
+     if (!ctx->class_proto) {
+```

@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29480,6 +29480,8 @@
+ JSAtom JS_GetScriptOrModuleName(JSContext *ctx, int n_stack_levels)
+ {
+     JSStackFrame *sf;
++    if (n_stack_levels < 0)
++        funlogline();
+     JSFunctionBytecode *b;
+     JSObject *p;
+     /* XXX: currently we just use the filename of the englobing
+@@ -29491,6 +29493,8 @@
+     while (n_stack_levels-- > 0) {
+         sf = sf->prev_frame;
+         if (!sf)
++            return JS_ATOM_NULL;
++        if (!sf->prev_frame && n_stack_levels > 0)
+             return JS_ATOM_NULL;
+     }
+     for(;;) {
+@@ -29500,6 +29504,8 @@
+         if (!js_class_has_bytecode(p->class_id))
+             return JS_ATOM_NULL;
+         b = p->u.func.function_bytecode;
++        if (!b)
++            funlogline();
+         if (!b->is_direct_or_indirect_eval) {
+             if (!b->has_debug)
+                 return JS_ATOM_NULL;

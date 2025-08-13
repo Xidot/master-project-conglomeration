@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37714,6 +37714,9 @@
+     uint8_t *data_ptr;
+     JSValue obj;
+     uint64_t u64;
++    
++    if (!s->allow_sab)
++        return JS_ThrowSyntaxError(ctx, "SharedArrayBuffer not allowed");
+ 
+     if (bc_get_leb128(s, &byte_length))
+         return JS_EXCEPTION;
+@@ -37720,6 +37723,9 @@
+     if (bc_get_u64(s, &u64))
+         return JS_EXCEPTION;
+     data_ptr = (uint8_t *)(uintptr_t)u64;
++    if (!ctx->rt->sab_funcs.sab_dup)
++        return JS_ThrowSyntaxError(ctx, "SharedArrayBuffer not supported");
++
+     /* the SharedArrayBuffer is cloned */
+     obj = js_array_buffer_constructor3(ctx, JS_UNDEFINED, byte_length,
+                                        JS_CLASS_SHARED_ARRAY_BUFFER,

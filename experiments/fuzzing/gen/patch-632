@@ -1,0 +1,47 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12350,6 +12350,8 @@
+ 
+     tag = JS_VALUE_GET_TAG(val);
+     if (tag <= JS_TAG_NULL) {
++        if (tag == JS_TAG_UNINITIALIZED)
++            funlogline();
+         *pres = JS_VALUE_GET_INT(val);
+         return 0;
+     } else if (JS_TAG_IS_FLOAT64(tag)) {
+@@ -44310,6 +44312,8 @@
+             if (JS_ToFloat64(ctx, &a, argv[i]))
+                 return JS_EXCEPTION;
+             if (!isnan(r)) {
++                if (isnan(a))
++                    funlogline();
+                 if (isnan(a)) {
+                     r = a;
+                 } else {
+@@ -44401,6 +44405,8 @@
+     r = 0;
+     if (argc > 0) {
+         if (JS_ToFloat64(ctx, &r, argv[0]))
++            return JS_EXCEPTION;
++        if (isnan(r))
+             return JS_EXCEPTION;
+         if (argc == 1) {
+             r = fabs(r);
+@@ -51280,6 +51286,8 @@
+         if (JS_ToFloat64(ctx, &a, argv[i]))
+             return JS_EXCEPTION;
+         if (!isfinite(a))
++            funlogline();
++        if (!isfinite(a))
+             break;
+         fields[i] = trunc(a);
+         if (i == 0 && fields[0] >= 0 && fields[0] < 100)
+@@ -51356,6 +51364,8 @@
+     for(i = 0; i < n; i++) {
+         if (JS_ToFloat64(ctx, &a, argv[i]))
+             return JS_EXCEPTION;
++        if (!isfinite(a))
++            funlogline();
+         if (!isfinite(a))
+             return JS_NAN;
+         fields[i] = trunc(a);

@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5560,6 +5560,9 @@
+     if (var_ref) {
+         assert(var_ref->header.ref_count > 0);
+         if (--var_ref->header.ref_count == 0) {
++            if (!var_ref->is_detached && var_ref->async_func == NULL) {
++                funlogline();
++            }
+             if (var_ref->is_detached) {
+                 JS_FreeValueRT(rt, var_ref->value);
+             } else {

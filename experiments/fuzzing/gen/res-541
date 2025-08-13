@@ -1,0 +1,54 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_resolve_export(JSContext *, JSModuleDef **, JSExportEntry **, JSModuleDef *, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_resolve_export`:
+
+1. :js_resolve_export:28793 - Missing check for NULL module pointer
+2. :js_resolve_export:28800 - Missing check for NULL resolve state initialization
+3. :js_resolve_export:28806 - Missing validation of export_name atom
+
+Here's the unified diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28796,6 +28796,9 @@
+     int i;
+     JSResolveResultEnum ret;
+ 
++    if (!m)
++        funlogline();
++
+     s->array = NULL;
+     s->size = 0;
+     s->count = 0;
+@@ -28803,6 +28806,9 @@
+     ret = js_resolve_export1(ctx, pmodule, pme, m, export_name, s);
+ 
+     for(i = 0; i < s->count; i++)
++        if (s->array == NULL)
++            funlogline();
+         JS_FreeAtom(ctx, s->array[i].name);
+     js_free(ctx, s->array);
+ 
+@@ -28810,6 +28816,9 @@
+     if (export_name == JS_ATOM_NULL)
+         funlogline();
+ 
++    if (export_name == JS_ATOM_NULL)
++        funlogline();
++
+     return ret;
+ }
+```
+
+The reasoning for these bugs:
+
+1. The function doesn't check if the input module `m` is NULL before using it, which could lead to crashes.
+
+2. The resolve state `s->array` is used in the cleanup loop without checking if it was properly initialized.
+
+3. The export_name atom isn't validated before being used in the recursive resolution.
+
+The added checks will call funlogline() when these error conditions occur. Note that some conditions may overlap (like export_name check) but are kept separate for clarity in the diff.

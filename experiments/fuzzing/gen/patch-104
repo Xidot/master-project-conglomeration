@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28877,6 +28877,9 @@
+                                           GetExportNamesState *s,
+                                           JSModuleDef *m, BOOL from_star)
+ {
++    if (unlikely(m == NULL)) {
++        funlogline();
++    }
+     ExportedNameEntry *en;
+     int i, j;
+ 
+@@ -28926,6 +28929,9 @@
+             en = &s->exported_names[s->exported_names_count++];
+             en->export_name = me->export_name;
+             /* avoid a second lookup for simple module exports */
++            if (unlikely(me == NULL)) {
++                funlogline();
++            }
+             if (from_star || me->export_type != JS_EXPORT_TYPE_LOCAL)
+                 en->u.me = NULL;
+             else
+@@ -28936,6 +28942,9 @@
+         }
+     }
+     for(i = 0; i < m->star_export_entries_count; i++) {
++        if (unlikely(m->req_module_entries == NULL)) {
++            funlogline();
++        }
+         JSStarExportEntry *se = &m->star_export_entries[i];
+         JSModuleDef *m1;
+         m1 = m->req_module_entries[se->req_module_idx].module;

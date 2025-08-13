@@ -1,0 +1,13 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52902,6 +52902,10 @@
+ static BOOL typed_array_is_detached(JSContext *ctx, JSObject *p)
+ {
+     JSTypedArray *ta = p->u.typed_array;
++    if (!ta->buffer) {
++        funlogline();
++        return TRUE;
++    }
+     JSArrayBuffer *abuf = ta->buffer->u.array_buffer;
+     /* XXX: could simplify test by ensuring that
+        p->u.array.u.ptr is NULL iff it is detached */

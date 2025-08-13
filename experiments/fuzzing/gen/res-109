@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_leb128(uint32_t *, const uint8_t *, const uint8_t *)
+-------------------------
+Here are the potential logical bugs in the target function `get_leb128`:
+
+:get_leb128:6789
+:get_leb128:6792
+
+---
+
+1. Line 6789: The loop runs for a maximum of 5 iterations, which limits the LEB128 decoding to 5 bytes. While this is typically sufficient for 32-bit values, it may not handle all valid LEB128 encodings correctly if they require more bytes (though unlikely for 32-bit values).
+
+2. Line 6792: The function sets *pval = 0 when returning -1 (error case). This could mask the actual error condition since 0 is also a valid LEB128 value. The caller might not distinguish between a decoding error and a legitimately decoded zero value.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6786,6 +6786,8 @@
+     v = 0;
+     for(i = 0; i < 5; i++) {
+         if (unlikely(ptr >= buf_end))
++            if (i == 0)
++                funlogline();
+             break;
+         a = *ptr++;
+         v |= (a & 0x7f) << (i * 7);
+@@ -6794,6 +6796,7 @@
+             return ptr - buf;
+         }
+     }
++    funlogline();
+     *pval = 0;
+     return -1;
+ }
+```
+
+The first instrumentation checks if we hit the buffer end on the first byte (invalid LEB128), while the second instrumentation logs when we hit the 5-byte limit or other error conditions before returning -1.

@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_realloc_array(JSContext *, void **, int, int *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_realloc_array:1440
+:js_realloc_array:1445
+
+---
+
+1. :js_realloc_array:1440 - The arithmetic overflow comment indicates a potential issue with `new_size = max_int(req_size, *psize * 3 / 2)`. If `*psize` is large enough, multiplying by 3 could overflow before division by 2.
+
+2. :js_realloc_array:1445 - After adding slack, `new_size += slack / elem_size` could potentially overflow if slack is very large and elem_size is small.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1437,6 +1437,9 @@
+     size_t slack;
+     void *new_array;
+     /* XXX: potential arithmetic overflow */
++    if (*psize > INT_MAX / 3 * 2) {
++        funlogline();
++    }
+     new_size = max_int(req_size, *psize * 3 / 2);
+     new_array = js_realloc2(ctx, *parray, new_size * elem_size, &slack);
+     if (!new_array)
+@@ -1444,6 +1447,9 @@
+     new_size += slack / elem_size;
+     *psize = new_size;
+     *parray = new_array;
++    if (new_size < 0) {
++        funlogline();
++    }
+     return 0;
+ }
+```
+
+The first check catches potential overflow in the initial size calculation, while the second check catches if the final size became negative after adding slack space.

@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54700,6 +54700,8 @@
+     int size_log2;
+     uint64_t len, offset;
+ 
++    if (argc < 1)
++        funlogline();
+     size_log2 = typed_array_size_log2(classid);
+     if (JS_VALUE_GET_TAG(argv[0]) != JS_TAG_OBJECT) {
+         if (JS_ToIndex(ctx, &len, argv[0]))
+@@ -54712,6 +54714,8 @@
+     } else {
+         JSObject *p = JS_VALUE_GET_OBJ(argv[0]);
+         if (p->class_id == JS_CLASS_ARRAY_BUFFER ||
+             p->class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
++            if (argc < 2)
++                funlogline();
+             abuf = p->u.array_buffer;
+             if (JS_ToIndex(ctx, &offset, argv[1]))
+                 return JS_EXCEPTION;
+@@ -54720,6 +54724,8 @@
+             if ((offset & ((1 << size_log2) - 1)) != 0 ||
+                 offset > abuf->byte_length)
+                 return JS_ThrowRangeError(ctx, "invalid offset");
++            if (argc < 3)
++                funlogline();
+             if (JS_IsUndefined(argv[2])) {
+                 if ((abuf->byte_length & ((1 << size_log2) - 1)) != 0)
+                     goto invalid_length;

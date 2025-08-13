@@ -1,0 +1,140 @@
+---- tree/tree.rs
+// Remove a node from the tree, re-linking remaining nodes as necessary.
+#[allow(unused_variables)] // `opt_path` only used when feature `fast_rebalance` is enabled
+fn priv_remove<U: SmallUnsigned + Default + Copy>(
+    &mut self,
+    opt_path: Option<&ArrayVec<[U; N]>>,
+    ngh: NodeGetHelper<U>,
+) -> Option<(K, V)> {
+    match ngh.node_idx() {
+        Some(node_idx) => {
+            let node_to_remove = &self.arena[node_idx];
+
+            // Copy out child indexes to reduce scope of above immutable borrow
+            let node_to_remove_left_idx = node_to_remove.left_idx();
+            let mut node_to_remove_right_idx = node_to_remove.right_idx();
+
+            let new_child = match (node_to_remove_left_idx, node_to_remove_right_idx) {
+                // No children
+                (None, None) => None,
+                // Left child only
+                (Some(left_idx), None) => Some(left_idx),
+                // Right child only
+                (None, Some(right_idx)) => Some(right_idx),
+                // Zero-copy algorithm for removal of node with two children:
+                // 1. Iterative search for min node in right subtree
+                // 2. Unlink min node from it's parent (has either no children or a right child)
+                // 3. Re-link min node to removed node's children
+                (Some(_), Some(right_idx)) => {
+                    let mut min_idx = right_idx;
+                    let mut min_parent_idx = node_idx;
+
+                    #[cfg(feature = "fast_rebalance")]
+                    let min_node_subtree_size = node_to_remove.subtree_size() - 1;
+
+                    loop {
+                        let min_node = &self.arena[min_idx];
+                        match min_node.left_idx() {
+                            // Continue search for min node
+                            Some(lt_idx) => {
+                                min_idx = lt_idx;
+                                min_parent_idx = min_idx;
+                            }
+                            // Min node found, unlink it
+                            None => match min_node.right_idx() {
+                                Some(_) => {
+                                    let unlink_new_child = min_node.right_idx();
+                                    if min_parent_idx == node_idx {
+                                        node_to_remove_right_idx = unlink_new_child;
+                                    } else {
+                                        let min_parent_node = &mut self.arena[min_parent_idx];
+                                        min_parent_node.set_left_idx(unlink_new_child);
+
+                                        #[cfg(feature = "fast_rebalance")]
+                                        {
+                                            min_parent_node.set_subtree_size(
+                                                min_parent_node.subtree_size() - 1,
+                                            );
+                                        }
+                                    }
+                                    break;
+                                }
+                                None => {
+                                    if min_parent_idx == node_idx {
+                                        node_to_remove_right_idx = None;
+                                    } else {
+                                        let min_parent_node = &mut self.arena[min_parent_idx];
+                                        min_parent_node.set_left_idx(None);
+
+                                        #[cfg(feature = "fast_rebalance")]
+                                        {
+                                            min_parent_node.set_subtree_size(
+                                                min_parent_node.subtree_size() - 1,
+                                            );
+                                        }
+                                    }
+                                    break;
+                                }
+                            },
+                        }
+                    }
+
+                    // Re-link min node to removed node's children
+                    let min_node = &mut self.arena[min_idx];
+                    min_node.set_right_idx(node_to_remove_right_idx);
+                    min_node.set_left_idx(node_to_remove_left_idx);
+
+                    #[cfg(feature = "fast_rebalance")]
+                    {
+                        min_node.set_subtree_size(min_node_subtree_size);
+                    }
+
+                    // Return as new child
+                    Some(min_idx)
+                }
+            };
+
+            // Update parent or root
+            match ngh.parent_idx() {
+                Some(parent_idx) => {
+                    let parent_node = &mut self.arena[parent_idx];
+                    if ngh.is_right_child() {
+                        parent_node.set_right_idx(new_child);
+                    } else {
+                        parent_node.set_left_idx(new_child);
+                    }
+                }
+                None => {
+                    self.opt_root_idx = new_child;
+                }
+            }
+
+            // Perform removal
+            let mut removed_node = self.arena.hard_remove(node_idx);
+            self.curr_size -= 1;
+
+            // Update min/max
+            if node_idx == self.min_idx {
+                self.update_min_idx();
+            } else if node_idx == self.max_idx {
+                self.update_max_idx();
+            }
+
+            // Update subtree sizes
+            #[cfg(feature = "fast_rebalance")]
+            {
+                debug_assert!(opt_path.is_some());
+                if let Some(path) = opt_path {
+                    for parent_idx in path {
+                        let parent_node = &mut self.arena[(*parent_idx).usize()];
+                        debug_assert!(parent_node.subtree_size() > 1);
+                        parent_node.set_subtree_size(parent_node.subtree_size() - 1);
+                    }
+                }
+            }
+
+            Some((removed_node.take_key(), removed_node.take_val()))
+        }
+        None => None,
+    }
+}

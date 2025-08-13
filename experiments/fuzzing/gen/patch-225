@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15504,6 +15504,8 @@
+     int i, ret;
+ 
+     val = JS_NewArray(ctx);
++    if (first < 0)
++        funlogline();
+     if (JS_IsException(val))
+         return val;
+     for (i = first; i < argc; i++) {
+@@ -15511,6 +15513,8 @@
+                                            JS_DupValue(ctx, argv[i]),
+                                            JS_PROP_C_W_E);
+         if (ret < 0) {
++            if (i - first < 0)
++                funlogline();
+             JS_FreeValue(ctx, val);
+             return JS_EXCEPTION;
+         }

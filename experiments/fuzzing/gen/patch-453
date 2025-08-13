@@ -1,0 +1,15 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3419,6 +3419,9 @@
+ static JSValue js_new_string16_len(JSContext *ctx, const uint16_t *buf, int len)
+ {
+     JSString *str;
++    if (len < 0)
++        funlogline();
+     str = js_alloc_string(ctx, len, 1);
+     if (!str)
+         return JS_EXCEPTION;
++    funlogline(); // No way to validate buf size, so log before memcpy
+     memcpy(str->u.str16, buf, len * 2);
+     return JS_MKPTR(JS_TAG_STRING, str);
+ }

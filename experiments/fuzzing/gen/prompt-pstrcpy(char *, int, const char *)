@@ -1,0 +1,42 @@
+Target function: "pstrcpy(char *, int, const char *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/// Line number here: 31
+void pstrcpy(char *buf, int buf_size, const char *str)
+{
+    int c;
+    char *q = buf;
+
+    if (buf_size <= 0)
+        return;
+
+    for(;;) {
+        c = *str++;
+        if (c == 0 || q >= buf + buf_size - 1)
+            break;
+        *q++ = c;
+    }
+    *q = '\0';
+}
+
+/* strcat and truncate. */
+/// Line number here: 49
+char *pstrcat(char *buf, int buf_size, const char *s)
+{
+    int len;
+    len = strlen(buf);
+    if (len < buf_size)
+        pstrcpy(buf + len, buf_size - len, s);
+    return buf;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"pstrcat(char *, int, const char *)";
+"pstrcat(char *, int, const char *)" -> "strlen(const char *)";
+"pstrcat(char *, int, const char *)" -> "pstrcpy(char *, int, const char *)";
+}

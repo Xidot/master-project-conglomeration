@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29702,6 +29702,8 @@
+     JSValue specifier_str = JS_UNDEFINED, attributes = JS_UNDEFINED, attributes_obj = JS_UNDEFINED;
+     JSValueConst args[5];
+ 
++    if (JS_IsException(specifier))
++        funlogline();
+     basename = JS_GetScriptOrModuleName(ctx, 0);
+     if (basename == JS_ATOM_NULL)
+         basename_val = JS_NULL;
+@@ -29747,6 +29749,8 @@
+             goto exception;
+         attributes_obj = JS_GetProperty(ctx, options, JS_ATOM_with);
+         if (JS_IsException(attributes_obj))
++            funlogline();
++        if (JS_IsException(attributes_obj))
+             goto exception;
+         if (!JS_IsUndefined(attributes_obj)) {
+             JSPropertyEnum *atoms;
+@@ -29767,6 +29771,8 @@
+                 val = JS_GetProperty(ctx, attributes_obj, atoms[i].atom);
+                 if (JS_IsException(val))
+                     goto exception1;
++                if (atoms[i].atom == JS_ATOM_NULL)
++                    funlogline();
+                 if (!JS_IsString(val)) {
+                     JS_FreeValue(ctx, val);
+                     JS_ThrowTypeError(ctx, "module attribute values must be strings");

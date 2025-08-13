@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12353,6 +12353,9 @@
+ {
+     uint32_t tag;
+ 
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_NULL) {
++        funlogline();
++    }
+     tag = JS_VALUE_GET_TAG(val);
+     if (tag <= JS_TAG_NULL) {
+         *pres = JS_VALUE_GET_INT(val);
+@@ -12356,6 +12359,9 @@
+     if (tag <= JS_TAG_NULL) {
+         *pres = JS_VALUE_GET_INT(val);
+         return 0;
++    } else if (JS_VALUE_GET_TAG(val) == JS_TAG_UNDEFINED) {
++        funlogline();
++        return __JS_ToFloat64Free(ctx, pres, val);
+     } else if (JS_TAG_IS_FLOAT64(tag)) {
+         *pres = JS_VALUE_GET_FLOAT64(val);
+         return 0;

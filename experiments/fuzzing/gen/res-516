@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ReadBigInt(BCReaderState *)
+-------------------------
+Let me analyze the `JS_ReadBigInt` function for potential logical bugs.
+
+Potential logical bug locations:
+1. :JS_ReadBigInt:37179 (len calculation for bigint allocation)
+2. :JS_ReadBigInt:37179 (sign extension handling for partial limbs)
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37185,6 +37185,9 @@
+     if (bc_get_leb128(s, &len))
+         goto fail;
+     bc_read_trace(s, "len=%" PRId64 "\n", (int64_t)len);
++    if (len > JS_BIGINT_MAX_SIZE * (JS_LIMB_BITS / 8)) {
++        funlogline();
++    }
+     if (len == 0) {
+         /* zero case */
+         bc_read_trace(s, "}\n");
+@@ -37212,6 +37215,9 @@
+         }
+         shift = JS_LIMB_BITS - n * 8;
+         /* extend the sign */
++        if (shift < 0 || shift >= JS_LIMB_BITS) {
++            funlogline();
++        }
+         if (shift != 0) {
+             v = (js_slimb_t)(v << shift) >> shift;
+         }
+```
+
+Reasoning:
+1. The first potential bug is in the len check - while js_bigint_new checks against JS_BIGINT_MAX_SIZE, the input len is in bytes which could overflow when converted to limbs. The check should be done before allocation.
+
+2. The second potential bug is in the sign extension calculation for partial limbs - the shift calculation could theoretically underflow or overflow if n is invalid, though in practice n is constrained by JS_LIMB_BITS/8.
+
+The instrumentation adds checks for these edge cases. Note that the second case is likely theoretical since n is derived from len % (JS_LIMB_BITS/8) which should keep it in bounds.

@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39628,6 +39628,8 @@
+ {
+     JSValue len_val;
+     len_val = JS_GetProperty(ctx, obj, JS_ATOM_length);
++    if (JS_VALUE_GET_TAG(obj) >= JS_TAG_FIRST && JS_VALUE_GET_TAG(obj) <= JS_TAG_OBJECT)
++        funlogline();
+     if (JS_IsException(len_val)) {
+         *pres = 0;
+         return -1;
+@@ -39632,6 +39634,8 @@
+         *pres = 0;
+         return -1;
+     }
++    if (JS_VALUE_GET_TAG(len_val) == JS_TAG_NULL)
++        funlogline();
+     return JS_ToUint32Free(ctx, pres, len_val);
+ }

@@ -1,0 +1,715 @@
+Target function: "string_buffer_putc16(StringBuffer *, uint32_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/* 0 <= c <= 0xffff */
+/// Line number here: 3608
+static int string_buffer_putc16(StringBuffer *s, uint32_t c)
+{
+    if (likely(s->len < s->size)) {
+        if (s->is_wide_char) {
+            s->str->u.str16[s->len++] = c;
+            return 0;
+        } else if (c < 0x100) {
+            s->str->u.str8[s->len++] = c;
+            return 0;
+        }
+    }
+    return string_buffer_putc_slow(s, c);
+}
+
+/// Line number here: 3574
+static no_inline int string_buffer_putc_slow(StringBuffer *s, uint32_t c)
+{
+    if (unlikely(s->len >= s->size)) {
+        if (string_buffer_realloc(s, s->len + 1, c))
+            return -1;
+    }
+    if (s->is_wide_char) {
+        s->str->u.str16[s->len++] = c;
+    } else if (c < 0x100) {
+        s->str->u.str8[s->len++] = c;
+    } else {
+        if (string_buffer_widen(s, s->size))
+            return -1;
+        s->str->u.str16[s->len++] = c;
+    }
+    return 0;
+}
+
+/* 0 <= c <= 0x10ffff */
+/// Line number here: 3623
+static int string_buffer_putc(StringBuffer *s, uint32_t c)
+{
+    if (unlikely(c >= 0x10000)) {
+        /* surrogate pair */
+        if (string_buffer_putc16(s, get_hi_surrogate(c)))
+            return -1;
+        c = get_lo_surrogate(c);
+    }
+    return string_buffer_putc16(s, c);
+}
+
+/// Line number here: 3769
+static int string_buffer_fill(StringBuffer *s, int c, int count)
+{
+    /* XXX: optimize */
+    if (s->len + count > s->size) {
+        if (string_buffer_realloc(s, s->len + count, c))
+            return -1;
+    }
+    while (count-- > 0) {
+        if (string_buffer_putc16(s, c))
+            return -1;
+    }
+    return 0;
+}
+
+/* create a string from a UTF-8 buffer */
+/// Line number here: 3816
+JSValue JS_NewStringLen(JSContext *ctx, const char *buf, size_t buf_len)
+{
+    const uint8_t *p, *p_end, *p_start, *p_next;
+    uint32_t c;
+    StringBuffer b_s, *b = &b_s;
+    size_t len1;
+
+    p_start = (const uint8_t *)buf;
+    p_end = p_start + buf_len;
+    len1 = count_ascii(p_start, buf_len);
+    p = p_start + len1;
+    if (len1 > JS_STRING_LEN_MAX)
+        return JS_ThrowInternalError(ctx, "string too long");
+    if (p == p_end) {
+        /* ASCII string */
+        return js_new_string8_len(ctx, buf, buf_len);
+    } else {
+        if (string_buffer_init(ctx, b, buf_len))
+            goto fail;
+        string_buffer_write8(b, p_start, len1);
+        while (p < p_end) {
+            if (*p < 128) {
+                string_buffer_putc8(b, *p++);
+            } else {
+                /* parse utf-8 sequence, return 0xFFFFFFFF for error */
+                c = unicode_from_utf8(p, p_end - p, &p_next);
+                if (c < 0x10000) {
+                    p = p_next;
+                } else if (c <= 0x10FFFF) {
+                    p = p_next;
+                    /* surrogate pair */
+                    string_buffer_putc16(b, get_hi_surrogate(c));
+                    c = get_lo_surrogate(c);
+                } else {
+                    /* invalid char */
+                    c = 0xfffd;
+                    /* skip the invalid chars */
+                    /* XXX: seems incorrect. Why not just use c = *p++; ? */
+                    while (p < p_end && (*p >= 0x80 && *p < 0xc0))
+                        p++;
+                    if (p < p_end) {
+                        p++;
+                        while (p < p_end && (*p >= 0x80 && *p < 0xc0))
+                            p++;
+                    }
+                }
+                string_buffer_putc16(b, c);
+            }
+        }
+    }
+    return string_buffer_end(b);
+
+ fail:
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 42636
+static JSValue js_string_fromCharCode(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv)
+{
+    int i;
+    StringBuffer b_s, *b = &b_s;
+
+    string_buffer_init(ctx, b, argc);
+
+    for(i = 0; i < argc; i++) {
+        int32_t c;
+        if (JS_ToInt32(ctx, &c, argv[i]) || string_buffer_putc16(b, c & 0xffff)) {
+            string_buffer_free(b);
+            return JS_EXCEPTION;
+        }
+    }
+    return string_buffer_end(b);
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 44145
+static JSValue js_string_CreateHTML(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv, int magic)
+{
+    JSValue str;
+    const JSString *p;
+    StringBuffer b_s, *b = &b_s;
+    static struct { const char *tag, *attr; } const defs[] = {
+        { "a", "name" }, { "big", NULL }, { "blink", NULL }, { "b", NULL },
+        { "tt", NULL }, { "font", "color" }, { "font", "size" }, { "i", NULL },
+        { "a", "href" }, { "small", NULL }, { "strike", NULL },
+        { "sub", NULL }, { "sup", NULL },
+    };
+
+    str = JS_ToStringCheckObject(ctx, this_val);
+    if (JS_IsException(str))
+        return JS_EXCEPTION;
+    string_buffer_init(ctx, b, 7);
+    string_buffer_putc8(b, '<');
+    string_buffer_puts8(b, defs[magic].tag);
+    if (defs[magic].attr) {
+        // r += " " + attr + "=\"" + value + "\"";
+        JSValue value;
+        int i;
+
+        string_buffer_putc8(b, ' ');
+        string_buffer_puts8(b, defs[magic].attr);
+        string_buffer_puts8(b, "=\"");
+        value = JS_ToStringCheckObject(ctx, argv[0]);
+        if (JS_IsException(value)) {
+            JS_FreeValue(ctx, str);
+            string_buffer_free(b);
+            return JS_EXCEPTION;
+        }
+        p = JS_VALUE_GET_STRING(value);
+        for (i = 0; i < p->len; i++) {
+            int c = string_get(p, i);
+            if (c == '"') {
+                string_buffer_puts8(b, "&quot;");
+            } else {
+                string_buffer_putc16(b, c);
+            }
+        }
+        JS_FreeValue(ctx, value);
+        string_buffer_putc8(b, '\"');
+    }
+    // return r + ">" + str + "</" + tag + ">";
+    string_buffer_putc8(b, '>');
+    string_buffer_concat_value_free(b, str);
+    string_buffer_puts8(b, "</");
+    string_buffer_puts8(b, defs[magic].tag);
+    string_buffer_putc8(b, '>');
+    return string_buffer_end(b);
+}
+
+/// Line number here: 677
+typedef struct JSRegExp {
+    JSString *pattern;
+    JSString *bytecode; /* also contains the flags */
+} JSRegExp
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 44948
+static JSValue js_regexp_get_source(JSContext *ctx, JSValueConst this_val)
+{
+    JSRegExp *re;
+    JSString *p;
+    StringBuffer b_s, *b = &b_s;
+    int i, n, c, c2, bra;
+
+    if (JS_VALUE_GET_TAG(this_val) != JS_TAG_OBJECT)
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    if (js_same_value(ctx, this_val, ctx->class_proto[JS_CLASS_REGEXP]))
+        goto empty_regex;
+
+    re = js_get_regexp(ctx, this_val, TRUE);
+    if (!re)
+        return JS_EXCEPTION;
+
+    p = re->pattern;
+
+    if (p->len == 0) {
+    empty_regex:
+        return js_new_string8(ctx, "(?:)");
+    }
+    string_buffer_init2(ctx, b, p->len, p->is_wide_char);
+
+    /* Escape '/' and newline sequences as needed */
+    bra = 0;
+    for (i = 0, n = p->len; i < n;) {
+        c2 = -1;
+        switch (c = string_get(p, i++)) {
+        case '\\':
+            if (i < n)
+                c2 = string_get(p, i++);
+            break;
+        case ']':
+            bra = 0;
+            break;
+        case '[':
+            if (!bra) {
+                if (i < n && string_get(p, i) == ']')
+                    c2 = string_get(p, i++);
+                bra = 1;
+            }
+            break;
+        case '\n':
+            c = '\\';
+            c2 = 'n';
+            break;
+        case '\r':
+            c = '\\';
+            c2 = 'r';
+            break;
+        case '/':
+            if (!bra) {
+                c = '\\';
+                c2 = '/';
+            }
+            break;
+        }
+        string_buffer_putc16(b, c);
+        if (c2 >= 0)
+            string_buffer_putc16(b, c2);
+    }
+    return string_buffer_end(b);
+}
+
+/// Line number here: 45114
+static JSValue js_regexp_escape(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    JSValue str;
+    StringBuffer b_s, *b = &b_s;
+    JSString *p;
+    uint32_t c, i;
+    char s[16];
+
+    if (!JS_IsString(argv[0]))
+        return JS_ThrowTypeError(ctx, "not a string");
+    str = JS_ToString(ctx, argv[0]); /* must call it to linearlize ropes */
+    if (JS_IsException(str))
+        return JS_EXCEPTION;
+    p = JS_VALUE_GET_STRING(str);
+    string_buffer_init2(ctx, b, 0, p->is_wide_char);
+    for (i = 0; i < p->len; i++) {
+        c = string_get(p, i);
+        if (c < 33) {
+            if (c >= 9 && c <= 13) {
+                string_buffer_putc8(b, '\\');
+                string_buffer_putc8(b, "tnvfr"[c - 9]);
+            } else {
+                goto hex2;
+            }
+        } else if (c < 128) {
+            if ((c >= '0' && c <= '9')
+             || (c >= 'A' && c <= 'Z')
+             || (c >= 'a' && c <= 'z')) {
+                if (i == 0)
+                    goto hex2;
+            } else if (strchr(",-=<>#&!%:;@~'`\"", c)) {
+                goto hex2;
+            } else if (c != '_') {
+                string_buffer_putc8(b, '\\');
+            }
+            string_buffer_putc8(b, c);
+        } else if (c < 256) {
+        hex2:
+            snprintf(s, sizeof(s), "\\x%02x", c);
+            string_buffer_puts8(b, s);
+        } else if (is_surrogate(c) || lre_is_space(c)) {
+            snprintf(s, sizeof(s), "\\u%04x", c);
+            string_buffer_puts8(b, s);
+        } else {
+            string_buffer_putc16(b, c);
+        }
+    }
+    JS_FreeValue(ctx, str);
+    return string_buffer_end(b);
+}
+
+/// Line number here: 50762
+static JSValue js_global_encodeURI(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv,
+                                   int isComponent)
+{
+    JSValue str;
+    StringBuffer b_s, *b = &b_s;
+    JSString *p;
+    int k, c, c1;
+
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        return str;
+
+    p = JS_VALUE_GET_STRING(str);
+    string_buffer_init(ctx, b, p->len);
+    for (k = 0; k < p->len;) {
+        c = string_get(p, k);
+        k++;
+        if (isURIUnescaped(c, isComponent)) {
+            string_buffer_putc16(b, c);
+        } else {
+            if (is_lo_surrogate(c)) {
+                js_throw_URIError(ctx, "invalid character");
+                goto fail;
+            } else if (is_hi_surrogate(c)) {
+                if (k >= p->len) {
+                    js_throw_URIError(ctx, "expecting surrogate pair");
+                    goto fail;
+                }
+                c1 = string_get(p, k);
+                k++;
+                if (!is_lo_surrogate(c1)) {
+                    js_throw_URIError(ctx, "expecting surrogate pair");
+                    goto fail;
+                }
+                c = from_surrogate(c, c1);
+            }
+            if (c < 0x80) {
+                encodeURI_hex(b, c);
+            } else {
+                /* XXX: use C UTF-8 conversion ? */
+                if (c < 0x800) {
+                    encodeURI_hex(b, (c >> 6) | 0xc0);
+                } else {
+                    if (c < 0x10000) {
+                        encodeURI_hex(b, (c >> 12) | 0xe0);
+                    } else {
+                        encodeURI_hex(b, (c >> 18) | 0xf0);
+                        encodeURI_hex(b, ((c >> 12) & 0x3f) | 0x80);
+                    }
+                    encodeURI_hex(b, ((c >> 6) & 0x3f) | 0x80);
+                }
+                encodeURI_hex(b, (c & 0x3f) | 0x80);
+            }
+        }
+    }
+    JS_FreeValue(ctx, str);
+    return string_buffer_end(b);
+
+fail:
+    JS_FreeValue(ctx, str);
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 50827
+static JSValue js_global_escape(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    JSValue str;
+    StringBuffer b_s, *b = &b_s;
+    JSString *p;
+    int i, len, c;
+
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        return str;
+
+    p = JS_VALUE_GET_STRING(str);
+    string_buffer_init(ctx, b, p->len);
+    for (i = 0, len = p->len; i < len; i++) {
+        c = string_get(p, i);
+        if (isUnescaped(c)) {
+            string_buffer_putc16(b, c);
+        } else {
+            encodeURI_hex(b, c);
+        }
+    }
+    JS_FreeValue(ctx, str);
+    return string_buffer_end(b);
+}
+
+/// Line number here: 50853
+static JSValue js_global_unescape(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv)
+{
+    JSValue str;
+    StringBuffer b_s, *b = &b_s;
+    JSString *p;
+    int i, len, c, n;
+
+    str = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str))
+        return str;
+
+    string_buffer_init(ctx, b, 0);
+    p = JS_VALUE_GET_STRING(str);
+    for (i = 0, len = p->len; i < len; i++) {
+        c = string_get(p, i);
+        if (c == '%') {
+            if (i + 6 <= len
+            &&  string_get(p, i + 1) == 'u'
+            &&  (n = string_get_hex(p, i + 2, 4)) >= 0) {
+                c = n;
+                i += 6 - 1;
+            } else
+            if (i + 3 <= len
+            &&  (n = string_get_hex(p, i + 1, 2)) >= 0) {
+                c = n;
+                i += 3 - 1;
+            }
+        }
+        string_buffer_putc16(b, c);
+    }
+    JS_FreeValue(ctx, str);
+    return string_buffer_end(b);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"string_buffer_putc16(StringBuffer *, uint32_t)";
+"string_buffer_putc16(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc16(StringBuffer *, uint32_t)" -> "string_buffer_putc_slow(StringBuffer *, uint32_t)";
+"string_buffer_putc_slow(StringBuffer *, uint32_t)";
+"string_buffer_putc_slow(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc_slow(StringBuffer *, uint32_t)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_putc_slow(StringBuffer *, uint32_t)" -> "string_buffer_widen(StringBuffer *, int)";
+"string_buffer_putc(StringBuffer *, uint32_t)";
+"string_buffer_putc(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc(StringBuffer *, uint32_t)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"string_buffer_putc(StringBuffer *, uint32_t)" -> "get_hi_surrogate(uint32_t)";
+"string_buffer_putc(StringBuffer *, uint32_t)" -> "get_lo_surrogate(uint32_t)";
+"string_buffer_fill(StringBuffer *, int, int)";
+"string_buffer_fill(StringBuffer *, int, int)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_fill(StringBuffer *, int, int)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "count_ascii(const uint8_t *, size_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_write8(StringBuffer *, const uint8_t *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_putc8(StringBuffer *, uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "unicode_from_utf8(const uint8_t *, int, const uint8_t **)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "get_hi_surrogate(uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "get_lo_surrogate(uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_end(StringBuffer *)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_free(StringBuffer *)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_free(StringBuffer *)";
+"js_string_fromCharCode(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToStringCheckObject(JSContext *, JSValue)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_putc8(StringBuffer *, uint32_t)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_puts8(StringBuffer *, const char *)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_free(StringBuffer *)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_get(const JSString *, int)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_concat_value_free(StringBuffer *, JSValue)";
+"js_string_CreateHTML(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_end(StringBuffer *)";
+"js_regexp_get_source(JSContext *, JSValue)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "js_same_value(JSContext *, JSValue, JSValue)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "js_get_regexp(JSContext *, JSValue, BOOL)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "js_new_string8(JSContext *, const char *)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "string_get(const JSString *, int)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_regexp_get_source(JSContext *, JSValue)" -> "string_buffer_end(StringBuffer *)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_IsString(JSValue)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_get(const JSString *, int)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc8(StringBuffer *, uint32_t)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "strchr(const char *, int)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "snprintf(char *restrict, size_t, const char *restrict, ...)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_puts8(StringBuffer *, const char *)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "is_surrogate(uint32_t)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "lre_is_space(uint32_t)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ToString(JSContext *, JSValue)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "string_get(const JSString *, int)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "isURIUnescaped(int, int)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "is_lo_surrogate(uint32_t)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "js_throw_URIError(JSContext *, const char *, ...)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "is_hi_surrogate(uint32_t)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "from_surrogate(uint32_t, uint32_t)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "encodeURI_hex(StringBuffer *, int)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_end(StringBuffer *)";
+"js_global_encodeURI(JSContext *, JSValue, int, JSValue *, int)" -> "string_buffer_free(StringBuffer *)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "string_get(const JSString *, int)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "isUnescaped(int)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "encodeURI_hex(StringBuffer *, int)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_global_escape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "string_get(const JSString *, int)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "string_get_hex(JSString *, int, int)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_global_unescape(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+}

@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8808,6 +8808,9 @@
+     /* extend the array by one */
+     /* XXX: convert to slow array if new_len > 2^31-1 elements */
+     new_len = p->u.array.count + 1;
++    if (new_len == 0) { // overflow check
++        funlogline();
++    }
+     /* update the length if necessary. We assume that if the length is
+        not an integer, then if it >= 2^31.  */
+     if (likely(JS_VALUE_GET_TAG(p->prop[0].u.value) == JS_TAG_INT)) {
+@@ -8816,6 +8819,9 @@
+             if (unlikely(!(get_shape_prop(p->shape)->flags & JS_PROP_WRITABLE))) {
+                 JS_FreeValue(ctx, val);
+                 return JS_ThrowTypeErrorReadOnly(ctx, flags, JS_ATOM_length);
++            }
++            if (new_len < array_len) { // length wrap-around check
++                funlogline();
+             }
+             p->prop[0].u.value = JS_NewInt32(ctx, new_len);
+         }
+     }
+@@ -8823,6 +8829,9 @@
+         if (expand_fast_array(ctx, p, new_len)) {
+             JS_FreeValue(ctx, val);
+             return -1;
++        }
++        if (p->u.array.u1.size < new_len) { // expansion failed check
++            funlogline();
+         }
+     }
+     p->u.array.u.values[new_len - 1] = val;

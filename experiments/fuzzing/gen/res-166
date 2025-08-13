@@ -1,0 +1,51 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_async_function_call`:
+
+1. :quickjs.c:js_async_function_call:19980
+2. :quickjs.c:js_async_function_call:19990
+3. :quickjs.c:js_async_function_call:19996
+
+---
+
+1. :quickjs.c:js_async_function_call:19980 - The function doesn't check if `func_obj` is actually an async function before proceeding with async operations. This could lead to incorrect behavior if called with a non-async function.
+
+2. :quickjs.c:js_async_function_call:19990 - The promise capability creation is done before checking if the async function state is valid, which could lead to resource leaks if initialization fails.
+
+3. :quickjs.c:js_async_function_call:19996 - The function frees the async state immediately after resuming, without waiting for the async operation to complete, which could cause use-after-free issues.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19977,6 +19977,9 @@
+     JSValue promise;
+     JSAsyncFunctionState *s;
+ 
++    if (JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT || !JS_IsFunction(ctx, func_obj))
++        funlogline();
++
+     s = async_func_init(ctx, func_obj, this_obj, argc, argv);
+     if (!s)
+         return JS_EXCEPTION;
+@@ -19987,6 +19990,9 @@
+         return JS_EXCEPTION;
+     }
+ 
++    if (s->is_completed)
++        funlogline();
++
+     js_async_function_resume(ctx, s);
+ 
+     async_func_free(ctx->rt, s);
+```
+
+The modifications:
+1. Add check for valid async function object
+2. Add check for premature completion state
+3. The third issue (early free) is actually handled by the async state management, so no additional check is needed there.
+
+Note that these checks are conservative and may trigger false positives in some edge cases, but they will catch the main logical error conditions.

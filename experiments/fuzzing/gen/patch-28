@@ -1,0 +1,72 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36930,6 +36930,9 @@
+ static int bc_get_u8(BCReaderState *s, uint8_t *pval)
+ {
+     if (unlikely(s->buf_end - s->ptr < 1)) {
++        if (s->ptr > s->buf_end) {
++            funlogline();
++        }
+         *pval = 0; /* avoid warning */
+         return bc_read_error_end(s);
+     }
+@@ -37178,6 +37181,9 @@
+     JSBigInt *p;
+     js_limb_t v;
+     uint8_t v8;
++
++    if (len > JS_LIMB_BITS * 2)
++        funlogline();
+     
+     if (bc_get_leb128(s, &len))
+         goto fail;
+@@ -37249,6 +37255,9 @@
+     int idx, i, local_count;
+     int function_size, cpool_offset, byte_code_offset;
+     int closure_var_offset, vardefs_offset;
++
++    if (sizeof(bc) != sizeof(JSFunctionBytecode))
++        funlogline();
+ 
+     memset(&bc, 0, sizeof(bc));
+     bc.header.ref_count = 1;
+@@ -37447,6 +37456,9 @@
+     JSModuleDef *m = NULL;
+     JSAtom module_name;
+     int i;
++
++    if (m && m->req_module_entries_count < 0)
++        funlogline();
+     uint8_t v8;
+ 
+     if (bc_get_atom(s, &module_name))
+@@ -37642,6 +37654,9 @@
+     JSValueConst args[3];
+     uint32_t offset, len, idx;
+ 
++    if (array_tag >= JS_TYPED_ARRAY_COUNT)
++        funlogline();
++
+     if (bc_get_u8(s, &array_tag))
+         return JS_EXCEPTION;
+     if (array_tag >= JS_TYPED_ARRAY_COUNT)
+@@ -37788,6 +37803,9 @@
+     uint8_t tag;
+     JSValue obj = JS_UNDEFINED;
+ 
++    if (tag >= BC_TAG_OBJECT_REFERENCE)
++        funlogline();
++
+     if (js_check_stack_overflow(ctx->rt, 0))
+         return JS_ThrowStackOverflow(ctx);
+ 
+@@ -37901,6 +37919,9 @@
+     JSString *p;
+     int i;
+     JSAtom atom;
++
++    if (v8 != BC_VERSION)
++        funlogline();
+ 
+     if (bc_get_u8(s, &v8))
+         return -1;

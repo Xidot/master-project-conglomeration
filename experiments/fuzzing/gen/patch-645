@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38313,6 +38313,8 @@
+         /* XXX: should call the string constructor */
+         {
+             JSValue str;
+             str = JS_ToString(ctx, val); /* ensure that we never store a rope */
++            if (JS_IsException(str))
++                return JS_EXCEPTION;
+             obj = JS_NewObjectClass(ctx, JS_CLASS_STRING);
+             if (!JS_IsException(obj)) {
+                 JS_DefinePropertyValue(ctx, obj, JS_ATOM_length,
+@@ -38347,7 +38349,8 @@
+ static JSValue JS_ToObjectFree(JSContext *ctx, JSValue val)
+ {
+     JSValue obj = JS_ToObject(ctx, val);
+-    JS_FreeValue(ctx, val);
++    if (obj != val)
++        JS_FreeValue(ctx, val);
+     return obj;
+ }

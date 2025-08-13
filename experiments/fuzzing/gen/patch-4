@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28695,6 +28695,9 @@
+ {
+     JSResolveEntry *re;
+ 
++    if (s->count < 0 || s->size < 0) {
++        funlogline();
++    }
+     if (js_resize_array(ctx, (void **)&s->array,
+                         sizeof(JSResolveEntry),
+                         &s->size, s->count + 1))
+@@ -28702,6 +28705,9 @@
+     re = &s->array[s->count++];
+     re->module = m;
+     re->name = JS_DupAtom(ctx, name);
++    if (s->count > s->size) {
++        funlogline();
++    }
+     return 0;
+ }

@@ -1,0 +1,524 @@
+Target function: "test_one_input_init(JSRuntime *, JSContext *)"
+
+
+---- File: ./quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/fuzz/fuzz_common.c
+
+/// Line number here: 30
+void test_one_input_init(JSRuntime *rt, JSContext *ctx) {
+    // 64 Mo
+    JS_SetMemoryLimit(rt, 0x4000000);
+    // 64 Kb
+    JS_SetMaxStackSize(rt, 0x10000);
+
+    JS_SetModuleLoaderFunc(rt, NULL, js_module_loader, NULL);
+    JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, NULL);
+    js_std_add_helpers(ctx, 0, NULL);
+
+    // Load os and std
+    js_std_init_handlers(rt);
+    js_init_module_std(ctx, "std");
+    js_init_module_os(ctx, "os");
+    const char *str = "import * as std from 'std';\n"
+                "import * as os from 'os';\n"
+                "globalThis.std = std;\n"
+                "globalThis.os = os;\n";
+    JSValue std_val = JS_Eval(ctx, str, strlen(str), "<input>", JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (!JS_IsException(std_val)) {
+        js_module_set_import_meta(ctx, std_val, 1, 1);
+        std_val = JS_EvalFunction(ctx, std_val);
+    } else {
+        js_std_dump_error(ctx);
+    }
+    std_val = js_std_await(ctx, std_val);
+    JS_FreeValue(ctx, std_val);
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1732
+void JS_SetMemoryLimit(JSRuntime *rt, size_t limit)
+{
+    rt->malloc_state.malloc_limit = limit;
+}
+
+/* use 0 to disable maximum stack size check */
+/// Line number here: 2329
+void JS_SetMaxStackSize(JSRuntime *rt, size_t stack_size)
+{
+    rt->stack_size = stack_size;
+    update_stack_limit(rt);
+}
+
+/* module_normalize = NULL is allowed and invokes the default module
+   filename normalizer */
+/// Line number here: 28497
+void JS_SetModuleLoaderFunc(JSRuntime *rt,
+                            JSModuleNormalizeFunc *module_normalize,
+                            JSModuleLoaderFunc *module_loader, void *opaque)
+{
+    rt->module_normalize_func = module_normalize;
+    rt->module_loader_has_attr = FALSE;
+    rt->u.module_loader_func = module_loader;
+    rt->module_check_attrs = NULL;
+    rt->module_loader_opaque = opaque;
+}
+
+/// Line number here: 1747
+void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque)
+{
+    rt->interrupt_handler = cb;
+    rt->interrupt_opaque = opaque;
+}
+
+/// Line number here: 2315
+JSRuntime *JS_GetRuntime(JSContext *ctx)
+{
+    return ctx->rt;
+}
+
+/* 'input' must be zero terminated i.e. input[input_len] = '\0'. */
+/// Line number here: 35904
+JSValue JS_Eval(JSContext *ctx, const char *input, size_t input_len,
+                const char *filename, int eval_flags)
+{
+    return JS_EvalThis(ctx, ctx->global_obj, input, input_len, filename,
+                       eval_flags);
+}
+
+/* instantiate and evaluate a bytecode function. Only used when
+   reading a script or module with JS_ReadObject() */
+/// Line number here: 35728
+JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj)
+{
+    return JS_EvalFunctionInternal(ctx, fun_obj, ctx->global_obj, NULL, NULL);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/* return the module specifier (allocated with js_malloc()) or NULL if
+   exception */
+/// Line number here: 937
+typedef char *JSModuleNormalizeFunc(JSContext *ctx,
+                                    const char *module_base_name,
+                                    const char *module_name, void *opaque)
+
+/// Line number here: 940
+typedef JSModuleDef *JSModuleLoaderFunc(JSContext *ctx,
+                                        const char *module_name, void *opaque)
+
+/* return != 0 if the JS code needs to be interrupted */
+/// Line number here: 920
+typedef int JSInterruptHandler(JSRuntime *rt, void *opaque)
+
+/// Line number here: 899
+typedef struct {
+    void *(*sab_alloc)(void *opaque, size_t size);
+    void (*sab_free)(void *opaque, void *ptr);
+    void (*sab_dup)(void *opaque, void *ptr);
+    void *sab_opaque;
+} JSSharedArrayBufferFunctions
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 4046
+void js_std_add_helpers(JSContext *ctx, int argc, char **argv)
+{
+    JSValue global_obj, console, args, performance;
+    int i;
+
+    /* XXX: should these global definitions be enumerable? */
+    global_obj = JS_GetGlobalObject(ctx);
+
+    console = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, console, "log",
+                      JS_NewCFunction(ctx, js_console_log, "log", 1));
+    JS_SetPropertyStr(ctx, global_obj, "console", console);
+
+    performance = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, performance, "now",
+                      JS_NewCFunction(ctx, js_os_now, "now", 0));
+    JS_SetPropertyStr(ctx, global_obj, "performance", performance);
+
+    /* same methods as the mozilla JS shell */
+    if (argc >= 0) {
+        args = JS_NewArray(ctx);
+        for(i = 0; i < argc; i++) {
+            JS_SetPropertyUint32(ctx, args, i, JS_NewString(ctx, argv[i]));
+        }
+        JS_SetPropertyStr(ctx, global_obj, "scriptArgs", args);
+    }
+
+    JS_SetPropertyStr(ctx, global_obj, "print",
+                      JS_NewCFunction(ctx, js_print, "print", 1));
+    JS_SetPropertyStr(ctx, global_obj, "__loadScript",
+                      JS_NewCFunction(ctx, js_loadScript, "__loadScript", 1));
+
+    JS_FreeValue(ctx, global_obj);
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 4081
+void js_std_init_handlers(JSRuntime *rt)
+{
+    JSThreadState *ts;
+
+    ts = malloc(sizeof(*ts));
+    if (!ts) {
+        fprintf(stderr, "Could not allocate memory for the worker");
+        exit(1);
+    }
+    memset(ts, 0, sizeof(*ts));
+    init_list_head(&ts->os_rw_handlers);
+    init_list_head(&ts->os_signal_handlers);
+    init_list_head(&ts->os_timers);
+    init_list_head(&ts->port_list);
+    init_list_head(&ts->rejected_promise_list);
+    ts->next_timer_id = 1;
+
+    JS_SetRuntimeOpaque(rt, ts);
+
+#ifdef USE_WORKER
+    /* set the SharedArrayBuffer memory handlers */
+    {
+        JSSharedArrayBufferFunctions sf;
+        memset(&sf, 0, sizeof(sf));
+        sf.sab_alloc = js_sab_alloc;
+        sf.sab_free = js_sab_free;
+        sf.sab_dup = js_sab_dup;
+        JS_SetSharedArrayBufferFunctions(rt, &sf);
+    }
+#endif
+}
+
+/// Line number here: 1711
+JSModuleDef *js_init_module_std(JSContext *ctx, const char *module_name)
+{
+    JSModuleDef *m;
+    m = JS_NewCModule(ctx, module_name, js_std_init);
+    if (!m)
+        return NULL;
+    JS_AddModuleExportList(ctx, m, js_std_funcs, countof(js_std_funcs));
+    JS_AddModuleExport(ctx, m, "in");
+    JS_AddModuleExport(ctx, m, "out");
+    JS_AddModuleExport(ctx, m, "err");
+    return m;
+}
+
+/// Line number here: 3996
+JSModuleDef *js_init_module_os(JSContext *ctx, const char *module_name)
+{
+    JSModuleDef *m;
+    m = JS_NewCModule(ctx, module_name, js_os_init);
+    if (!m)
+        return NULL;
+    JS_AddModuleExportList(ctx, m, js_os_funcs, countof(js_os_funcs));
+#ifdef USE_WORKER
+    JS_AddModuleExport(ctx, m, "Worker");
+#endif
+    return m;
+}
+
+/// Line number here: 540
+int js_module_set_import_meta(JSContext *ctx, JSValueConst func_val,
+                              JS_BOOL use_realpath, JS_BOOL is_main)
+{
+    JSModuleDef *m;
+    char buf[PATH_MAX + 16];
+    JSValue meta_obj;
+    JSAtom module_name_atom;
+    const char *module_name;
+
+    assert(JS_VALUE_GET_TAG(func_val) == JS_TAG_MODULE);
+    m = JS_VALUE_GET_PTR(func_val);
+
+    module_name_atom = JS_GetModuleName(ctx, m);
+    module_name = JS_AtomToCString(ctx, module_name_atom);
+    JS_FreeAtom(ctx, module_name_atom);
+    if (!module_name)
+        return -1;
+    if (!strchr(module_name, ':')) {
+        strcpy(buf, "file://");
+#if !defined(_WIN32)
+        /* realpath() cannot be used with modules compiled with qjsc
+           because the corresponding module source code is not
+           necessarily present */
+        if (use_realpath) {
+            char *res = realpath(module_name, buf + strlen(buf));
+            if (!res) {
+                JS_ThrowTypeError(ctx, "realpath failure");
+                JS_FreeCString(ctx, module_name);
+                return -1;
+            }
+        } else
+#endif
+        {
+            pstrcat(buf, sizeof(buf), module_name);
+        }
+    } else {
+        pstrcpy(buf, sizeof(buf), module_name);
+    }
+    JS_FreeCString(ctx, module_name);
+
+    meta_obj = JS_GetImportMeta(ctx, m);
+    if (JS_IsException(meta_obj))
+        return -1;
+    JS_DefinePropertyValueStr(ctx, meta_obj, "url",
+                              JS_NewString(ctx, buf),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, meta_obj, "main",
+                              JS_NewBool(ctx, is_main),
+                              JS_PROP_C_W_E);
+    JS_FreeValue(ctx, meta_obj);
+    return 0;
+}
+
+/// Line number here: 4156
+void js_std_dump_error(JSContext *ctx)
+{
+    JSValue exception_val;
+
+    exception_val = JS_GetException(ctx);
+    js_std_dump_error1(ctx, exception_val);
+    JS_FreeValue(ctx, exception_val);
+}
+
+/* Wait for a promise and execute pending jobs while waiting for
+   it. Return the promise result or JS_EXCEPTION in case of promise
+   rejection. */
+/// Line number here: 4255
+JSValue js_std_await(JSContext *ctx, JSValue obj)
+{
+    JSValue ret;
+    int state;
+
+    for(;;) {
+        state = JS_PromiseState(ctx, obj);
+        if (state == JS_PROMISE_FULFILLED) {
+            ret = JS_PromiseResult(ctx, obj);
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_REJECTED) {
+            ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_PENDING) {
+            int err;
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err < 0) {
+                js_std_dump_error(ctx);
+            }
+            if (err == 0) {
+                js_std_promise_rejection_check(ctx);
+
+                if (os_poll_func)
+                    os_poll_func(ctx);
+            }
+        } else {
+            /* not a promise */
+            ret = obj;
+            break;
+        }
+    }
+    return ret;
+}
+
+---- File: /usr/include/string.h
+
+/// Line number here: 406
+extern size_t strlen (const char *__s)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"test_one_input_init(JSRuntime *, JSContext *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_SetMemoryLimit(JSRuntime *, size_t)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_SetMaxStackSize(JSRuntime *, size_t)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_SetModuleLoaderFunc(JSRuntime *, JSModuleNormalizeFunc *, JSModuleLoaderFunc *, void *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_SetInterruptHandler(JSRuntime *, JSInterruptHandler *, void *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_std_add_helpers(JSContext *, int, char **)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_std_init_handlers(JSRuntime *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_init_module_std(JSContext *, const char *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_init_module_os(JSContext *, const char *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_Eval(JSContext *, const char *, size_t, const char *, int)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "strlen(const char *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_IsException(JSValue)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_module_set_import_meta(JSContext *, JSValue, int, int)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_EvalFunction(JSContext *, JSValue)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_std_dump_error(JSContext *)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "js_std_await(JSContext *, JSValue)";
+"test_one_input_init(JSRuntime *, JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_SetMaxStackSize(JSRuntime *, size_t)";
+"JS_SetMaxStackSize(JSRuntime *, size_t)" -> "update_stack_limit(JSRuntime *)";
+"js_std_add_helpers(JSContext *, int, char **)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_GetGlobalObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewObject(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewArray(JSContext *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_NewString(JSContext *, const char *)";
+"js_std_add_helpers(JSContext *, int, char **)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_init_handlers(JSRuntime *)";
+"js_std_init_handlers(JSRuntime *)" -> "malloc(size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_init_handlers(JSRuntime *)" -> "exit(int)";
+"js_std_init_handlers(JSRuntime *)" -> "memset(void *, int, size_t)";
+"js_std_init_handlers(JSRuntime *)" -> "init_list_head(struct list_head *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetRuntimeOpaque(JSRuntime *, void *)";
+"js_std_init_handlers(JSRuntime *)" -> "JS_SetSharedArrayBufferFunctions(JSRuntime *, const JSSharedArrayBufferFunctions *)";
+"js_init_module_std(JSContext *, const char *)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"js_init_module_os(JSContext *, const char *)";
+"js_init_module_os(JSContext *, const char *)" -> "JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)";
+"js_init_module_os(JSContext *, const char *)" -> "JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)";
+"js_init_module_os(JSContext *, const char *)" -> "JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"JS_Eval(JSContext *, const char *, size_t, const char *, int)";
+"JS_Eval(JSContext *, const char *, size_t, const char *, int)" -> "JS_EvalThis(JSContext *, JSValue, const char *, size_t, const char *, int)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_GetModuleName(JSContext *, JSModuleDef *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "strchr(const char *, int)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "strcpy(char *restrict, const char *restrict)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "realpath(const char *restrict, char *restrict)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "strlen(const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "pstrcat(char *, int, const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "pstrcpy(char *, int, const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_GetImportMeta(JSContext *, JSModuleDef *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_IsException(JSValue)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_NewString(JSContext *, const char *)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_NewBool(JSContext *, int)";
+"js_module_set_import_meta(JSContext *, JSValue, int, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_EvalFunction(JSContext *, JSValue)";
+"JS_EvalFunction(JSContext *, JSValue)" -> "JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)";
+"js_std_dump_error(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "JS_GetException(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseState(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseResult(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_Throw(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_await(JSContext *, JSValue)" -> "JS_GetRuntime(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_dump_error(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "os_poll_func";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+}

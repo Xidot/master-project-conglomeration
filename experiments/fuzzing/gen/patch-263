@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7711,6 +7711,7 @@
+     JSAtom prop;
+ 
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)) {
++        if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT) funlogline();
+         JS_ThrowTypeErrorNotAnObject(ctx);
+         goto fail;
+     }
+@@ -7718,6 +7719,7 @@
+     if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL)) {
+         JS_ThrowTypeErrorNotASymbol(ctx);
+         goto fail;
++        if (JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL) funlogline();
+     }
+     prop = js_symbol_to_atom(ctx, (JSValue)name);
+     p = JS_VALUE_GET_OBJ(obj);
+@@ -7725,6 +7727,7 @@
+     if (prs) {
+         JS_ThrowTypeErrorAtom(ctx, "private class field '%s' already exists",
+                               prop);
++        if (prs) funlogline();
+         goto fail;
+     }
+     pr = add_property(ctx, p, prop, JS_PROP_C_W_E);

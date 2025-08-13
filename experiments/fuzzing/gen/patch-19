@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37055,6 +37055,9 @@
+ static int bc_get_atom(BCReaderState *s, JSAtom *patom)
+ {
+     uint32_t v;
++    if (!patom) {
++        funlogline();
++    }
+     if (bc_get_leb128(s, &v))
+         return -1;
+     if (v & 1) {
+@@ -37062,6 +37065,9 @@
+         return 0;
+     } else {
+         return bc_idx_to_atom(s, patom, v >> 1);
++        if (v >> 1 > JS_ATOM_MAX) {
++            funlogline();
++        }
+     }
+ }

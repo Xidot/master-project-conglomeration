@@ -1,0 +1,34 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__js_poll_interrupts(JSContext *)
+-------------------------
+Based on the provided code and call graph, here are the potential logical bugs in the target function `__js_poll_interrupts(JSContext *)`:
+
+:__js_poll_interrupts(JSContext *):7215
+:__js_poll_interrupts(JSContext *):7217
+
+---
+
+Reasoning:
+1. Line 7215: The function resets `ctx->interrupt_counter` unconditionally, which could lead to missed interrupts if called multiple times in quick succession.
+2. Line 7217: There's no check if `rt->interrupt_opaque` is valid before passing it to the interrupt handler, which could cause issues if the handler expects valid data.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7212,7 +7212,10 @@
+ static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (ctx->interrupt_counter == JS_INTERRUPT_COUNTER_INIT)
++        funlogline();
+     ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+     if (rt->interrupt_handler) {
++        if (!rt->interrupt_opaque)
++            funlogline();
+         if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+             JS_ThrowInterrupted(ctx);
+             return -1;
+```

@@ -1,0 +1,180 @@
+Target function: "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/* add the op1 limb */
+/// Line number here: 11076
+static JSBigInt *js_bigint_extend(JSContext *ctx, JSBigInt *r,
+                                  js_limb_t op1)
+{
+    int n2 = r->len;
+    if ((op1 != 0 && op1 != -1) ||
+        (op1 & 1) != r->tab[n2 - 1] >> (JS_LIMB_BITS - 1)) {
+        JSBigInt *r1;
+        r1 = js_realloc(ctx, r,
+                        sizeof(JSBigInt) + (n2 + 1) * sizeof(js_limb_t));
+        if (!r1) {
+            js_free(ctx, r);
+            return NULL;
+        }
+        r = r1;
+        r->len = n2 + 1;
+        r->tab[n2] = op1;
+    } else {
+        /* otherwise still need to normalize the result */
+        r = js_bigint_normalize(ctx, r);
+    }
+    return r;
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1391
+void *js_realloc(JSContext *ctx, void *ptr, size_t size)
+{
+    void *ret;
+    ret = js_realloc_rt(ctx->rt, ptr, size);
+    if (unlikely(!ret && size != 0)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ret;
+}
+
+/// Line number here: 1385
+void js_free(JSContext *ctx, void *ptr)
+{
+    js_free_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 11045
+static JSBigInt *js_bigint_normalize(JSContext *ctx, JSBigInt *a)
+{
+    return js_bigint_normalize1(ctx, a, a->len);
+}
+
+/* return NULL in case of error. Compute a + b (b_neg = 0) or a - b
+   (b_neg = 1) */
+/* XXX: optimize */
+/// Line number here: 11102
+static JSBigInt *js_bigint_add(JSContext *ctx, const JSBigInt *a,
+                               const JSBigInt *b, int b_neg)
+{
+    JSBigInt *r;
+    int n1, n2, i;
+    js_limb_t carry, op1, op2, a_sign, b_sign;
+    
+    n2 = max_int(a->len, b->len);
+    n1 = min_int(a->len, b->len);
+    r = js_bigint_new(ctx, n2);
+    if (!r)
+        return NULL;
+    /* XXX: optimize */
+    /* common part */
+    carry = b_neg;
+    for(i = 0; i < n1; i++) {
+        op1 = a->tab[i];
+        op2 = b->tab[i] ^ (-b_neg);
+        ADDC(r->tab[i], carry, op1, op2, carry);
+    }
+    a_sign = -js_bigint_sign(a);
+    b_sign = (-js_bigint_sign(b)) ^ (-b_neg);
+    /* part with sign extension of one operand  */
+    if (a->len > b->len) {
+        for(i = n1; i < n2; i++) {
+            op1 = a->tab[i];
+            ADDC(r->tab[i], carry, op1, b_sign, carry);
+        }
+    } else if (a->len < b->len) {
+        for(i = n1; i < n2; i++) {
+            op2 = b->tab[i] ^ (-b_neg);
+            ADDC(r->tab[i], carry, a_sign, op2, carry);
+        }
+    }
+
+    /* part with sign extension for both operands. Extend the result
+       if necessary */
+    return js_bigint_extend(ctx, r, a_sign + b_sign + carry);
+}
+
+/// Line number here: 11340
+static JSBigInt *js_bigint_shl(JSContext *ctx, const JSBigInt *a,
+                               unsigned int shift1)
+{
+    int d, i, shift;
+    JSBigInt *r;
+    js_limb_t l;
+
+    if (a->len == 1 && a->tab[0] == 0)
+        return js_bigint_new_si(ctx, 0); /* zero case */
+    d = shift1 / JS_LIMB_BITS;
+    shift = shift1 % JS_LIMB_BITS;
+    r = js_bigint_new(ctx, a->len + d);
+    if (!r)
+        return NULL;
+    for(i = 0; i < d; i++)
+        r->tab[i] = 0;
+    if (shift == 0) {
+        for(i = 0; i < a->len; i++) {
+            r->tab[i + d] = a->tab[i];
+        }
+    } else {
+        l = mp_shl(r->tab + d, a->tab, a->len, shift);
+        if (js_bigint_sign(a))
+            l |= (js_limb_t)(-1) << shift;
+        r = js_bigint_extend(ctx, r, l);
+    }
+    return r;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+"js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)" -> "js_realloc(JSContext *, void *, size_t)";
+"js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)" -> "js_free(JSContext *, void *)";
+"js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_realloc(JSContext *, void *, size_t)";
+"js_realloc(JSContext *, void *, size_t)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"js_realloc(JSContext *, void *, size_t)" -> "__builtin_expect(long, long)";
+"js_realloc(JSContext *, void *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_normalize(JSContext *, JSBigInt *)" -> "js_bigint_normalize1(JSContext *, JSBigInt *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "max_int(int, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "min_int(int, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)" -> "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "mp_shl(js_limb_t *, const js_limb_t *, int, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+}

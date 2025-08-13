@@ -1,0 +1,59 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-map_delete_weakrefs(JSRuntime *, JSWeakRefHeader *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `map_delete_weakrefs` function:
+
+:quickjs.c:map_delete_weakrefs:48618
+:quickjs.c:map_delete_weakrefs:48625
+:quickjs.c:map_delete_weakrefs:48631
+
+\pagebreak
+
+Reasons:
+1. Line 48618: The function assumes `wh` is always valid and part of a `JSMapState` structure, but there's no check for NULL pointer.
+2. Line 48625: The loop iterates through records but doesn't handle cases where `mr->key` might be invalid for hashing even if it's live.
+3. Line 48631: The hash table removal logic could fail if the record was moved during resizing but the code still tries to remove it.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48615,6 +48615,9 @@
+ static void map_delete_weakrefs(JSRuntime *rt, JSWeakRefHeader *wh)
+ {
+     JSMapState *s = container_of(wh, JSMapState, weakref_header);
++    if (s == NULL) {
++        funlogline();
++    }
+     struct list_head *el, *el1;
+     JSMapRecord *mr1, **pmr;
+     uint32_t h;
+ 
+@@ -48622,6 +48625,9 @@
+         JSMapRecord *mr = list_entry(el, JSMapRecord, link);
+         if (!js_weakref_is_live(mr->key)) {
+ 
++            if (JS_VALUE_GET_TAG(mr->key) >= 0 && JS_VALUE_GET_TAG(mr->key) != JS_TAG_UNDEFINED) {
++                funlogline();
++            }
+             /* even if key is not live it can be hashed as a pointer */
+             h = map_hash_key(mr->key, s->hash_bits);
+             pmr = &s->hash_table[h];
+@@ -48629,6 +48635,9 @@
+                 mr1 = *pmr;
+                 /* the entry may already be removed from the hash
+                    table if the map was resized */
++                if (mr1 == mr && mr->empty) {
++                    funlogline();
++                }
+                 if (mr1 == NULL)
+                     goto done; 
+                 if (mr1 == mr)
+```
+
+The modifications add checks for:
+1. NULL container_of result
+2. Invalid key tags that shouldn't be hashed
+3. Attempting to remove already empty records

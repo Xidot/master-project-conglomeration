@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3677,6 +3677,9 @@
+     for (i = 0; i < len; i++) {
+         c |= p[i];
+     }
++    if (s->len > INT_MAX - len) {
++        funlogline();
++    }
+     if (s->len + len > s->size) {
+         if (string_buffer_realloc(s, s->len + len, c))
+             return -1;
+@@ -3684,6 +3687,9 @@
+         if (string_buffer_widen(s, s->size))
+             return -1;
+     }
++    if (!s->is_wide_char && c >= 0x100 && s->len + len > s->size) {
++        funlogline();
++    }
+     if (s->is_wide_char) {
+         memcpy(&s->str->u.str16[s->len], p, len << 1);
+         s->len += len;

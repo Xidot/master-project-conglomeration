@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8664,6 +8664,9 @@
+ static int call_setter(JSContext *ctx, JSObject *setter,
+                        JSValueConst this_obj, JSValue val, int flags)
+ {
++    if (setter == NULL && !(flags & (JS_PROP_THROW | JS_PROP_THROW_STRICT))) {
++        funlogline();
++    }
+     JSValue ret, func;
+     if (likely(setter)) {
+         func = JS_MKPTR(JS_TAG_OBJECT, setter);
+@@ -8671,6 +8674,9 @@
+         func = JS_DupValue(ctx, func);
+         ret = JS_CallFree(ctx, func, this_obj, 1, (JSValueConst *)&val);
+         JS_FreeValue(ctx, val);
++        if (JS_VALUE_HAS_REF_COUNT(val) {
++            funlogline();
++        }
+         if (JS_IsException(ret))
+             return -1;
+         JS_FreeValue(ctx, ret);

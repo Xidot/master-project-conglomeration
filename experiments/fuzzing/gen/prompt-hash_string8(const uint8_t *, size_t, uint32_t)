@@ -1,0 +1,101 @@
+Target function: "hash_string8(const uint8_t *, size_t, uint32_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* XXX: could use faster version ? */
+/// Line number here: 2421
+static inline uint32_t hash_string8(const uint8_t *str, size_t len, uint32_t h)
+{
+    size_t i;
+
+    for(i = 0; i < len; i++)
+        h = h * 263 + str[i];
+    return h;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 2440
+static uint32_t hash_string(const JSString *str, uint32_t h)
+{
+    if (str->is_wide_char)
+        h = hash_string16(str->u.str16, str->len, h);
+    else
+        h = hash_string8(str->u.str8, str->len, h);
+    return h;
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* Warning: str must be ASCII only */
+/// Line number here: 2827
+static JSAtom __JS_FindAtom(JSRuntime *rt, const char *str, size_t len,
+                            int atom_type)
+{
+    uint32_t h, h1, i;
+    JSAtomStruct *p;
+
+    h = hash_string8((const uint8_t *)str, len, JS_ATOM_TYPE_STRING);
+    h &= JS_ATOM_HASH_MASK;
+    h1 = h & (rt->atom_hash_size - 1);
+    i = rt->atom_hash[h1];
+    while (i != 0) {
+        p = rt->atom_array[i];
+        if (p->hash == h &&
+            p->atom_type == JS_ATOM_TYPE_STRING &&
+            p->len == len &&
+            p->is_wide_char == 0 &&
+            memcmp(p->u.str8, str, len) == 0) {
+            if (!__JS_AtomIsConst(i))
+                p->header.ref_count++;
+            return i;
+        }
+        i = p->hash_next;
+    }
+    return JS_ATOM_NULL;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+
+
+----- Callgraph:
+strict digraph G {
+"hash_string(const JSString *, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string16(const uint16_t *, size_t, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "memcmp(const void *, const void *, size_t)";
+"__JS_FindAtom(JSRuntime *, const char *, size_t, int)" -> "__JS_AtomIsConst(JSAtom)";
+}

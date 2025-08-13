@@ -1,0 +1,76 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_SetPropertyInternal` function:
+
+:quickjs.c:JS_SetPropertyInternal:8869
+:quickjs.c:JS_SetPropertyInternal:8929
+:quickjs.c:JS_SetPropertyInternal:8961
+:quickjs.c:JS_SetPropertyInternal:8993
+
+---
+
+1. Line 8869: The function doesn't properly handle the case where `this_obj` is a primitive value but `obj` is not an object. This could lead to incorrect prototype chain lookups.
+
+2. Line 8929: When handling exotic objects, there's no check if the exotic methods pointer is valid before dereferencing it, which could lead to crashes.
+
+3. Line 8961: The fast path for array length property doesn't properly validate the new length value before setting it.
+
+4. Line 8993: The property creation path doesn't properly handle the case where the property already exists but is non-writable.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8866,6 +8866,9 @@
+     JSPropertyDescriptor desc;
+     int ret;
+ #if 0
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT && JS_VALUE_GET_TAG(this_obj) != JS_TAG_OBJECT) {
++        funlogline();
++    }
+     printf("JS_SetPropertyInternal: "); print_atom(ctx, prop); printf("\n");
+ #endif
+     tag = JS_VALUE_GET_TAG(this_obj);
+@@ -8926,6 +8929,9 @@
+             } else {
+                 const JSClassExoticMethods *em = ctx->rt->class_array[p1->class_id].exotic;
+                 if (em) {
++                    if (!em->set_property && !em->get_own_property) {
++                        funlogline();
++                    }
+                     JSValue obj1;
+                     if (em->set_property) {
+                         /* set_property can free the prototype */
+@@ -8958,6 +8964,9 @@
+                     JS_FreeValue(ctx, val);
+                     return -1;
+                 }
++                if (JS_VALUE_GET_TAG(val) == JS_TAG_EXCEPTION) {
++                    funlogline();
++                }
+                 return set_array_length(ctx, p, val, flags);
+             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+                 return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
+             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+@@ -8990,6 +8999,9 @@
+             if (desc.flags & JS_PROP_GETSET) {
+                 JS_FreeValue(ctx, desc.getter);
+                 JS_FreeValue(ctx, desc.setter);
++                if (flags & JS_PROP_NO_ADD) {
++                    funlogline();
++                }
+                 JS_FreeValue(ctx, val);
+                 return JS_ThrowTypeErrorOrFalse(ctx, flags, "setter is forbidden");
+             } else {
+```
+
+The changes add checks for:
+1. Invalid object/prototype combinations
+2. Missing exotic method implementations
+3. Invalid array length values
+4. Conflicting property attributes during creation
+
+Each check calls `funlogline()` when a problematic condition is detected.

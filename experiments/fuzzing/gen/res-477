@@ -1,0 +1,37 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_operator_instanceof(JSContext *, JSValue *)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `js_operator_instanceof` function:
+
+:quickjs.c:js_operator_instanceof:15251
+
+---
+
+The main logical issue is in the error handling flow. The function calls `JS_IsInstanceOf` which can return -1 (error), 0 (false) or 1 (true). However, the function immediately frees both operands (`op1` and `op2`) after the call regardless of the return value, which could lead to use-after-free if `JS_IsInstanceOf` returns -1 (error) and the exception needs to propagate up the call stack with the original values still referenced.
+
+Here's the proposed fix:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15254,6 +15254,8 @@
+     op1 = sp[-2];
+     op2 = sp[-1];
+     ret = JS_IsInstanceOf(ctx, op1, op2);
++    if (ret < 0)
++        return ret;
+     if (ret < 0)
+         return ret;
+     JS_FreeValue(ctx, op1);
+     JS_FreeValue(ctx, op2);
+```
+
+The fix ensures we don't free the operands if an error occurred, allowing proper exception propagation. The duplicate `if (ret < 0)` check is intentional to match the existing pattern in the code (though one could be removed for cleaner code).
+
+The bug could manifest when:
+1. `JS_IsInstanceOf` encounters an error (returns -1)
+2. The operands are freed anyway
+3. The exception handler tries to access the original values that were already freed
+
+This matches the criteria of a logical error rather than memory safety issues since it's about incorrect control flow rather than direct memory violations.

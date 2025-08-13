@@ -1,0 +1,426 @@
+Target function: "JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 774
+static js_force_inline JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj,
+                                              JSAtom prop)
+{
+    return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, 0);
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/// Line number here: 632
+static inline JS_BOOL JS_IsNull(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_NULL;
+}
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 657
+typedef struct JSBoundFunction {
+    JSValue func_obj;
+    JSValue this_val;
+    int argc;
+    JSValue argv[0];
+} JSBoundFunction
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* return TRUE, FALSE or (-1) in case of exception */
+/// Line number here: 7409
+static int JS_OrdinaryIsInstanceOf(JSContext *ctx, JSValueConst val,
+                                   JSValueConst obj)
+{
+    JSValue obj_proto;
+    JSObject *proto;
+    const JSObject *p, *proto1;
+    BOOL ret;
+
+    if (!JS_IsFunction(ctx, obj))
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id == JS_CLASS_BOUND_FUNCTION) {
+        JSBoundFunction *s = p->u.bound_function;
+        return JS_IsInstanceOf(ctx, val, s->func_obj);
+    }
+
+    /* Only explicitly boxed values are instances of constructors */
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return FALSE;
+    obj_proto = JS_GetProperty(ctx, obj, JS_ATOM_prototype);
+    if (JS_VALUE_GET_TAG(obj_proto) != JS_TAG_OBJECT) {
+        if (!JS_IsException(obj_proto))
+            JS_ThrowTypeError(ctx, "operand 'prototype' property is not an object");
+        ret = -1;
+        goto done;
+    }
+    proto = JS_VALUE_GET_OBJ(obj_proto);
+    p = JS_VALUE_GET_OBJ(val);
+    for(;;) {
+        proto1 = p->shape->proto;
+        if (!proto1) {
+            /* slow case if exotic object in the prototype chain */
+            if (unlikely(p->is_exotic && !p->fast_array)) {
+                JSValue obj1;
+                obj1 = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, (JSObject *)p));
+                for(;;) {
+                    obj1 = JS_GetPrototypeFree(ctx, obj1);
+                    if (JS_IsException(obj1)) {
+                        ret = -1;
+                        break;
+                    }
+                    if (JS_IsNull(obj1)) {
+                        ret = FALSE;
+                        break;
+                    }
+                    if (proto == JS_VALUE_GET_OBJ(obj1)) {
+                        JS_FreeValue(ctx, obj1);
+                        ret = TRUE;
+                        break;
+                    }
+                    /* must check for timeout to avoid infinite loop */
+                    if (js_poll_interrupts(ctx)) {
+                        JS_FreeValue(ctx, obj1);
+                        ret = -1;
+                        break;
+                    }
+                }
+            } else {
+                ret = FALSE;
+            }
+            break;
+        }
+        p = proto1;
+        if (proto == p) {
+            ret = TRUE;
+            break;
+        }
+    }
+done:
+    JS_FreeValue(ctx, obj_proto);
+    return ret;
+}
+
+/// Line number here: 10248
+BOOL JS_IsFunction(JSContext *ctx, JSValueConst val)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return FALSE;
+    p = JS_VALUE_GET_OBJ(val);
+    switch(p->class_id) {
+    case JS_CLASS_BYTECODE_FUNCTION:
+        return TRUE;
+    case JS_CLASS_PROXY:
+        return p->u.proxy_data->is_func;
+    default:
+        return (ctx->rt->class_array[p->class_id].call != NULL);
+    }
+}
+
+/* return TRUE, FALSE or (-1) in case of exception */
+/// Line number here: 7483
+int JS_IsInstanceOf(JSContext *ctx, JSValueConst val, JSValueConst obj)
+{
+    JSValue method;
+
+    if (!JS_IsObject(obj))
+        goto fail;
+    method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_hasInstance);
+    if (JS_IsException(method))
+        return -1;
+    if (!JS_IsNull(method) && !JS_IsUndefined(method)) {
+        JSValue ret;
+        ret = JS_CallFree(ctx, method, obj, 1, &val);
+        return JS_ToBoolFree(ctx, ret);
+    }
+
+    /* legacy case */
+    if (!JS_IsFunction(ctx, obj)) {
+    fail:
+        JS_ThrowTypeError(ctx, "invalid 'instanceof' right operand");
+        return -1;
+    }
+    return JS_OrdinaryIsInstanceOf(ctx, val, obj);
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 7400
+static JSValue JS_GetPrototypeFree(JSContext *ctx, JSValue obj)
+{
+    JSValue obj1;
+    obj1 = JS_GetPrototype(ctx, obj);
+    JS_FreeValue(ctx, obj);
+    return obj1;
+}
+
+/// Line number here: 7228
+static inline __exception int js_poll_interrupts(JSContext *ctx)
+{
+    if (unlikely(--ctx->interrupt_counter <= 0)) {
+        return __js_poll_interrupts(ctx);
+    } else {
+        return 0;
+    }
+}
+
+/// Line number here: 39876
+static JSValue js_function_hasInstance(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    int ret;
+    ret = JS_OrdinaryIsInstanceOf(ctx, argv[0], this_val);
+    if (ret < 0)
+        return JS_EXCEPTION;
+    else
+        return JS_NewBool(ctx, ret);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsFunction(JSContext *, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsInstanceOf(JSContext *, JSValue, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "__builtin_expect(long, long)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_GetPrototypeFree(JSContext *, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsNull(JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)" -> "js_poll_interrupts(JSContext *)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsObject(JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsNull(JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsUndefined(JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_IsFunction(JSContext *, JSValue)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_IsInstanceOf(JSContext *, JSValue, JSValue)" -> "JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)" -> "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_GetPrototypeFree(JSContext *, JSValue)";
+"JS_GetPrototypeFree(JSContext *, JSValue)" -> "JS_GetPrototype(JSContext *, JSValue)";
+"JS_GetPrototypeFree(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_poll_interrupts(JSContext *)";
+"js_poll_interrupts(JSContext *)" -> "__builtin_expect(long, long)";
+"js_poll_interrupts(JSContext *)" -> "__js_poll_interrupts(JSContext *)";
+"js_function_hasInstance(JSContext *, JSValue, int, JSValue *)";
+"js_function_hasInstance(JSContext *, JSValue, int, JSValue *)" -> "JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)";
+"js_function_hasInstance(JSContext *, JSValue, int, JSValue *)" -> "JS_NewBool(JSContext *, int)";
+}

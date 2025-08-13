@@ -1,0 +1,684 @@
+Target function: "JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 1043
+enum OPCodeEnum {
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f) OP_ ## id,
+#define def(id, size, n_pop, n_push, f)
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_COUNT, /* excluding temporary opcodes */
+    /* temporary opcodes : overlap with the short opcodes */
+    OP_TEMP_START = OP_nop + 1,
+    OP___dummy = OP_TEMP_START - 1,
+#define FMT(f)
+#define DEF(id, size, n_pop, n_push, f)
+#define def(id, size, n_pop, n_push, f) OP_ ## id,
+#include "quickjs-opcode.h"
+#undef def
+#undef DEF
+#undef FMT
+    OP_TEMP_END,
+}
+
+/// Line number here: 1035
+enum OPCodeFormat {
+#define FMT(f) OP_FMT_ ## f,
+#define DEF(id, size, n_pop, n_push, f)
+#include "quickjs-opcode.h"
+#undef DEF
+#undef FMT
+}
+
+/// Line number here: 37121
+static int JS_ReadFunctionBytecode(BCReaderState *s, JSFunctionBytecode *b,
+                                   int byte_code_offset, uint32_t bc_len)
+{
+    uint8_t *bc_buf;
+    int pos, len, op;
+    JSAtom atom;
+    uint32_t idx;
+
+    if (s->is_rom_data) {
+        /* directly use the input buffer */
+        if (unlikely(s->buf_end - s->ptr < bc_len))
+            return bc_read_error_end(s);
+        bc_buf = (uint8_t *)s->ptr;
+        s->ptr += bc_len;
+    } else {
+        bc_buf = (void *)((uint8_t*)b + byte_code_offset);
+        if (bc_get_buf(s, bc_buf, bc_len))
+            return -1;
+    }
+    b->byte_code_buf = bc_buf;
+
+    if (is_be())
+        bc_byte_swap(bc_buf, bc_len);
+
+    pos = 0;
+    while (pos < bc_len) {
+        op = bc_buf[pos];
+        len = short_opcode_info(op).size;
+        switch(short_opcode_info(op).fmt) {
+        case OP_FMT_atom:
+        case OP_FMT_atom_u8:
+        case OP_FMT_atom_u16:
+        case OP_FMT_atom_label_u8:
+        case OP_FMT_atom_label_u16:
+            idx = get_u32(bc_buf + pos + 1);
+            if (s->is_rom_data) {
+                /* just increment the reference count of the atom */
+                JS_DupAtom(s->ctx, (JSAtom)idx);
+            } else {
+                if (bc_idx_to_atom(s, &atom, idx)) {
+                    /* Note: the atoms will be freed up to this position */
+                    b->byte_code_len = pos;
+                    return -1;
+                }
+                put_u32(bc_buf + pos + 1, atom);
+#ifdef DUMP_READ_OBJECT
+                bc_read_trace(s, "at %d, fixup atom: ", pos + 1); print_atom(s->ctx, atom); printf("\n");
+#endif
+            }
+            break;
+        default:
+            break;
+        }
+        pos += len;
+    }
+    return 0;
+}
+
+/// Line number here: 36923
+static int bc_read_error_end(BCReaderState *s)
+{
+    if (!s->error_state) {
+        JS_ThrowSyntaxError(s->ctx, "read after the end of the buffer");
+    }
+    return s->error_state = -1;
+}
+
+/// Line number here: 37023
+static int bc_get_buf(BCReaderState *s, uint8_t *buf, uint32_t buf_len)
+{
+    if (buf_len != 0) {
+        if (unlikely(!buf || s->buf_end - s->ptr < buf_len))
+            return bc_read_error_end(s);
+        memcpy(buf, s->ptr, buf_len);
+        s->ptr += buf_len;
+    }
+    return 0;
+}
+
+/// Line number here: 36098
+static inline BOOL is_be(void)
+{
+    union {
+        uint16_t a;
+        uint8_t  b;
+    } u = {0x100};
+    return u.b;
+}
+
+/// Line number here: 36204
+static void bc_byte_swap(uint8_t *bc_buf, int bc_len)
+{
+    int pos, len, op, fmt;
+
+    pos = 0;
+    while (pos < bc_len) {
+        op = bc_buf[pos];
+        len = short_opcode_info(op).size;
+        fmt = short_opcode_info(op).fmt;
+        switch(fmt) {
+        case OP_FMT_u16:
+        case OP_FMT_i16:
+        case OP_FMT_label16:
+        case OP_FMT_npop:
+        case OP_FMT_loc:
+        case OP_FMT_arg:
+        case OP_FMT_var_ref:
+            put_u16(bc_buf + pos + 1,
+                    bswap16(get_u16(bc_buf + pos + 1)));
+            break;
+        case OP_FMT_i32:
+        case OP_FMT_u32:
+        case OP_FMT_const:
+        case OP_FMT_label:
+        case OP_FMT_atom:
+        case OP_FMT_atom_u8:
+            put_u32(bc_buf + pos + 1,
+                    bswap32(get_u32(bc_buf + pos + 1)));
+            break;
+        case OP_FMT_atom_u16:
+        case OP_FMT_label_u16:
+            put_u32(bc_buf + pos + 1,
+                    bswap32(get_u32(bc_buf + pos + 1)));
+            put_u16(bc_buf + pos + 1 + 4,
+                    bswap16(get_u16(bc_buf + pos + 1 + 4)));
+            break;
+        case OP_FMT_atom_label_u8:
+        case OP_FMT_atom_label_u16:
+            put_u32(bc_buf + pos + 1,
+                    bswap32(get_u32(bc_buf + pos + 1)));
+            put_u32(bc_buf + pos + 1 + 4,
+                    bswap32(get_u32(bc_buf + pos + 1 + 4)));
+            if (fmt == OP_FMT_atom_label_u16) {
+                put_u16(bc_buf + pos + 1 + 4 + 4,
+                        bswap16(get_u16(bc_buf + pos + 1 + 4 + 4)));
+            }
+            break;
+        case OP_FMT_npop_u16:
+            put_u16(bc_buf + pos + 1,
+                    bswap16(get_u16(bc_buf + pos + 1)));
+            put_u16(bc_buf + pos + 1 + 2,
+                    bswap16(get_u16(bc_buf + pos + 1 + 2)));
+            break;
+        default:
+            break;
+        }
+        pos += len;
+    }
+}
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 2597
+JSAtom JS_DupAtom(JSContext *ctx, JSAtom v)
+{
+    JSRuntime *rt;
+    JSAtomStruct *p;
+
+    if (!__JS_AtomIsConst(v)) {
+        rt = ctx->rt;
+        p = rt->atom_array[v];
+        p->header.ref_count++;
+    }
+    return v;
+}
+
+/// Line number here: 37034
+static int bc_idx_to_atom(BCReaderState *s, JSAtom *patom, uint32_t idx)
+{
+    JSAtom atom;
+
+    if (__JS_AtomIsTaggedInt(idx)) {
+        atom = idx;
+    } else if (idx < s->first_atom) {
+        atom = JS_DupAtom(s->ctx, idx);
+    } else {
+        idx -= s->first_atom;
+        if (idx >= s->idx_to_atom_count) {
+            JS_ThrowSyntaxError(s->ctx, "invalid atom index (pos=%u)",
+                                (unsigned int)(s->ptr - s->buf_start));
+            *patom = JS_ATOM_NULL;
+            return s->error_state = -1;
+        }
+        atom = JS_DupAtom(s->ctx, s->idx_to_atom[idx]);
+    }
+    *patom = atom;
+    return 0;
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/* XXX: could use a different structure in bytecode functions to save
+   memory */
+/// Line number here: 597
+typedef struct JSVarDef {
+    JSAtom var_name;
+    /* index into fd->scopes of this variable lexical scope */
+    int scope_level;
+    /* during compilation:
+        - if scope_level = 0: scope in which the variable is defined
+        - if scope_level != 0: index into fd->vars of the next
+          variable in the same or enclosing lexical scope
+       in a bytecode function:
+       index into fd->vars of the next
+       variable in the same or enclosing lexical scope
+    */
+    int scope_next;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t is_captured : 1;
+    uint8_t is_static_private : 1; /* only used during private class field parsing */
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* only used during compilation: function pool index for lexical
+       variables with var_kind =
+       JS_VAR_FUNCTION_DECL/JS_VAR_NEW_FUNCTION_DECL or scope level of
+       the definition of the 'var' variables (they have scope_level =
+       0) */
+    int func_pool_idx : 24; /* only used during compilation : index in
+                               the constant pool for hoisted function
+                               definition */
+} JSVarDef
+
+/// Line number here: 544
+typedef struct JSClosureVar {
+    uint8_t is_local : 1;
+    uint8_t is_arg : 1;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* 8 bits available */
+    uint16_t var_idx; /* is_local = TRUE: index to a normal variable of the
+                    parent function. otherwise: index to a closure
+                    variable of the parent function */
+    JSAtom var_name;
+} JSClosureVar
+
+/// Line number here: 37250
+static JSValue JS_ReadFunctionTag(BCReaderState *s)
+{
+    JSContext *ctx = s->ctx;
+    JSFunctionBytecode bc, *b;
+    JSValue obj = JS_UNDEFINED;
+    uint16_t v16;
+    uint8_t v8;
+    int idx, i, local_count;
+    int function_size, cpool_offset, byte_code_offset;
+    int closure_var_offset, vardefs_offset;
+
+    memset(&bc, 0, sizeof(bc));
+    bc.header.ref_count = 1;
+    //bc.gc_header.mark = 0;
+
+    if (bc_get_u16(s, &v16))
+        goto fail;
+    idx = 0;
+    bc.has_prototype = bc_get_flags(v16, &idx, 1);
+    bc.has_simple_parameter_list = bc_get_flags(v16, &idx, 1);
+    bc.is_derived_class_constructor = bc_get_flags(v16, &idx, 1);
+    bc.need_home_object = bc_get_flags(v16, &idx, 1);
+    bc.func_kind = bc_get_flags(v16, &idx, 2);
+    bc.new_target_allowed = bc_get_flags(v16, &idx, 1);
+    bc.super_call_allowed = bc_get_flags(v16, &idx, 1);
+    bc.super_allowed = bc_get_flags(v16, &idx, 1);
+    bc.arguments_allowed = bc_get_flags(v16, &idx, 1);
+    bc.has_debug = bc_get_flags(v16, &idx, 1);
+    bc.is_direct_or_indirect_eval = bc_get_flags(v16, &idx, 1);
+    bc.read_only_bytecode = s->is_rom_data;
+    if (bc_get_u8(s, &v8))
+        goto fail;
+    bc.js_mode = v8;
+    if (bc_get_atom(s, &bc.func_name))  //@ atom leak if failure
+        goto fail;
+    if (bc_get_leb128_u16(s, &bc.arg_count))
+        goto fail;
+    if (bc_get_leb128_u16(s, &bc.var_count))
+        goto fail;
+    if (bc_get_leb128_u16(s, &bc.defined_arg_count))
+        goto fail;
+    if (bc_get_leb128_u16(s, &bc.stack_size))
+        goto fail;
+    if (bc_get_leb128_int(s, &bc.closure_var_count))
+        goto fail;
+    if (bc_get_leb128_int(s, &bc.cpool_count))
+        goto fail;
+    if (bc_get_leb128_int(s, &bc.byte_code_len))
+        goto fail;
+    if (bc_get_leb128_int(s, &local_count))
+        goto fail;
+
+    if (bc.has_debug) {
+        function_size = sizeof(*b);
+    } else {
+        function_size = offsetof(JSFunctionBytecode, debug);
+    }
+    cpool_offset = function_size;
+    function_size += bc.cpool_count * sizeof(*bc.cpool);
+    vardefs_offset = function_size;
+    function_size += local_count * sizeof(*bc.vardefs);
+    closure_var_offset = function_size;
+    function_size += bc.closure_var_count * sizeof(*bc.closure_var);
+    byte_code_offset = function_size;
+    if (!bc.read_only_bytecode) {
+        function_size += bc.byte_code_len;
+    }
+
+    b = js_mallocz(ctx, function_size);
+    if (!b)
+        return JS_EXCEPTION;
+
+    memcpy(b, &bc, offsetof(JSFunctionBytecode, debug));
+    b->header.ref_count = 1;
+    if (local_count != 0) {
+        b->vardefs = (void *)((uint8_t*)b + vardefs_offset);
+    }
+    if (b->closure_var_count != 0) {
+        b->closure_var = (void *)((uint8_t*)b + closure_var_offset);
+    }
+    if (b->cpool_count != 0) {
+        b->cpool = (void *)((uint8_t*)b + cpool_offset);
+    }
+
+    add_gc_object(ctx->rt, &b->header, JS_GC_OBJ_TYPE_FUNCTION_BYTECODE);
+
+    obj = JS_MKPTR(JS_TAG_FUNCTION_BYTECODE, b);
+
+#ifdef DUMP_READ_OBJECT
+    bc_read_trace(s, "name: "); print_atom(s->ctx, b->func_name); printf("\n");
+#endif
+    bc_read_trace(s, "args=%d vars=%d defargs=%d closures=%d cpool=%d\n",
+                  b->arg_count, b->var_count, b->defined_arg_count,
+                  b->closure_var_count, b->cpool_count);
+    bc_read_trace(s, "stack=%d bclen=%d locals=%d\n",
+                  b->stack_size, b->byte_code_len, local_count);
+
+    if (local_count != 0) {
+        bc_read_trace(s, "vars {\n");
+        for(i = 0; i < local_count; i++) {
+            JSVarDef *vd = &b->vardefs[i];
+            if (bc_get_atom(s, &vd->var_name))
+                goto fail;
+            if (bc_get_leb128_int(s, &vd->scope_level))
+                goto fail;
+            if (bc_get_leb128_int(s, &vd->scope_next))
+                goto fail;
+            vd->scope_next--;
+            if (bc_get_u8(s, &v8))
+                goto fail;
+            idx = 0;
+            vd->var_kind = bc_get_flags(v8, &idx, 4);
+            vd->is_const = bc_get_flags(v8, &idx, 1);
+            vd->is_lexical = bc_get_flags(v8, &idx, 1);
+            vd->is_captured = bc_get_flags(v8, &idx, 1);
+#ifdef DUMP_READ_OBJECT
+            bc_read_trace(s, "name: "); print_atom(s->ctx, vd->var_name); printf("\n");
+#endif
+        }
+        bc_read_trace(s, "}\n");
+    }
+    if (b->closure_var_count != 0) {
+        bc_read_trace(s, "closure vars {\n");
+        for(i = 0; i < b->closure_var_count; i++) {
+            JSClosureVar *cv = &b->closure_var[i];
+            int var_idx;
+            if (bc_get_atom(s, &cv->var_name))
+                goto fail;
+            if (bc_get_leb128_int(s, &var_idx))
+                goto fail;
+            cv->var_idx = var_idx;
+            if (bc_get_u8(s, &v8))
+                goto fail;
+            idx = 0;
+            cv->is_local = bc_get_flags(v8, &idx, 1);
+            cv->is_arg = bc_get_flags(v8, &idx, 1);
+            cv->is_const = bc_get_flags(v8, &idx, 1);
+            cv->is_lexical = bc_get_flags(v8, &idx, 1);
+            cv->var_kind = bc_get_flags(v8, &idx, 4);
+#ifdef DUMP_READ_OBJECT
+            bc_read_trace(s, "name: "); print_atom(s->ctx, cv->var_name); printf("\n");
+#endif
+        }
+        bc_read_trace(s, "}\n");
+    }
+    {
+        bc_read_trace(s, "bytecode {\n");
+        if (JS_ReadFunctionBytecode(s, b, byte_code_offset, b->byte_code_len))
+            goto fail;
+        bc_read_trace(s, "}\n");
+    }
+    if (b->has_debug) {
+        /* read optional debug information */
+        bc_read_trace(s, "debug {\n");
+        if (bc_get_atom(s, &b->debug.filename))
+            goto fail;
+#ifdef DUMP_READ_OBJECT
+        bc_read_trace(s, "filename: "); print_atom(s->ctx, b->debug.filename); printf("\n");
+#endif
+        if (bc_get_leb128_int(s, &b->debug.pc2line_len))
+            goto fail;
+        if (b->debug.pc2line_len) {
+            b->debug.pc2line_buf = js_mallocz(ctx, b->debug.pc2line_len);
+            if (!b->debug.pc2line_buf)
+                goto fail;
+            if (bc_get_buf(s, b->debug.pc2line_buf, b->debug.pc2line_len))
+                goto fail;
+        }
+        if (bc_get_leb128_int(s, &b->debug.source_len))
+            goto fail;
+        if (b->debug.source_len) {
+            bc_read_trace(s, "source: %d bytes\n", b->source_len);
+            b->debug.source = js_mallocz(ctx, b->debug.source_len);
+            if (!b->debug.source)
+                goto fail;
+            if (bc_get_buf(s, (uint8_t *)b->debug.source, b->debug.source_len))
+                goto fail;
+        }
+        bc_read_trace(s, "}\n");
+    }
+    if (b->cpool_count != 0) {
+        bc_read_trace(s, "cpool {\n");
+        for(i = 0; i < b->cpool_count; i++) {
+            JSValue val;
+            val = JS_ReadObjectRec(s);
+            if (JS_IsException(val))
+                goto fail;
+            b->cpool[i] = val;
+        }
+        bc_read_trace(s, "}\n");
+    }
+    b->realm = JS_DupContext(ctx);
+    return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 155
+struct __attribute__((packed)) packed_u32 {
+    uint32_t v;
+}
+
+/// Line number here: 178
+static inline uint32_t get_u32(const uint8_t *tab)
+{
+    return ((const struct packed_u32 *)tab)->v;
+}
+
+/// Line number here: 188
+static inline void put_u32(uint8_t *tab, uint32_t val)
+{
+    ((struct packed_u32 *)tab)->v = val;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "__builtin_expect(long, long)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "bc_read_error_end(BCReaderState *)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "bc_get_buf(BCReaderState *, uint8_t *, uint32_t)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "is_be()";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "bc_byte_swap(uint8_t *, int)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "get_u32(const uint8_t *)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)";
+"JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)" -> "put_u32(uint8_t *, uint32_t)";
+"bc_read_error_end(BCReaderState *)";
+"bc_read_error_end(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"bc_get_buf(BCReaderState *, uint8_t *, uint32_t)";
+"bc_get_buf(BCReaderState *, uint8_t *, uint32_t)" -> "__builtin_expect(long, long)";
+"bc_get_buf(BCReaderState *, uint8_t *, uint32_t)" -> "bc_read_error_end(BCReaderState *)";
+"bc_get_buf(BCReaderState *, uint8_t *, uint32_t)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"bc_byte_swap(uint8_t *, int)";
+"bc_byte_swap(uint8_t *, int)" -> "put_u16(uint8_t *, uint16_t)";
+"bc_byte_swap(uint8_t *, int)" -> "bswap16(uint16_t)";
+"bc_byte_swap(uint8_t *, int)" -> "get_u16(const uint8_t *)";
+"bc_byte_swap(uint8_t *, int)" -> "put_u32(uint8_t *, uint32_t)";
+"bc_byte_swap(uint8_t *, int)" -> "bswap32(uint32_t)";
+"bc_byte_swap(uint8_t *, int)" -> "get_u32(const uint8_t *)";
+"JS_DupAtom(JSContext *, JSAtom)";
+"JS_DupAtom(JSContext *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"bc_idx_to_atom(BCReaderState *, JSAtom *, uint32_t)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadFunctionTag(BCReaderState *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "memset(void *, int, size_t)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_u16(BCReaderState *, uint16_t *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_flags(uint32_t, int *, int)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_atom(BCReaderState *, JSAtom *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_leb128_u16(BCReaderState *, uint16_t *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_leb128_int(BCReaderState *, int *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "js_mallocz(JSContext *, size_t)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "JS_ReadFunctionBytecode(BCReaderState *, JSFunctionBytecode *, int, uint32_t)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "bc_get_buf(BCReaderState *, uint8_t *, uint32_t)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "JS_ReadObjectRec(BCReaderState *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "JS_IsException(JSValue)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "JS_DupContext(JSContext *)";
+"JS_ReadFunctionTag(BCReaderState *)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

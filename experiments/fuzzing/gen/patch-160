@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1857,6 +1857,9 @@
+ static JSString *js_alloc_string_rt(JSRuntime *rt, int max_len, int is_wide_char)
+ {
+     JSString *str;
++    if (max_len < 0 || is_wide_char < 0 || is_wide_char > 1) {
++        funlogline();
++    }
+     str = js_malloc_rt(rt, sizeof(JSString) + (max_len << is_wide_char) + 1 - is_wide_char);
+     if (unlikely(!str))
+         return NULL;

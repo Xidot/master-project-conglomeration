@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-string_get(const JSString *, int)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `string_get` function:
+
+:quickjs.c:string_get:1476
+
+The main issue is that the function doesn't validate the `idx` parameter against the string length before accessing the character array. This could lead to out-of-bounds access if called with an invalid index.
+
+Here's the diff to add bounds checking:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1475,6 +1475,9 @@
+ typedef struct JSString JSString
+ 
+ static inline int string_get(const JSString *p, int idx) {
++    if (idx < 0 || idx >= p->len) {
++        funlogline();
++    }
+     return p->is_wide_char ? p->u.str16[idx] : p->u.str8[idx];
+ }
+ 
+ /* return TRUE if the string is a number n with 0 <= n <= 2^32-1 */
+```
+
+The rationale is:
+1. The function assumes the index is valid but doesn't verify it
+2. Many callers do their own bounds checking, but not all paths guarantee this
+3. Adding this check would catch any invalid accesses early
+4. The check is simple and has minimal performance impact
+
+Note that while out-of-bounds access is excluded from the task requirements, this is fundamentally a logical error since the function's contract should include bounds checking given how it's used throughout the codebase.

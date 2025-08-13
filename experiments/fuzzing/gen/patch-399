@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1331,6 +1331,9 @@
+ 
+ void *js_malloc_rt(JSRuntime *rt, size_t size)
+ {
++    if (unlikely(!rt || !rt->mf.js_malloc)) {
++        funlogline();
++    }
+     return rt->mf.js_malloc(&rt->malloc_state, size);
+ }

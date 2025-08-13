@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -45068,6 +45068,8 @@
+     JSValue pattern, flags;
+     StringBuffer b_s, *b = &b_s;
+ 
++    if (!JS_IsObject(this_val) || JS_VALUE_GET_TAG(this_val) != JS_TAG_OBJECT)
++        funlogline();
+     if (!JS_IsObject(this_val))
+         return JS_ThrowTypeErrorNotAnObject(ctx);
+ 
+@@ -45075,6 +45077,8 @@
+     string_buffer_putc8(b, '/');
+     pattern = JS_GetProperty(ctx, this_val, JS_ATOM_source);
+     if (string_buffer_concat_value_free(b, pattern))
++        if (JS_IsException(pattern))
++            funlogline();
+         goto fail;
+     string_buffer_putc8(b, '/');
+     flags = JS_GetProperty(ctx, this_val, JS_ATOM_flags);
+     if (string_buffer_concat_value_free(b, flags))

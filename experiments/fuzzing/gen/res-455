@@ -1,0 +1,47 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_new_string8_len(JSContext *, const char *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_new_string8_len` function:
+
+:quickjs.c:js_new_string8_len:3402
+:quickjs.c:js_new_string8_len:3407
+:quickjs.c:js_new_string8_len:3410
+
+---
+
+1. Line 3402: No check for NULL `buf` parameter before usage
+2. Line 3407: No validation that `len` matches actual buffer length
+3. Line 3410: Potential buffer overflow if `len` is exactly the allocated size (no space for null terminator)
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3401,6 +3401,9 @@
+ {
+     JSString *str;
+ 
++    if (!buf)
++        return JS_EXCEPTION;
++
+     if (len <= 0) {
+         return JS_AtomToString(ctx, JS_ATOM_empty_string);
+     }
+@@ -3408,6 +3411,9 @@
+     if (!str)
+         return JS_EXCEPTION;
++
++    if (len > str->len)
++        funlogline();
++
+     memcpy(str->u.str8, buf, len);
+     str->u.str8[len] = '\0';
+     return JS_MKPTR(JS_TAG_STRING, str);
+```
+
+The changes:
+1. Added NULL check for input buffer
+2. Added length validation check against allocated string size
+3. The null terminator write at line 3410 is actually safe since `js_alloc_string` allocates len+1 bytes (implied by context)

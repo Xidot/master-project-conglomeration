@@ -1,0 +1,370 @@
+Target function: "JS_ReadObjectAtoms(BCReaderState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 37902
+static int JS_ReadObjectAtoms(BCReaderState *s)
+{
+    uint8_t v8;
+    JSString *p;
+    int i;
+    JSAtom atom;
+
+    if (bc_get_u8(s, &v8))
+        return -1;
+    if (v8 != BC_VERSION) {
+        JS_ThrowSyntaxError(s->ctx, "invalid version (%d expected=%d)",
+                            v8, BC_VERSION);
+        return -1;
+    }
+    if (bc_get_leb128(s, &s->idx_to_atom_count))
+        return -1;
+
+    bc_read_trace(s, "%d atom indexes {\n", s->idx_to_atom_count);
+
+    if (s->idx_to_atom_count != 0) {
+        s->idx_to_atom = js_mallocz(s->ctx, s->idx_to_atom_count *
+                                    sizeof(s->idx_to_atom[0]));
+        if (!s->idx_to_atom)
+            return s->error_state = -1;
+    }
+    for(i = 0; i < s->idx_to_atom_count; i++) {
+        p = JS_ReadString(s);
+        if (!p)
+            return -1;
+        atom = JS_NewAtomStr(s->ctx, p);
+        if (atom == JS_ATOM_NULL)
+            return s->error_state = -1;
+        s->idx_to_atom[i] = atom;
+        if (s->is_rom_data && (atom != (i + s->first_atom)))
+            s->is_rom_data = FALSE; /* atoms must be relocated */
+    }
+    bc_read_trace(s, "}\n");
+    return 0;
+}
+
+/// Line number here: 36931
+static int bc_get_u8(BCReaderState *s, uint8_t *pval)
+{
+    if (unlikely(s->buf_end - s->ptr < 1)) {
+        *pval = 0; /* avoid warning */
+        return bc_read_error_end(s);
+    }
+    *pval = *s->ptr++;
+    return 0;
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7043
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowSyntaxError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_SYNTAX_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 36986
+static int bc_get_leb128(BCReaderState *s, uint32_t *pval)
+{
+    int ret;
+    ret = get_leb128(pval, s->ptr, s->buf_end);
+    if (unlikely(ret < 0))
+        return bc_read_error_end(s);
+    s->ptr += ret;
+    return 0;
+}
+
+/* Throw out of memory in case of error */
+/// Line number here: 1374
+void *js_mallocz(JSContext *ctx, size_t size)
+{
+    void *ptr;
+    ptr = js_mallocz_rt(ctx->rt, size);
+    if (unlikely(!ptr)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    return ptr;
+}
+
+/// Line number here: 37069
+static JSString *JS_ReadString(BCReaderState *s)
+{
+    uint32_t len;
+    size_t size;
+    BOOL is_wide_char;
+    JSString *p;
+
+    if (bc_get_leb128(s, &len))
+        return NULL;
+    is_wide_char = len & 1;
+    len >>= 1;
+    if (len > JS_STRING_LEN_MAX) {
+        JS_ThrowInternalError(s->ctx, "string too long");
+        return NULL;
+    }
+    p = js_alloc_string(s->ctx, len, is_wide_char);
+    if (!p) {
+        s->error_state = -1;
+        return NULL;
+    }
+    size = (size_t)len << is_wide_char;
+    if ((s->buf_end - s->ptr) < size) {
+        bc_read_error_end(s);
+        js_free_string(s->ctx->rt, p);
+        return NULL;
+    }
+    memcpy(p->u.str8, s->ptr, size);
+    s->ptr += size;
+    if (is_wide_char) {
+        if (is_be()) {
+            uint32_t i;
+            for (i = 0; i < len; i++)
+                p->u.str16[i] = bswap16(p->u.str16[i]);
+        }
+    } else {
+        p->u.str8[size] = '\0'; /* add the trailing zero for 8 bit strings */
+    }
+#ifdef DUMP_READ_OBJECT
+    JS_DumpString(s->ctx->rt, p); printf("\n");
+#endif
+    return p;
+}
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/* Warning: 'p' is freed */
+/// Line number here: 2913
+static JSAtom JS_NewAtomStr(JSContext *ctx, JSString *p)
+{
+    JSRuntime *rt = ctx->rt;
+    uint32_t n;
+    if (is_num_string(&n, p)) {
+        if (n <= JS_ATOM_MAX_INT) {
+            js_free_string(rt, p);
+            return __JS_AtomFromUInt32(n);
+        }
+    }
+    /* XXX: should generate an exception */
+    return __JS_NewAtom(rt, p, JS_ATOM_TYPE_STRING);
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 37954
+JSValue JS_ReadObject(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                       int flags)
+{
+    BCReaderState ss, *s = &ss;
+    JSValue obj;
+
+    ctx->binary_object_count += 1;
+    ctx->binary_object_size += buf_len;
+
+    memset(s, 0, sizeof(*s));
+    s->ctx = ctx;
+    s->buf_start = buf;
+    s->buf_end = buf + buf_len;
+    s->ptr = buf;
+    s->allow_bytecode = ((flags & JS_READ_OBJ_BYTECODE) != 0);
+    s->is_rom_data = ((flags & JS_READ_OBJ_ROM_DATA) != 0);
+    s->allow_sab = ((flags & JS_READ_OBJ_SAB) != 0);
+    s->allow_reference = ((flags & JS_READ_OBJ_REFERENCE) != 0);
+    if (s->allow_bytecode)
+        s->first_atom = JS_ATOM_END;
+    else
+        s->first_atom = 1;
+    if (JS_ReadObjectAtoms(s)) {
+        obj = JS_EXCEPTION;
+    } else {
+        obj = JS_ReadObjectRec(s);
+    }
+    bc_reader_free(s);
+    return obj;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ReadObjectAtoms(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_u8(BCReaderState *, uint8_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "js_mallocz(JSContext *, size_t)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_ReadString(BCReaderState *)";
+"JS_ReadObjectAtoms(BCReaderState *)" -> "JS_NewAtomStr(JSContext *, JSString *)";
+"bc_get_u8(BCReaderState *, uint8_t *)";
+"bc_get_u8(BCReaderState *, uint8_t *)" -> "__builtin_expect(long, long)";
+"bc_get_u8(BCReaderState *, uint8_t *)" -> "bc_read_error_end(BCReaderState *)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowSyntaxError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"bc_get_leb128(BCReaderState *, uint32_t *)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "get_leb128(uint32_t *, const uint8_t *, const uint8_t *)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "__builtin_expect(long, long)";
+"bc_get_leb128(BCReaderState *, uint32_t *)" -> "bc_read_error_end(BCReaderState *)";
+"js_mallocz(JSContext *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"js_mallocz(JSContext *, size_t)" -> "__builtin_expect(long, long)";
+"js_mallocz(JSContext *, size_t)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"JS_ReadString(BCReaderState *)";
+"JS_ReadString(BCReaderState *)" -> "bc_get_leb128(BCReaderState *, uint32_t *)";
+"JS_ReadString(BCReaderState *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ReadString(BCReaderState *)" -> "js_alloc_string(JSContext *, int, int)";
+"JS_ReadString(BCReaderState *)" -> "bc_read_error_end(BCReaderState *)";
+"JS_ReadString(BCReaderState *)" -> "js_free_string(JSRuntime *, JSString *)";
+"JS_ReadString(BCReaderState *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"JS_ReadString(BCReaderState *)" -> "is_be()";
+"JS_ReadString(BCReaderState *)" -> "bswap16(uint16_t)";
+"JS_NewAtomStr(JSContext *, JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "is_num_string(uint32_t *, const JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "js_free_string(JSRuntime *, JSString *)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "__JS_AtomFromUInt32(uint32_t)";
+"JS_NewAtomStr(JSContext *, JSString *)" -> "__JS_NewAtom(JSRuntime *, JSString *, int)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "memset(void *, int, size_t)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObjectAtoms(BCReaderState *)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObjectRec(BCReaderState *)";
+"JS_ReadObject(JSContext *, const uint8_t *, size_t, int)" -> "bc_reader_free(BCReaderState *)";
+}

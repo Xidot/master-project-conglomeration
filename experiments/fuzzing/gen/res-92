@@ -1,0 +1,33 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-free_sh(JSRuntime *, JSOSSignalHandler *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `free_sh` function:
+
+:free_sh:2060
+
+---
+
+```diff
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -2059,6 +2059,9 @@
+ static void free_sh(JSRuntime *rt, JSOSSignalHandler *sh)
+ {
+     list_del(&sh->link);
++    if (sh->func.tag == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     JS_FreeValueRT(rt, sh->func);
+     js_free_rt(rt, sh);
+ }
+```
+
+The logical bug here is that `JS_FreeValueRT` is called on `sh->func` without first checking if it's a valid/initialized JSValue. If `sh->func` was never properly initialized (tag = JS_TAG_UNINITIALIZED), this could lead to undefined behavior when trying to free it. The added check will detect this case.
+
+The bug could occur if:
+1. A signal handler is created but the func field isn't properly initialized
+2. Memory corruption occurs and modifies the tag field
+3. The struct is reused without proper initialization
+
+The fix adds a check for the uninitialized state before attempting to free the value.

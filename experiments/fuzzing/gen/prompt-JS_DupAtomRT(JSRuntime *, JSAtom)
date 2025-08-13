@@ -1,0 +1,264 @@
+Target function: "JS_DupAtomRT(JSRuntime *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 545
+typedef struct JSClassDef {
+    const char *class_name;
+    JSClassFinalizer *finalizer;
+    JSClassGCMark *gc_mark;
+    /* if call != NULL, the object is a function. If (flags &
+       JS_CALL_FLAG_CONSTRUCTOR) != 0, the function is called as a
+       constructor. In this case, 'this_val' is new.target. A
+       constructor call only happens if the object constructor bit is
+       set (see JS_SetConstructorBit()). */
+    JSClassCall *call;
+    /* XXX: suppress this indirection ? It is here only to save memory
+       because only a few classes need these methods */
+    JSClassExoticMethods *exotic;
+} JSClassDef
+
+/// Line number here: 55
+typedef struct JSClass JSClass
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/// Line number here: 2586
+static JSAtom JS_DupAtomRT(JSRuntime *rt, JSAtom v)
+{
+    JSAtomStruct *p;
+
+    if (!__JS_AtomIsConst(v)) {
+        p = rt->atom_array[v];
+        p->header.ref_count++;
+    }
+    return v;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 2356
+static inline BOOL __JS_AtomIsConst(JSAtom v)
+{
+#if defined(DUMP_LEAKS) && DUMP_LEAKS > 1
+        return (int32_t)v <= 0;
+#else
+        return (int32_t)v < JS_ATOM_END;
+#endif
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* create a new object internal class. Return -1 if error, 0 if
+   OK. The finalizer can be NULL if none is needed. */
+/// Line number here: 3336
+static int JS_NewClass1(JSRuntime *rt, JSClassID class_id,
+                        const JSClassDef *class_def, JSAtom name)
+{
+    int new_size, i;
+    JSClass *cl, *new_class_array;
+    struct list_head *el;
+
+    if (class_id >= (1 << 16))
+        return -1;
+    if (class_id < rt->class_count &&
+        rt->class_array[class_id].class_id != 0)
+        return -1;
+
+    if (class_id >= rt->class_count) {
+        new_size = max_int(JS_CLASS_INIT_COUNT,
+                           max_int(class_id + 1, rt->class_count * 3 / 2));
+
+        /* reallocate the context class prototype array, if any */
+        list_for_each(el, &rt->context_list) {
+            JSContext *ctx = list_entry(el, JSContext, link);
+            JSValue *new_tab;
+            new_tab = js_realloc_rt(rt, ctx->class_proto,
+                                    sizeof(ctx->class_proto[0]) * new_size);
+            if (!new_tab)
+                return -1;
+            for(i = rt->class_count; i < new_size; i++)
+                new_tab[i] = JS_NULL;
+            ctx->class_proto = new_tab;
+        }
+        /* reallocate the class array */
+        new_class_array = js_realloc_rt(rt, rt->class_array,
+                                        sizeof(JSClass) * new_size);
+        if (!new_class_array)
+            return -1;
+        memset(new_class_array + rt->class_count, 0,
+               (new_size - rt->class_count) * sizeof(JSClass));
+        rt->class_array = new_class_array;
+        rt->class_count = new_size;
+    }
+    cl = &rt->class_array[class_id];
+    cl->class_id = class_id;
+    cl->class_name = JS_DupAtomRT(rt, name);
+    cl->finalizer = class_def->finalizer;
+    cl->gc_mark = class_def->gc_mark;
+    cl->call = class_def->call;
+    cl->exotic = class_def->exotic;
+    return 0;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_DupAtomRT(JSRuntime *, JSAtom)";
+"JS_DupAtomRT(JSRuntime *, JSAtom)" -> "__JS_AtomIsConst(JSAtom)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "max_int(int, int)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "memset(void *, int, size_t)";
+"JS_NewClass1(JSRuntime *, JSClassID, const JSClassDef *, JSAtom)" -> "JS_DupAtomRT(JSRuntime *, JSAtom)";
+}

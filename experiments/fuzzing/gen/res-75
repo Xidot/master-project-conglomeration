@@ -1,0 +1,34 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-find_export_entry(JSContext *, JSModuleDef *, JSAtom)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs in the `find_export_entry` function:
+
+:find_export_entry:28368
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28370,6 +28370,9 @@
+ {
+     JSExportEntry *me;
+     int i;
++    if (m == NULL || m->export_entries == NULL) {
++        funlogline();
++    }
+     for(i = 0; i < m->export_entries_count; i++) {
+         me = &m->export_entries[i];
+         if (me->export_name == export_name)
+             return me;
+```
+
+The logical bug is that the function doesn't check if the module `m` or its `export_entries` array is NULL before accessing them. This could lead to crashes if called with invalid module pointers. The added check will detect when these invalid conditions occur.
+
+The bug could be triggered when:
+1. The module is not properly initialized
+2. The export entries array allocation failed
+3. The function is called with a NULL module pointer
+
+The fix adds a check for these conditions before accessing the module's data structures.

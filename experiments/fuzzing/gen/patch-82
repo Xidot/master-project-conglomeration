@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -55744,6 +55744,8 @@
+ static void finrec_delete_weakref(JSRuntime *rt, JSWeakRefHeader *wh)
+ {
+     JSFinalizationRegistryData *frd = container_of(wh, JSFinalizationRegistryData, weakref_header);
++    if (!frd)
++        funlogline();
+     struct list_head *el, *el1;
+ 
+     list_for_each_safe(el, el1, &frd->entries) {
+@@ -55757,6 +55759,8 @@
+         if (!js_weakref_is_live(fre->target)) {
+             JSValueConst args[2];
+             args[0] = frd->cb;
++            if (!js_weakref_is_live(frd->cb))
++                funlogline();
+             args[1] = fre->held_val;
+             JS_EnqueueJob(frd->realm, js_finrec_job, 2, args);
+                 
+@@ -55764,6 +55768,8 @@
+             js_weakref_free(rt, fre->token);
+             JS_FreeValueRT(rt, fre->held_val);
+             list_del(&fre->link);
++            if (js_weakref_is_live(fre->held_val))
++                funlogline();
+             js_free_rt(rt, fre);
+         }
+     }

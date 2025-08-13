@@ -1,0 +1,122 @@
+Target function: "js_free_message(JSWorkerMessage *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 112
+typedef struct {
+    struct list_head link;
+    uint8_t *data;
+    size_t data_len;
+    /* list of SharedArrayBuffers, necessary to free the message */
+    uint8_t **sab_tab;
+    size_t sab_tab_len;
+} JSWorkerMessage
+
+/// Line number here: 3506
+static void js_free_message(JSWorkerMessage *msg)
+{
+    size_t i;
+    /* free the SAB */
+    for(i = 0; i < msg->sab_tab_len; i++) {
+        js_sab_free(NULL, msg->sab_tab[i]);
+    }
+    free(msg->sab_tab);
+    free(msg->data);
+    free(msg);
+}
+
+/// Line number here: 3443
+typedef struct {
+    int ref_count;
+    uint64_t buf[0];
+} JSSABHeader
+
+/// Line number here: 3464
+static void js_sab_free(void *opaque, void *ptr)
+{
+    JSSABHeader *sab;
+    int ref_count;
+    sab = (JSSABHeader *)((uint8_t *)ptr - sizeof(JSSABHeader));
+    ref_count = atomic_add_int(&sab->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        free(sab);
+    }
+}
+
+/// Line number here: 130
+typedef struct {
+    int ref_count;
+#ifdef USE_WORKER
+    pthread_mutex_t mutex;
+#endif
+    struct list_head msg_queue; /* list of JSWorkerMessage.link */
+    JSWaker waker;
+} JSWorkerMessagePipe
+
+/// Line number here: 3518
+static void js_free_message_pipe(JSWorkerMessagePipe *ps)
+{
+    struct list_head *el, *el1;
+    JSWorkerMessage *msg;
+    int ref_count;
+
+    if (!ps)
+        return;
+
+    ref_count = atomic_add_int(&ps->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        list_for_each_safe(el, el1, &ps->msg_queue) {
+            msg = list_entry(el, JSWorkerMessage, link);
+            js_free_message(msg);
+        }
+        pthread_mutex_destroy(&ps->mutex);
+        js_waker_close(&ps->waker);
+        free(ps);
+    }
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 686
+extern void free (void *__ptr) __THROW
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_free_message(JSWorkerMessage *)";
+"js_free_message(JSWorkerMessage *)" -> "js_sab_free(void *, void *)";
+"js_free_message(JSWorkerMessage *)" -> "free(void *)";
+"js_sab_free(void *, void *)";
+"js_sab_free(void *, void *)" -> "atomic_add_int(int *, int)";
+"js_sab_free(void *, void *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_sab_free(void *, void *)" -> "free(void *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "atomic_add_int(int *, int)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_free_message(JSWorkerMessage *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "pthread_mutex_destroy(pthread_mutex_t *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_waker_close(JSWaker *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "free(void *)";
+}

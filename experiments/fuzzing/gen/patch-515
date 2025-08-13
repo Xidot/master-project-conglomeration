@@ -1,0 +1,19 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37690,6 +37690,8 @@
+     JSValue obj;
+ 
+     if (bc_get_leb128(s, &byte_length))
++        return JS_EXCEPTION;
++    if (unlikely(byte_length == 0))
+         return JS_EXCEPTION;
+     if (unlikely(s->buf_end - s->ptr < byte_length)) {
+         bc_read_error_end(s);
+@@ -37700,6 +37702,7 @@
+         goto fail;
+     if (BC_add_object_ref(s, obj))
+         goto fail;
++    funlogline(); // Instrumentation for potential state inconsistency
+     s->ptr += byte_length;
+     return obj;
+  fail:

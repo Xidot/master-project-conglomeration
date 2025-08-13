@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_async_function_resume(JSContext *, JSAsyncFunctionState *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_async_function_resume`:
+
+:js_async_function_resume:19908
+:js_async_function_resume:19914
+:js_async_function_resume:19936
+
+---
+
+1. Line 19908: After calling `async_func_resume`, the function checks `s->is_completed` but doesn't handle the case where `func_ret` might be an exception but `is_completed` is false. This could lead to unhandled exceptions.
+
+2. Line 19914: When handling exceptions, the code calls `JS_Call` with `s->resolving_funcs[1]` but doesn't check if the resolving function is valid before calling it. This could lead to crashes if the function is invalid.
+
+3. Line 19936: The code calls `js_promise_resolve` with `value` but doesn't verify if `value` is valid before passing it. If `value` is corrupted or invalid, this could cause issues.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19905,6 +19905,8 @@
+ 
+     func_ret = async_func_resume(ctx, s);
+     if (s->is_completed) {
++        if (JS_IsException(func_ret) && !s->is_completed)
++            funlogline();
+         if (JS_IsException(func_ret)) {
+             JSValue error;
+         fail:
+@@ -19911,6 +19913,8 @@
+             error = JS_GetException(ctx);
+             ret2 = JS_Call(ctx, s->resolving_funcs[1], JS_UNDEFINED,
+                            1, (JSValueConst *)&error);
++            if (!JS_IsFunction(ctx, s->resolving_funcs[1]))
++                funlogline();
+             JS_FreeValue(ctx, error);
+             JS_FreeValue(ctx, ret2); /* XXX: what to do if exception ? */
+         } else {
+@@ -19933,6 +19937,8 @@
+         /* await */
+         JS_FreeValue(ctx, func_ret); /* not used */
+         promise = js_promise_resolve(ctx, ctx->promise_ctor,
++        if (JS_IsException(value))
++            funlogline();
+                                      1, (JSValueConst *)&value, 0);
+         JS_FreeValue(ctx, value);
+         if (JS_IsException(promise))
+```
+
+The modifications add checks for:
+1. Inconsistent state between exception and completion flag
+2. Invalid resolving function before calling it
+3. Invalid value before passing to promise resolution

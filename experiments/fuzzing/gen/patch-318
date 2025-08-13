@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1904,6 +1904,8 @@
+     struct list_head *el, *el1;
+     int i;
+ 
++    if (rt->current_exception.tag == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JS_FreeValueRT(rt, rt->current_exception);
+ 
+     list_for_each_safe(el, el1, &rt->job_list) {
+@@ -1928,6 +1930,8 @@
+     /* don't remove the weak objects to avoid create new jobs with
+        FinalizationRegistry */
+     JS_RunGCInternal(rt, FALSE);
++    if (!list_empty(&rt->weakref_list))
++        funlogline();
+ 
+ #ifdef DUMP_LEAKS
+     /* leaking objects */
+@@ -1957,6 +1961,8 @@
+     /* free the classes */
+     for(i = 0; i < rt->class_count; i++) {
+         JSClass *cl = &rt->class_array[i];
++        if (cl->class_id == 0 && cl->class_name != 0)
++            funlogline();
+         if (cl->class_id != 0) {
+             JS_FreeAtomRT(rt, cl->class_name);
+         }
+@@ -1982,6 +1988,8 @@
+         for(i = 0; i < rt->atom_size; i++) {
+             JSAtomStruct *p = rt->atom_array[i];
+             if (!atom_is_free(p)) {
++                if (p->header.ref_count > 1)
++                    funlogline();
+ #ifdef DUMP_LEAKS
+                 list_del(&p->link);
+ #endif

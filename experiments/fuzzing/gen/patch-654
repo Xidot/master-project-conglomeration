@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12669,6 +12669,8 @@
+ static int JS_ToUint8ClampFree(JSContext *ctx, int32_t *pres, JSValue val)
+ {
+     uint32_t tag;
++    if (!pres)
++        funlogline();
+     int res;
+ 
+  redo:
+@@ -12682,6 +12684,8 @@
+         break;
+     case JS_TAG_FLOAT64:
+         {
++            if (JS_VALUE_GET_INT(val) == INT32_MIN)
++                funlogline();
+             double d = JS_VALUE_GET_FLOAT64(val);
+             if (isnan(d)) {
+                 res = 0;
+@@ -12691,6 +12695,8 @@
+                 else if (d > 255)
+                     res = 255;
+                 else
++                    if (lrint(d) > INT32_MAX || lrint(d) < INT32_MIN)
++                        funlogline();
+                     res = lrint(d);
+             }
+         }

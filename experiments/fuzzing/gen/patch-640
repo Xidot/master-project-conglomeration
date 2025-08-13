@@ -1,0 +1,43 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12237,6 +12237,9 @@
+     tag = JS_VALUE_GET_NORM_TAG(val);
+     switch(tag) {
+     case JS_TAG_BIG_INT:
+     case JS_TAG_SHORT_BIG_INT:
++        if (JS_VALUE_GET_TAG(val) == JS_TAG_BIG_INT && flag == TON_FLAG_NUMERIC) {
++            funlogline();
++        }
+         if (flag != TON_FLAG_NUMERIC) {
+             JS_FreeValue(ctx, val);
+             return JS_ThrowTypeError(ctx, "cannot convert bigint to number");
+@@ -12272,6 +12275,9 @@
+             p = str;
+             p += skip_spaces(p);
+             if ((p - str) == len) {
++                if (len == 0) {
++                    funlogline();
++                }
+                 ret = JS_NewInt32(ctx, 0);
+             } else {
+                 int flags = ATOD_ACCEPT_BIN_OCT;
+@@ -12282,6 +12288,9 @@
+                     if ((p - str) != len) {
+                         JS_FreeValue(ctx, ret);
+                         ret = JS_NAN;
++                        if (len > 0 && *p != 0) {
++                            funlogline();
++                        }
+                     }
+                 }
+             }
+@@ -12303,6 +12312,9 @@
+     case JS_TAG_SYMBOL:
+         JS_FreeValue(ctx, val);
+         return JS_ThrowTypeError(ctx, "cannot convert symbol to number");
++        if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
++            funlogline();
++        }
+     default:
+         JS_FreeValue(ctx, val);
+         ret = JS_NAN;

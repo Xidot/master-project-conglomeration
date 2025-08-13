@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54522,6 +54522,9 @@
+     p = JS_VALUE_GET_OBJ(obj);
+     size_log2 = typed_array_size_log2(p->class_id);
+     ta = js_malloc(ctx, sizeof(*ta));
++    if (size_log2 < 0 || size_log2 > 5) {
++        funlogline();
++    }
+     if (!ta) {
+         JS_FreeValue(ctx, buffer);
+         return -1;
+@@ -54531,6 +54534,9 @@
+     ta->obj = p;
+     ta->buffer = pbuffer;
+     ta->offset = offset;
++    if (len > (UINT32_MAX >> size_log2)) {
++        funlogline();
++    }
+     ta->length = len << size_log2;
+     list_add_tail(&ta->link, &abuf->array_list);
+     p->u.typed_array = ta;

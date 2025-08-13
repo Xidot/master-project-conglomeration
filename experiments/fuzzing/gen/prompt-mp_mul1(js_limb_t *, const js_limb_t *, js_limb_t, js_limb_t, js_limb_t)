@@ -1,0 +1,169 @@
+Target function: "mp_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 407
+typedef uint128_t js_dlimb_t
+
+/* tabr[] = taba[] * b + l. Return the high carry */
+/// Line number here: 10646
+static js_limb_t mp_mul1(js_limb_t *tabr, const js_limb_t *taba, js_limb_t n,
+                      js_limb_t b, js_limb_t l)
+{
+    js_limb_t i;
+    js_dlimb_t t;
+
+    for(i = 0; i < n; i++) {
+        t = (js_dlimb_t)taba[i] * (js_dlimb_t)b + l;
+        tabr[i] = t;
+        l = t >> JS_LIMB_BITS;
+    }
+    return l;
+}
+
+/* size of the result : op1_size + op2_size. */
+/// Line number here: 10690
+static void mp_mul_basecase(js_limb_t *result,
+                            const js_limb_t *op1, js_limb_t op1_size,
+                            const js_limb_t *op2, js_limb_t op2_size)
+{
+    int i;
+    js_limb_t r;
+    
+    result[op1_size] = mp_mul1(result, op1, op1_size, op2[0], 0);
+    for(i=1;i<op2_size;i++) {
+        r = mp_add_mul1(result + i, op1, op1_size, op2[i]);
+        result[i + op1_size] = r;
+    }
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* syntax: [-]digits in base radix. Return NULL if memory error. radix
+   = 10, 2, 8 or 16. */
+/// Line number here: 11743
+static JSBigInt *js_bigint_from_string(JSContext *ctx,
+                                       const char *str, int radix)
+{
+    const char *p = str;
+    int is_neg, n_digits, n_limbs, len, log2_radix, n_bits, i;
+    JSBigInt *r;
+    js_limb_t v, c, h;
+    
+    is_neg = 0;
+    if (*p == '-') {
+        is_neg = 1;
+        p++;
+    }
+    while (*p == '0')
+        p++;
+    n_digits = strlen(p);
+    log2_radix = 32 - clz32(radix - 1); /* ceil(log2(radix)) */
+    /* compute the maximum number of limbs */
+    /* XXX: overflow */
+    if (radix == 10) {
+        n_bits = (n_digits * 27 + 7) / 8; /* >= ceil(n_digits * log2(10)) */
+    } else {
+        n_bits = n_digits * log2_radix;
+    }
+    /* we add one extra bit for the sign */
+    n_limbs = max_int(1, n_bits / JS_LIMB_BITS + 1);
+    r = js_bigint_new(ctx, n_limbs);
+    if (!r)
+        return NULL;
+    if (radix == 10) {
+        int digits_per_limb = JS_LIMB_DIGITS;
+        len = 1;
+        r->tab[0] = 0;
+        for(;;) {
+            /* XXX: slow */
+            v = 0;
+            for(i = 0; i < digits_per_limb; i++) {
+                c = to_digit(*p);
+                if (c >= radix)
+                    break;
+                p++;
+                v = v * 10 + c;
+            }
+            if (i == 0)
+                break;
+            if (len == 1 && r->tab[0] == 0) {
+                r->tab[0] = v;
+            } else {
+                h = mp_mul1(r->tab, r->tab, len, js_pow_dec[i], v);
+                if (h != 0) {
+                    r->tab[len++] = h;
+                }
+            }
+        }
+        /* add one extra limb to have the correct sign*/
+        if ((r->tab[len - 1] >> (JS_LIMB_BITS - 1)) != 0)
+            r->tab[len++] = 0;
+        r->len = len;
+    } else {
+        unsigned int bit_pos, shift, pos;
+        
+        /* power of two base: no multiplication is needed */
+        r->len = n_limbs;
+        memset(r->tab, 0, sizeof(r->tab[0]) * n_limbs);
+        for(i = 0; i < n_digits; i++) {
+            c = to_digit(p[n_digits - 1 - i]);
+            assert(c < radix);
+            bit_pos = i * log2_radix;
+            shift = bit_pos & (JS_LIMB_BITS - 1);
+            pos = bit_pos / JS_LIMB_BITS;
+            r->tab[pos] |= c << shift;
+            /* if log2_radix does not divide JS_LIMB_BITS, needed an
+               additional op */
+            if (shift + log2_radix > JS_LIMB_BITS) {
+                r->tab[pos + 1] |= c >> (JS_LIMB_BITS - shift);
+            }
+        }
+    }
+    r = js_bigint_normalize(ctx, r);
+    /* XXX: could do it in place */
+    if (is_neg) {
+        JSBigInt *r1;
+        r1 = js_bigint_neg(ctx, r);
+        js_free(ctx, r);
+        r = r1;
+    }
+    return r;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+
+
+----- Callgraph:
+strict digraph G {
+"mp_mul_basecase(js_limb_t *, const js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)";
+"mp_mul_basecase(js_limb_t *, const js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)";
+"mp_mul_basecase(js_limb_t *, const js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_add_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t)";
+"js_bigint_from_string(JSContext *, const char *, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "strlen(const char *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "clz32(unsigned int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "max_int(int, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "to_digit(int)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "mp_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "memset(void *, int, size_t)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_bigint_neg(JSContext *, const JSBigInt *)";
+"js_bigint_from_string(JSContext *, const char *, int)" -> "js_free(JSContext *, void *)";
+}

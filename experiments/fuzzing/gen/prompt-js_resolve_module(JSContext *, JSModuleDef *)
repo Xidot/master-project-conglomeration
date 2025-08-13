@@ -1,0 +1,603 @@
+Target function: "js_resolve_module(JSContext *, JSModuleDef *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/* Load all the required modules for module 'm' */
+/// Line number here: 29108
+static int js_resolve_module(JSContext *ctx, JSModuleDef *m)
+{
+    int i;
+    JSModuleDef *m1;
+
+    if (m->resolved)
+        return 0;
+#ifdef DUMP_MODULE_RESOLVE
+    {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        printf("resolving module '%s':\n", JS_AtomGetStr(ctx, buf1, sizeof(buf1), m->module_name));
+    }
+#endif
+    m->resolved = TRUE;
+    /* resolve each requested module */
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        m1 = js_host_resolve_imported_module_atom(ctx, m->module_name,
+                                                  rme->module_name,
+                                                  rme->attributes);
+        if (!m1)
+            return -1;
+        rme->module = m1;
+        /* already done in js_host_resolve_imported_module() except if
+           the module was loaded with JS_EvalBinary() */
+        if (js_resolve_module(ctx, m1) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 28648
+static JSModuleDef *js_host_resolve_imported_module_atom(JSContext *ctx,
+                                                         JSAtom base_module_name,
+                                                         JSAtom module_name1,
+                                                         JSValueConst attributes)
+{
+    const char *base_cname, *cname;
+    JSModuleDef *m;
+
+    base_cname = JS_AtomToCString(ctx, base_module_name);
+    if (!base_cname)
+        return NULL;
+    cname = JS_AtomToCString(ctx, module_name1);
+    if (!cname) {
+        JS_FreeCString(ctx, base_cname);
+        return NULL;
+    }
+    m = js_host_resolve_imported_module(ctx, base_cname, cname, attributes);
+    JS_FreeCString(ctx, base_cname);
+    JS_FreeCString(ctx, cname);
+    return m;
+}
+
+/// Line number here: 2181
+enum JSFreeModuleEnum {
+    JS_FREE_MODULE_ALL,
+    JS_FREE_MODULE_NOT_RESOLVED,
+}
+
+/// Line number here: 29602
+static void JS_LoadModuleInternal(JSContext *ctx, const char *basename,
+                                  const char *filename,
+                                  JSValueConst *resolving_funcs,
+                                  JSValueConst attributes)
+{
+    JSValue evaluate_promise;
+    JSModuleDef *m;
+    JSValue ret, err, func_obj, evaluate_resolving_funcs[2];
+    JSValueConst func_data[3];
+
+    m = js_host_resolve_imported_module(ctx, basename, filename, attributes);
+    if (!m)
+        goto fail;
+
+    if (js_resolve_module(ctx, m) < 0) {
+        js_free_modules(ctx, JS_FREE_MODULE_NOT_RESOLVED);
+        goto fail;
+    }
+
+    /* Evaluate the module code */
+    func_obj = JS_NewModuleValue(ctx, m);
+    evaluate_promise = JS_EvalFunction(ctx, func_obj);
+    if (JS_IsException(evaluate_promise)) {
+    fail:
+        err = JS_GetException(ctx);
+        ret = JS_Call(ctx, resolving_funcs[1], JS_UNDEFINED,
+                      1, (JSValueConst *)&err);
+        JS_FreeValue(ctx, ret); /* XXX: what to do if exception ? */
+        JS_FreeValue(ctx, err);
+        return;
+    }
+
+    func_obj = JS_NewModuleValue(ctx, m);
+    func_data[0] = resolving_funcs[0];
+    func_data[1] = resolving_funcs[1];
+    func_data[2] = func_obj;
+    evaluate_resolving_funcs[0] = JS_NewCFunctionData(ctx, js_load_module_fulfilled, 0, 0, 3, func_data);
+    evaluate_resolving_funcs[1] = JS_NewCFunctionData(ctx, js_load_module_rejected, 0, 0, 3, func_data);
+    JS_FreeValue(ctx, func_obj);
+    ret = js_promise_then(ctx, evaluate_promise, 2, (JSValueConst *)evaluate_resolving_funcs);
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, evaluate_resolving_funcs[0]);
+    JS_FreeValue(ctx, evaluate_resolving_funcs[1]);
+    JS_FreeValue(ctx, evaluate_promise);
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 20741
+typedef struct JSFunctionDef {
+    JSContext *ctx;
+    struct JSFunctionDef *parent;
+    int parent_cpool_idx; /* index in the constant pool of the parent
+                             or -1 if none */
+    int parent_scope_level; /* scope level in parent at point of definition */
+    struct list_head child_list; /* list of JSFunctionDef.link */
+    struct list_head link;
+
+    BOOL is_eval; /* TRUE if eval code */
+    int eval_type; /* only valid if is_eval = TRUE */
+    BOOL is_global_var; /* TRUE if variables are not defined locally:
+                           eval global, eval module or non strict eval */
+    BOOL is_func_expr; /* TRUE if function expression */
+    BOOL has_home_object; /* TRUE if the home object is available */
+    BOOL has_prototype; /* true if a prototype field is necessary */
+    BOOL has_simple_parameter_list;
+    BOOL has_parameter_expressions; /* if true, an argument scope is created */
+    BOOL has_use_strict; /* to reject directive in special cases */
+    BOOL has_eval_call; /* true if the function contains a call to eval() */
+    BOOL has_arguments_binding; /* true if the 'arguments' binding is
+                                   available in the function */
+    BOOL has_this_binding; /* true if the 'this' and new.target binding are
+                              available in the function */
+    BOOL new_target_allowed; /* true if the 'new.target' does not
+                                throw a syntax error */
+    BOOL super_call_allowed; /* true if super() is allowed */
+    BOOL super_allowed; /* true if super. or super[] is allowed */
+    BOOL arguments_allowed; /* true if the 'arguments' identifier is allowed */
+    BOOL is_derived_class_constructor;
+    BOOL in_function_body;
+    JSFunctionKindEnum func_kind : 8;
+    JSParseFunctionEnum func_type : 8;
+    uint8_t js_mode; /* bitmap of JS_MODE_x */
+    JSAtom func_name; /* JS_ATOM_NULL if no name */
+
+    JSVarDef *vars;
+    int var_size; /* allocated size for vars[] */
+    int var_count;
+    JSVarDef *args;
+    int arg_size; /* allocated size for args[] */
+    int arg_count; /* number of arguments */
+    int defined_arg_count;
+    int var_object_idx; /* -1 if none */
+    int arg_var_object_idx; /* -1 if none (var object for the argument scope) */
+    int arguments_var_idx; /* -1 if none */
+    int arguments_arg_idx; /* argument variable definition in argument scope,
+                              -1 if none */
+    int func_var_idx; /* variable containing the current function (-1
+                         if none, only used if is_func_expr is true) */
+    int eval_ret_idx; /* variable containing the return value of the eval, -1 if none */
+    int this_var_idx; /* variable containg the 'this' value, -1 if none */
+    int new_target_var_idx; /* variable containg the 'new.target' value, -1 if none */
+    int this_active_func_var_idx; /* variable containg the 'this.active_func' value, -1 if none */
+    int home_object_var_idx;
+    BOOL need_home_object;
+
+    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_first;    /* index into vd->vars of first lexically scoped variable */
+    int scope_size;     /* allocated size of fd->scopes array */
+    int scope_count;    /* number of entries used in the fd->scopes array */
+    JSVarScope *scopes;
+    JSVarScope def_scope_array[4];
+    int body_scope; /* scope of the body of the function or eval */
+
+    int global_var_count;
+    int global_var_size;
+    JSGlobalVar *global_vars;
+
+    DynBuf byte_code;
+    int last_opcode_pos; /* -1 if no last opcode */
+    const uint8_t *last_opcode_source_ptr;
+    BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
+
+    LabelSlot *label_slots;
+    int label_size; /* allocated size for label_slots[] */
+    int label_count;
+    BlockEnv *top_break; /* break/continue label stack */
+
+    /* constant pool (strings, functions, numbers) */
+    JSValue *cpool;
+    int cpool_count;
+    int cpool_size;
+
+    /* list of variables in the closure */
+    int closure_var_count;
+    int closure_var_size;
+    JSClosureVar *closure_var;
+
+    JumpSlot *jump_slots;
+    int jump_size;
+    int jump_count;
+
+    LineNumberSlot *line_number_slots;
+    int line_number_size;
+    int line_number_count;
+    int line_number_last;
+    int line_number_last_pc;
+
+    /* pc2line table */
+    BOOL strip_debug : 1; /* strip all debug info (implies strip_source = TRUE) */
+    BOOL strip_source : 1; /* strip only source code */
+    JSAtom filename;
+    uint32_t source_pos; /* pointer in the eval() source */
+    GetLineColCache *get_line_col_cache; /* XXX: could remove to save memory */
+    DynBuf pc2line;
+
+    char *source;  /* raw source, utf-8 encoded */
+    int source_len;
+
+    JSModuleDef *module; /* != NULL when parsing a module */
+    BOOL has_await; /* TRUE if await is used (used in module eval) */
+} JSFunctionDef
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 605
+enum JSFunctionKindEnum {
+    JS_FUNC_NORMAL = 0,
+    JS_FUNC_GENERATOR = (1 << 0),
+    JS_FUNC_ASYNC = (1 << 1),
+    JS_FUNC_ASYNC_GENERATOR = (JS_FUNC_GENERATOR | JS_FUNC_ASYNC),
+}
+
+/* 'input' must be zero terminated i.e. input[input_len] = '\0'. */
+/// Line number here: 35734
+static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
+                                 const char *input, size_t input_len,
+                                 const char *filename, int flags, int scope_idx)
+{
+    JSParseState s1, *s = &s1;
+    int err, js_mode, eval_type;
+    JSValue fun_obj, ret_val;
+    JSStackFrame *sf;
+    JSVarRef **var_refs;
+    JSFunctionBytecode *b;
+    JSFunctionDef *fd;
+    JSModuleDef *m;
+
+    js_parse_init(ctx, s, input, input_len, filename);
+    skip_shebang(&s->buf_ptr, s->buf_end);
+
+    eval_type = flags & JS_EVAL_TYPE_MASK;
+    m = NULL;
+    if (eval_type == JS_EVAL_TYPE_DIRECT) {
+        JSObject *p;
+        sf = ctx->rt->current_stack_frame;
+        assert(sf != NULL);
+        assert(JS_VALUE_GET_TAG(sf->cur_func) == JS_TAG_OBJECT);
+        p = JS_VALUE_GET_OBJ(sf->cur_func);
+        assert(js_class_has_bytecode(p->class_id));
+        b = p->u.func.function_bytecode;
+        var_refs = p->u.func.var_refs;
+        js_mode = b->js_mode;
+    } else {
+        sf = NULL;
+        b = NULL;
+        var_refs = NULL;
+        js_mode = 0;
+        if (flags & JS_EVAL_FLAG_STRICT)
+            js_mode |= JS_MODE_STRICT;
+        if (eval_type == JS_EVAL_TYPE_MODULE) {
+            JSAtom module_name = JS_NewAtom(ctx, filename);
+            if (module_name == JS_ATOM_NULL)
+                return JS_EXCEPTION;
+            m = js_new_module_def(ctx, module_name);
+            if (!m)
+                return JS_EXCEPTION;
+            js_mode |= JS_MODE_STRICT;
+        }
+    }
+    fd = js_new_function_def(ctx, NULL, TRUE, FALSE, filename,
+                             s->buf_start, &s->get_line_col_cache);
+    if (!fd)
+        goto fail1;
+    s->cur_func = fd;
+    fd->eval_type = eval_type;
+    fd->has_this_binding = (eval_type != JS_EVAL_TYPE_DIRECT);
+    if (eval_type == JS_EVAL_TYPE_DIRECT) {
+        fd->new_target_allowed = b->new_target_allowed;
+        fd->super_call_allowed = b->super_call_allowed;
+        fd->super_allowed = b->super_allowed;
+        fd->arguments_allowed = b->arguments_allowed;
+    } else {
+        fd->new_target_allowed = FALSE;
+        fd->super_call_allowed = FALSE;
+        fd->super_allowed = FALSE;
+        fd->arguments_allowed = TRUE;
+    }
+    fd->js_mode = js_mode;
+    fd->func_name = JS_DupAtom(ctx, JS_ATOM__eval_);
+    if (b) {
+        if (add_closure_variables(ctx, fd, b, scope_idx))
+            goto fail;
+    }
+    fd->module = m;
+    if (m != NULL || (flags & JS_EVAL_FLAG_ASYNC)) {
+        fd->in_function_body = TRUE;
+        fd->func_kind = JS_FUNC_ASYNC;
+    }
+    s->is_module = (m != NULL);
+    s->allow_html_comments = !s->is_module;
+
+    push_scope(s); /* body scope */
+    fd->body_scope = fd->scope_level;
+
+    err = js_parse_program(s);
+    if (err) {
+    fail:
+        free_token(s, &s->token);
+        js_free_function_def(ctx, fd);
+        goto fail1;
+    }
+
+    if (m != NULL)
+        m->has_tla = fd->has_await;
+
+    /* create the function object and all the enclosed functions */
+    fun_obj = js_create_function(ctx, fd);
+    if (JS_IsException(fun_obj))
+        goto fail1;
+    /* Could add a flag to avoid resolution if necessary */
+    if (m) {
+        m->func_obj = fun_obj;
+        if (js_resolve_module(ctx, m) < 0)
+            goto fail1;
+        fun_obj = JS_NewModuleValue(ctx, m);
+    }
+    if (flags & JS_EVAL_FLAG_COMPILE_ONLY) {
+        ret_val = fun_obj;
+    } else {
+        ret_val = JS_EvalFunctionInternal(ctx, fun_obj, this_obj, var_refs, sf);
+    }
+    return ret_val;
+ fail1:
+    /* XXX: should free all the unresolved dependencies */
+    if (m)
+        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_MODULE, m));
+    return JS_EXCEPTION;
+}
+
+/* load the dependencies of the module 'obj'. Useful when JS_ReadObject()
+   returns a module. */
+/// Line number here: 35911
+int JS_ResolveModule(JSContext *ctx, JSValueConst obj)
+{
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+        JSModuleDef *m = JS_VALUE_GET_PTR(obj);
+        if (js_resolve_module(ctx, m) < 0) {
+            js_free_modules(ctx, JS_FREE_MODULE_NOT_RESOLVED);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_resolve_module(JSContext *, JSModuleDef *)";
+"js_resolve_module(JSContext *, JSModuleDef *)" -> "js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)";
+"js_resolve_module(JSContext *, JSModuleDef *)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_host_resolve_imported_module_atom(JSContext *, JSAtom, JSAtom, JSValue)" -> "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_host_resolve_imported_module(JSContext *, const char *, const char *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_free_modules(JSContext *, JSFreeModuleEnum)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_NewModuleValue(JSContext *, JSModuleDef *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_EvalFunction(JSContext *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_GetException(JSContext *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "JS_NewCFunctionData(JSContext *, JSCFunctionData *, int, int, int, JSValue *)";
+"JS_LoadModuleInternal(JSContext *, const char *, const char *, JSValue *, JSValue)" -> "js_promise_then(JSContext *, JSValue, int, JSValue *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_parse_init(JSContext *, JSParseState *, const char *, size_t, const char *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "skip_shebang(const uint8_t **, const uint8_t *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_class_has_bytecode(JSClassID)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_NewAtom(JSContext *, const char *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_new_module_def(JSContext *, JSAtom)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_new_function_def(JSContext *, JSFunctionDef *, BOOL, BOOL, const char *, const uint8_t *, GetLineColCache *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "add_closure_variables(JSContext *, JSFunctionDef *, JSFunctionBytecode *, int)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "push_scope(JSParseState *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_parse_program(JSParseState *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "free_token(JSParseState *, JSToken *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_free_function_def(JSContext *, JSFunctionDef *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_create_function(JSContext *, JSFunctionDef *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_IsException(JSValue)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_NewModuleValue(JSContext *, JSModuleDef *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)";
+"__JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ResolveModule(JSContext *, JSValue)";
+"JS_ResolveModule(JSContext *, JSValue)" -> "js_resolve_module(JSContext *, JSModuleDef *)";
+"JS_ResolveModule(JSContext *, JSValue)" -> "js_free_modules(JSContext *, JSFreeModuleEnum)";
+}

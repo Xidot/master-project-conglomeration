@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12800,6 +12800,8 @@
+ static __exception int JS_ToLengthFree(JSContext *ctx, int64_t *plen,
+                                        JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_EXCEPTION)
++        funlogline();
+     int res = JS_ToInt64Clamp(ctx, plen, val, 0, MAX_SAFE_INTEGER, 0);
+     JS_FreeValue(ctx, val);
+     return res;

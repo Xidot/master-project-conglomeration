@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-string_buffer_write8(StringBuffer *, const uint8_t *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `string_buffer_write8`:
+
+:quickjs.c:string_buffer_write8:3664
+:quickjs.c:string_buffer_write8:3669
+
+---
+
+1. `quickjs.c:string_buffer_write8:3664` - When `s->is_wide_char` is true, the code writes 8-bit data into a 16-bit buffer without proper conversion. This could lead to incorrect character representation.
+
+2. `quickjs.c:string_buffer_write8:3669` - The memcpy operation assumes the buffer is large enough after reallocation check, but there's no validation that `len` is non-negative, which could lead to buffer underflow if negative length is passed.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3661,6 +3661,9 @@
+             return -1;
+     }
+     if (s->is_wide_char) {
++        if (len < 0) {
++            funlogline();
++        }
+         for (i = 0; i < len; i++) {
+             s->str->u.str16[s->len + i] = p[i];
+         }
+@@ -3668,6 +3671,9 @@
+     } else {
+         memcpy(&s->str->u.str8[s->len], p, len);
+         s->len += len;
++        if (len < 0) {
++            funlogline();
++        }
+     }
+     return 0;
+ }
+```

@@ -1,0 +1,47 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_object_seal(JSContext *, JSValue, int, JSValue *, int)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `js_object_seal` function for potential logical bugs.
+
+Potential logical bug locations in js_object_seal:
+
+1. :js_object_seal:39056 - Missing check for exotic objects before calling JS_PreventExtensions
+2. :js_object_seal:39085 - Not handling JS_GetOwnPropertyInternal failure properly before using desc.flags
+3. :js_object_seal:39090 - Not checking if js_free_desc is needed after JS_GetOwnPropertyInternal failure
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39056,6 +39056,9 @@
+     if (!JS_IsObject(obj))
+         return JS_DupValue(ctx, obj);
+ 
++    if (JS_VALUE_GET_OBJ(obj)->is_exotic)
++        funlogline();
++
+     res = JS_PreventExtensions(ctx, obj);
+     if (res < 0)
+         return JS_EXCEPTION;
+@@ -39085,6 +39088,8 @@
+             if (res < 0)
+                 goto exception;
+             if (res) {
++                if (!(desc.flags & JS_PROP_CONFIGURABLE))
++                    funlogline();
+                 if (desc.flags & JS_PROP_WRITABLE)
+                     desc_flags |= JS_PROP_HAS_WRITABLE;
+                 js_free_desc(ctx, &desc);
+```
+
+Reasons for the identified bugs:
+
+1. At line 39056: The function doesn't properly handle exotic objects before calling JS_PreventExtensions. Exotic objects may have custom behavior that needs to be considered.
+
+2. At line 39085: After JS_GetOwnPropertyInternal succeeds (res > 0), it directly accesses desc.flags without ensuring the descriptor is valid for the current operation.
+
+3. At line 39090: The js_free_desc call happens after checking desc.flags, but if JS_GetOwnPropertyInternal fails, we might still need to clean up partial state.
+
+The added checks will help catch these edge cases by calling funlogline() when the problematic conditions occur.

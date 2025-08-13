@@ -1,0 +1,20 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4150,6 +4150,9 @@
+ void js_std_free_handlers(JSRuntime *rt)
+ {
+     JSThreadState *ts = JS_GetRuntimeOpaque(rt);
++    if (ts == NULL) {
++        funlogline();
++    }
+     struct list_head *el, *el1;
+ 
+     list_for_each_safe(el, el1, &ts->os_rw_handlers) {
+@@ -4175,6 +4178,7 @@
+     js_free_message_pipe(ts->send_pipe);
+ #endif
+ 
++    funlogline(); // Freeing ts but still using rt afterwards
+     free(ts);
+     JS_SetRuntimeOpaque(rt, NULL); /* fail safe */
+ }

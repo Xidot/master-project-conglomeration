@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48451,6 +48451,8 @@
+         d = JS_VALUE_GET_FLOAT64(key);
+         /* normalize the NaN */
+         if (isnan(d))
++            funlogline();
++        if (isinf(d))
+             d = JS_FLOAT64_NAN;
+     hash_float64:
+         h = map_hash64(float64_as_uint64(d) ^ JS_TAG_FLOAT64, hash_bits);
+@@ -48463,6 +48465,8 @@
+         {
+             int i;
+             h = 1;
++            if (p->len == 0)
++                funlogline();
+             for(i = p->len - 1; i >= 0; i--) {
+                 h = h * 263 + p->tab[i];
+             }
+@@ -48472,6 +48476,8 @@
+         }
+         break;
+     default:
++        if (tag != JS_TAG_NULL && tag != JS_TAG_UNDEFINED && tag != JS_TAG_UNINITIALIZED)
++            funlogline();
+         h = 0;
+         break;
+     }

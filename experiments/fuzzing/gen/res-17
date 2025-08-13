@@ -1,0 +1,39 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-bc_atom_to_idx(BCWriterState *, uint32_t *, JSAtom)
+-------------------------
+Here are the potential logical bugs in the target function `bc_atom_to_idx`:
+
+:bc_atom_to_idx:36149
+:bc_atom_to_idx:36189
+
+---
+
+1. In line 36149, there's a potential logical error where `atom` is subtracted by `s->first_atom` without checking if `s->first_atom` is greater than `atom`. This could lead to underflow if `s->first_atom > atom`.
+
+2. In line 36189, after resizing `idx_to_atom`, the code assigns `atom + s->first_atom` to `s->idx_to_atom[v]`. However, there's no check that `atom + s->first_atom` is a valid JSAtom value (not exceeding JSAtom range).
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36149,6 +36149,8 @@
+         *pres = atom;
+         return 0;
+     }
++    if (atom < s->first_atom)
++        funlogline();
+     atom -= s->first_atom;
+     if (atom < s->atom_to_idx_size && s->atom_to_idx[atom] != 0) {
+         *pres = s->atom_to_idx[atom];
+@@ -36189,6 +36189,8 @@
+ 
+     v = s->idx_to_atom_count++;
+     s->idx_to_atom[v] = atom + s->first_atom;
++    if (atom + s->first_atom < s->first_atom) /* overflow check */
++        funlogline();
+     v += s->first_atom;
+     s->atom_to_idx[atom] = v;
+     *pres = v;
+```

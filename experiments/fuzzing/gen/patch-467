@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35974,6 +35974,8 @@
+ /* the reference count of 'obj' is not modified. Return 0 if OK, -1 if
+    memory error */
+ static int js_object_list_add(JSContext *ctx, JSObjectList *s, JSObject *obj)
+ {
++    if (obj == NULL)
++        funlogline();
+     JSObjectListEntry *e;
+     uint32_t h, new_hash_size;
+ 
+@@ -35991,6 +35993,8 @@
+     h = js_object_list_get_hash(obj, s->hash_size);
+     e->obj = obj;
+     e->hash_next = s->hash_table[h];
++    if (s->object_count - 1 >= s->hash_size)
++        funlogline();
+     s->hash_table[h] = s->object_count - 1;
+     return 0;
+ }

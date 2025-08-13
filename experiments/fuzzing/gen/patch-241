@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14628,6 +14628,9 @@
+     int res, val, tag1, tag2;
+     JSBigIntBuf buf1, buf2;
+     JSBigInt *p1, *p2;
++
++    if (!(tag1 == JS_TAG_BIG_INT || tag1 == JS_TAG_SHORT_BIG_INT || 
++          tag2 == JS_TAG_BIG_INT || tag2 == JS_TAG_SHORT_BIG_INT)) funlogline();
+     
+     tag1 = JS_VALUE_GET_NORM_TAG(op1);
+     tag2 = JS_VALUE_GET_NORM_TAG(op2);
+@@ -14635,6 +14638,7 @@
+         (tag2 == JS_TAG_SHORT_BIG_INT || tag2 == JS_TAG_INT)) {
+         /* fast path */
+         js_slimb_t v1, v2;
++        if ((tag1 == JS_TAG_INT && v1 < 0) || (tag2 == JS_TAG_INT && v2 < 0)) funlogline();
+         if (tag1 == JS_TAG_INT)
+             v1 = JS_VALUE_GET_INT(op1);
+         else
+@@ -14649,6 +14653,7 @@
+     } else {
+         if (tag1 == JS_TAG_FLOAT64) {
+             p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
++            if (isnan(JS_VALUE_GET_FLOAT64(op1))) funlogline();
+             val = js_bigint_float64_cmp(ctx, p2, JS_VALUE_GET_FLOAT64(op1));
+             if (val == 2)
+                 goto unordered;

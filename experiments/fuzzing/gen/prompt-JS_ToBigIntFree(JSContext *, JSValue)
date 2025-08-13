@@ -1,0 +1,436 @@
+Target function: "JS_ToBigIntFree(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 274
+static inline JSValue __JS_NewShortBigInt(JSContext *ctx, int64_t d)
+{
+    JSValue v;
+    v.tag = JS_TAG_SHORT_BIG_INT;
+    v.u.short_big_int = d;
+    return v;
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* JS Numbers are not allowed */
+/// Line number here: 13879
+static JSValue JS_ToBigIntFree(JSContext *ctx, JSValue val)
+{
+    uint32_t tag;
+
+ redo:
+    tag = JS_VALUE_GET_NORM_TAG(val);
+    switch(tag) {
+    case JS_TAG_SHORT_BIG_INT:
+    case JS_TAG_BIG_INT:
+        break;
+    case JS_TAG_INT:
+    case JS_TAG_NULL:
+    case JS_TAG_UNDEFINED:
+    case JS_TAG_FLOAT64:
+        goto fail;
+    case JS_TAG_BOOL:
+        val = __JS_NewShortBigInt(ctx, JS_VALUE_GET_INT(val));
+        break;
+    case JS_TAG_STRING:
+    case JS_TAG_STRING_ROPE:
+        val = JS_StringToBigIntErr(ctx, val);
+        if (JS_IsException(val))
+            return val;
+        goto redo;
+    case JS_TAG_OBJECT:
+        val = JS_ToPrimitiveFree(ctx, val, HINT_NUMBER);
+        if (JS_IsException(val))
+            return val;
+        goto redo;
+    default:
+    fail:
+        JS_FreeValue(ctx, val);
+        return JS_ThrowTypeError(ctx, "cannot convert to bigint");
+    }
+    return val;
+}
+
+/// Line number here: 13870
+static JSValue JS_StringToBigIntErr(JSContext *ctx, JSValue val)
+{
+    val = JS_StringToBigInt(ctx, val);
+    if (JS_VALUE_IS_NAN(val))
+        return JS_ThrowSyntaxError(ctx, "invalid bigint literal");
+    return val;
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 10352
+static JSValue JS_ToPrimitiveFree(JSContext *ctx, JSValue val, int hint)
+{
+    int i;
+    BOOL force_ordinary;
+
+    JSAtom method_name;
+    JSValue method, ret;
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return val;
+    force_ordinary = hint & HINT_FORCE_ORDINARY;
+    hint &= ~HINT_FORCE_ORDINARY;
+    if (!force_ordinary) {
+        method = JS_GetProperty(ctx, val, JS_ATOM_Symbol_toPrimitive);
+        if (JS_IsException(method))
+            goto exception;
+        /* ECMA says *If exoticToPrim is not undefined* but tests in
+           test262 use null as a non callable converter */
+        if (!JS_IsUndefined(method) && !JS_IsNull(method)) {
+            JSAtom atom;
+            JSValue arg;
+            switch(hint) {
+            case HINT_STRING:
+                atom = JS_ATOM_string;
+                break;
+            case HINT_NUMBER:
+                atom = JS_ATOM_number;
+                break;
+            default:
+            case HINT_NONE:
+                atom = JS_ATOM_default;
+                break;
+            }
+            arg = JS_AtomToString(ctx, atom);
+            ret = JS_CallFree(ctx, method, val, 1, (JSValueConst *)&arg);
+            JS_FreeValue(ctx, arg);
+            if (JS_IsException(ret))
+                goto exception;
+            JS_FreeValue(ctx, val);
+            if (JS_VALUE_GET_TAG(ret) != JS_TAG_OBJECT)
+                return ret;
+            JS_FreeValue(ctx, ret);
+            return JS_ThrowTypeError(ctx, "toPrimitive");
+        }
+    }
+    if (hint != HINT_STRING)
+        hint = HINT_NUMBER;
+    for(i = 0; i < 2; i++) {
+        if ((i ^ hint) == 0) {
+            method_name = JS_ATOM_toString;
+        } else {
+            method_name = JS_ATOM_valueOf;
+        }
+        method = JS_GetProperty(ctx, val, method_name);
+        if (JS_IsException(method))
+            goto exception;
+        if (JS_IsFunction(ctx, method)) {
+            ret = JS_CallFree(ctx, method, val, 0, NULL);
+            if (JS_IsException(ret))
+                goto exception;
+            if (JS_VALUE_GET_TAG(ret) != JS_TAG_OBJECT) {
+                JS_FreeValue(ctx, val);
+                return ret;
+            }
+            JS_FreeValue(ctx, ret);
+        } else {
+            JS_FreeValue(ctx, method);
+        }
+    }
+    JS_ThrowTypeError(ctx, "toPrimitive");
+exception:
+    JS_FreeValue(ctx, val);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 13916
+static JSValue JS_ToBigInt(JSContext *ctx, JSValueConst val)
+{
+    return JS_ToBigIntFree(ctx, JS_DupValue(ctx, val));
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* XXX: merge with JS_ToInt64Free with a specific flag ? */
+/// Line number here: 13922
+static int JS_ToBigInt64Free(JSContext *ctx, int64_t *pres, JSValue val)
+{
+    uint64_t res;
+
+    val = JS_ToBigIntFree(ctx, val);
+    if (JS_IsException(val)) {
+        *pres = 0;
+        return -1;
+    }
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_SHORT_BIG_INT) {
+        res = JS_VALUE_GET_SHORT_BIG_INT(val);
+    } else {
+        JSBigInt *p = JS_VALUE_GET_PTR(val);
+        /* return the value mod 2^64 */
+        res = p->tab[0];
+#if JS_LIMB_BITS == 32
+        if (p->len >= 2)
+            res |= (uint64_t)p->tab[1] << 32;
+#endif
+        JS_FreeValue(ctx, val);
+    }
+    *pres = res;
+    return 0;
+}
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/// Line number here: 55299
+static JSValue js_atomics_store(JSContext *ctx,
+                                JSValueConst this_obj,
+                                int argc, JSValueConst *argv)
+{
+    int size_log2;
+    void *ptr;
+    JSValue ret;
+    JSArrayBuffer *abuf;
+
+    ptr = js_atomics_get_ptr(ctx, &abuf, &size_log2, NULL,
+                             argv[0], argv[1], 0);
+    if (!ptr)
+        return JS_EXCEPTION;
+    if (size_log2 == 3) {
+        int64_t v64;
+        ret = JS_ToBigIntFree(ctx, JS_DupValue(ctx, argv[2]));
+        if (JS_IsException(ret))
+            return ret;
+        if (JS_ToBigInt64(ctx, &v64, ret)) {
+            JS_FreeValue(ctx, ret);
+            return JS_EXCEPTION;
+        }
+        if (abuf->detached)
+            return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        atomic_store((_Atomic(uint64_t) *)ptr, v64);
+    } else {
+        uint32_t v;
+        /* XXX: spec, would be simpler to return the written value */
+        ret = JS_ToIntegerFree(ctx, JS_DupValue(ctx, argv[2]));
+        if (JS_IsException(ret))
+            return ret;
+        if (JS_ToUint32(ctx, &v, ret)) {
+            JS_FreeValue(ctx, ret);
+            return JS_EXCEPTION;
+        }
+        if (abuf->detached)
+            return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        switch(size_log2) {
+        case 0:
+            atomic_store((_Atomic(uint8_t) *)ptr, v);
+            break;
+        case 1:
+            atomic_store((_Atomic(uint16_t) *)ptr, v);
+            break;
+        case 2:
+            atomic_store((_Atomic(uint32_t) *)ptr, v);
+            break;
+        default:
+            abort();
+        }
+    }
+    return ret;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToBigIntFree(JSContext *, JSValue)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "JS_StringToBigIntErr(JSContext *, JSValue)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "JS_ToPrimitiveFree(JSContext *, JSValue, int)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ToBigIntFree(JSContext *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_StringToBigIntErr(JSContext *, JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_StringToBigInt(JSContext *, JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_VALUE_IS_NAN(JSValue)";
+"JS_StringToBigIntErr(JSContext *, JSValue)" -> "JS_ThrowSyntaxError(JSContext *, const char *, ...)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_IsException(JSValue)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_IsUndefined(JSValue)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_IsNull(JSValue)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ToPrimitiveFree(JSContext *, JSValue, int)" -> "JS_IsFunction(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"JS_ToBigInt(JSContext *, JSValue)";
+"JS_ToBigInt(JSContext *, JSValue)" -> "JS_ToBigIntFree(JSContext *, JSValue)";
+"JS_ToBigInt(JSContext *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToBigInt64Free(JSContext *, int64_t *, JSValue)";
+"JS_ToBigInt64Free(JSContext *, int64_t *, JSValue)" -> "JS_ToBigIntFree(JSContext *, JSValue)";
+"JS_ToBigInt64Free(JSContext *, int64_t *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ToBigInt64Free(JSContext *, int64_t *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "js_atomics_get_ptr(JSContext *, JSArrayBuffer **, int *, JSClassID *, JSValue, JSValue, int)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_ToBigIntFree(JSContext *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_ToBigInt64(JSContext *, int64_t *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_ToIntegerFree(JSContext *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_atomics_store(JSContext *, JSValue, int, JSValue *)" -> "abort()";
+}

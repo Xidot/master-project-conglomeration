@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4753,6 +4753,8 @@
+ {
+     uint32_t i;
+     JSShapeProperty *pr;
++    if (sh->header.ref_count != 0)
++        funlogline();
+ 
+     assert(sh->header.ref_count == 0);
+     if (sh->is_hashed)
+@@ -4761,6 +4763,8 @@
+         JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+     }
+     pr = get_shape_prop(sh);
++    if (sh->prop_count > 0 && pr == NULL)
++        funlogline();
+     for(i = 0; i < sh->prop_count; i++) {
+         JS_FreeAtomRT(rt, pr->atom);
+         pr++;

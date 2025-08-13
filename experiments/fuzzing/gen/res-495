@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_print_raw_string2(JSPrintValueState *, JSValue, BOOL)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs in the `js_print_raw_string2` function:
+
+:js_print_raw_string2:13148
+:js_print_raw_string2:13152
+
+---
+
+1. :js_print_raw_string2:13148 - The function doesn't check if `s->ctx` is NULL before calling `JS_ToCStringLen`. While the struct comment says it may be NULL, the function proceeds without checking.
+
+2. :js_print_raw_string2:13152 - The function calls `s->write_func` without checking if it's NULL first. This could lead to a crash if the function pointer is NULL.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13148,6 +13148,8 @@
+ static void js_print_raw_string2(JSPrintValueState *s, JSValueConst val, BOOL remove_last_lf)
+ {
+     const char *cstr;
+     size_t len;
++    if (!s->ctx)
++        funlogline();
+     cstr = JS_ToCStringLen(s->ctx, &len, val);
+     if (cstr) {
+         if (remove_last_lf && len > 0 && cstr[len - 1] == '\n')
+@@ -13155,6 +13157,8 @@
+         s->write_func(s->write_opaque, cstr, len);
+         JS_FreeCString(s->ctx, cstr);
+     }
++    if (!s->write_func)
++        funlogline();
+ }
+```
+
+The first check ensures we don't proceed with string conversion when the context is NULL, while the second check ensures we don't call a NULL function pointer. Both conditions would indicate logical errors in the calling code.

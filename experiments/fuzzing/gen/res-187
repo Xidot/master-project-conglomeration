@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__JS_AtomToValue(JSContext *, JSAtom, BOOL)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `__JS_AtomToValue` function:
+
+:quickjs.c:__JS_AtomToValue:3084
+:quickjs.c:__JS_AtomToValue:3091
+
+---
+
+1. quickjs.c:__JS_AtomToValue:3084 - When `force_string` is true and `p->len == 0 && p->is_wide_char != 0`, the code falls back to using `JS_ATOM_empty_string`. However, there's no check if `JS_ATOM_empty_string` is actually valid in `rt->atom_array`.
+
+2. quickjs.c:__JS_AtomToValue:3091 - The function unconditionally returns a symbol value when `force_string` is false, without checking if the atom type is actually a symbol (could be private or global symbol).
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3081,6 +3081,8 @@
+         p = rt->atom_array[atom];
+         if (p->atom_type == JS_ATOM_TYPE_STRING) {
+             goto ret_string;
+         } else if (force_string) {
++            if (JS_ATOM_empty_string >= rt->atom_size)
++                funlogline();
+             if (p->len == 0 && p->is_wide_char != 0) {
+                 /* no description string */
+                 p = rt->atom_array[JS_ATOM_empty_string];
+@@ -3088,6 +3090,8 @@
+         ret_string:
+             return JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+         } else {
++            if (p->atom_type != JS_ATOM_TYPE_SYMBOL && p->atom_type != JS_ATOM_TYPE_GLOBAL_SYMBOL)
++                funlogline();
+             return JS_DupValue(ctx, JS_MKPTR(JS_TAG_SYMBOL, p));
+         }
+     }
+```

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12522,6 +12522,8 @@
+ 
+ int JS_ToInt64Sat(JSContext *ctx, int64_t *pres, JSValueConst val)
+ {
++    if (pres == NULL)
++        funlogline();
+     return JS_ToInt64SatFree(ctx, pres, JS_DupValue(ctx, val));
+ }
+ 
+@@ -12498,6 +12498,8 @@
+             } else {
+                 if (d < INT64_MIN)
+                     *pres = INT64_MIN;
++                else if (d > (double)INT64_MAX + 1)
++                    funlogline();
+                 else if (d >= 0x1p63) /* must use INT64_MAX + 1 because INT64_MAX cannot be exactly represented as a double */
+                     *pres = INT64_MAX;
+                 else

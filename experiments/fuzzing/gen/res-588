@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_string_get_length(JSValue)
+-------------------------
+Based on the provided code and call graph, here are the potential logical bugs in the target function `js_string_get_length`:
+
+:js_string_get_length:13080
+
+---
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13080,6 +13080,9 @@
+ static uint32_t js_string_get_length(JSValueConst val)
+ {
+     if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING) {
++        if (JS_VALUE_GET_STRING(val) == NULL) {
++            funlogline();
++        }
+         JSString *p = JS_VALUE_GET_STRING(val);
+         return p->len;
+     } else if (JS_VALUE_GET_TAG(val) == JS_TAG_STRING_ROPE) {
+```
+
+The logical bug is that the function doesn't check if the string pointer is NULL before dereferencing it to get the length. While the JSValue might have the correct tag (JS_TAG_STRING), the actual string pointer could still be NULL, which would lead to undefined behavior when accessing p->len.
+
+The fix adds a NULL check before dereferencing the pointer. This is particularly important since the function is called recursively in the string rope case (as seen in the call graph), where invalid string values could propagate.

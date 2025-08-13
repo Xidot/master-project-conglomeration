@@ -1,0 +1,113 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_resize_array(JSContext *, void **, int, int *, int)
+-------------------------
+Based on the code and callgraph provided, I'll analyze potential logical bugs in the `js_resize_array` function and its callers. Here are the identified issues:
+
+:quickjs.c:js_resize_array:1458
+:quickjs.c:js_realloc_array:1440
+:quickjs.c:add_var:22804
+:quickjs.c:add_arg:22884
+:quickjs.c:add_closure_var:31287
+:quickjs.c:js_object_list_add:35977
+:quickjs.c:bc_atom_to_idx:36149
+:quickjs.c:JS_WriteSharedArrayBuffer:36625
+:quickjs.c:BC_add_object_ref1:37233
+
+---
+
+Here are the diffs for the identified issues:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1440,6 +1440,9 @@
+     int new_size;
+     size_t slack;
+     void *new_array;
++    if (req_size <= 0) {
++        funlogline();
++    }
+     /* XXX: potential arithmetic overflow */
+     new_size = max_int(req_size, *psize * 3 / 2);
+     new_array = js_realloc2(ctx, *parray, new_size * elem_size, &slack);
+@@ -22804,6 +22807,9 @@
+     JSVarDef *vd;
+ 
+     /* the local variable indexes are currently stored on 16 bits */
++    if (fd->var_count < 0) {
++        funlogline();
++    }
+     if (fd->var_count >= JS_MAX_LOCAL_VARS) {
+         JS_ThrowInternalError(ctx, "too many local variables");
+         return -1;
+@@ -22884,6 +22890,9 @@
+     JSVarDef *vd;
+ 
+     /* the local variable indexes are currently stored on 16 bits */
++    if (fd->arg_count < 0) {
++        funlogline();
++    }
+     if (fd->arg_count >= JS_MAX_LOCAL_VARS) {
+         JS_ThrowInternalError(ctx, "too many arguments");
+         return -1;
+@@ -31287,6 +31296,9 @@
+     JSClosureVar *cv;
+ 
+     /* the closure variable indexes are currently stored on 16 bits */
++    if (s->closure_var_count < 0) {
++        funlogline();
++    }
+     if (s->closure_var_count >= JS_MAX_LOCAL_VARS) {
+         JS_ThrowInternalError(ctx, "too many closure variables");
+         return -1;
+@@ -35977,6 +35989,9 @@
+     JSObjectListEntry *e;
+     uint32_t h, new_hash_size;
+ 
++    if (s->object_count < 0) {
++        funlogline();
++    }
+     if (js_resize_array(ctx, (void *)&s->object_tab,
+                         sizeof(s->object_tab[0]),
+                         &s->object_size, s->object_count + 1))
+@@ -36149,6 +36164,9 @@
+ {
+     uint32_t v;
+ 
++    if (atom < 0) {
++        funlogline();
++    }
+     if (atom < s->first_atom || __JS_AtomIsTaggedInt(atom)) {
+         *pres = atom;
+         return 0;
+@@ -36625,6 +36643,9 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf == NULL) {
++        funlogline();
++    }
+     assert(!abuf->detached); /* SharedArrayBuffer are never detached */
+     bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
+     bc_put_leb128(s, abuf->byte_length);
+@@ -37233,6 +37254,9 @@
+ static int BC_add_object_ref1(BCReaderState *s, JSObject *p)
+ {
+     if (s->allow_reference) {
++        if (p == NULL) {
++            funlogline();
++        }
+         if (js_resize_array(s->ctx, (void *)&s->objects,
+                             sizeof(s->objects[0]),
+                             &s->objects_size, s->objects_count + 1))
+```
+
+The main logical issues identified are:
+
+1. Missing checks for negative sizes/counts before array operations
+2. Potential NULL pointer dereferences
+3. Missing validation of input parameters
+4. Potential integer overflow in size calculations
+
+The diffs add checks for these conditions before the problematic operations would occur. Each check calls `funlogline()` when the error condition is detected.

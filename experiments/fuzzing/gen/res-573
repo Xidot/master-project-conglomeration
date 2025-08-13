@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_shape_prepare_update` function:
+
+:quickjs.c:js_shape_prepare_update:9489
+:quickjs.c:js_shape_prepare_update:9495
+
+---
+The issues are:
+
+1. At line 9489: After cloning the shape and freeing the old one, the code updates `pprs` but doesn't verify if the index is still valid in the new shape. If the new shape has fewer properties, this could lead to an out-of-bounds access.
+
+2. At line 9495: The function unlinks the shape from hash table but doesn't verify if the shape was actually in the hash table to begin with. This could lead to incorrect hash table state if called on a shape that wasn't hashed.
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9486,6 +9486,8 @@
+             if (pprs)
+                 idx = *pprs - get_shape_prop(sh);
+             /* clone the shape (the resulting one is no longer hashed) */
++            if (pprs && idx >= sh->prop_count)
++                funlogline();
+             sh = js_clone_shape(ctx, sh);
+             if (!sh)
+                 return -1;
+@@ -9492,6 +9494,8 @@
+             js_free_shape(ctx->rt, p->shape);
+             p->shape = sh;
+             if (pprs)
++                if (idx >= sh->prop_count)
++                    funlogline();
+                 *pprs = get_shape_prop(sh) + idx;
+         } else {
+             js_shape_hash_unlink(ctx->rt, sh);
+```
+
+The changes add checks for:
+1. Invalid index before cloning
+2. Invalid index after cloning before using it to update pprs
+
+These checks will catch cases where the property pointer would become invalid after the shape clone operation.

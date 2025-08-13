@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mp_shr(js_limb_t *, const js_limb_t *, int, int, js_limb_t)
+-------------------------
+Here are the potential logical bugs in the target function `mp_shr`:
+
+:mp_shr:10865
+
+---
+
+The main logical issue in `mp_shr` is that it doesn't properly handle the case where `shift` equals `JS_LIMB_BITS`. The function comment states that `1 <= shift <= LIMB_BITS - 1`, but there's no enforcement of this precondition in the function itself. If `shift` equals `JS_LIMB_BITS`, the shift operation `l << (JS_LIMB_BITS - shift)` would result in undefined behavior (shifting by the size of the type or more).
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10870,6 +10870,9 @@
+     int i;
+     js_limb_t l, a;
+ 
++    if (shift <= 0 || shift >= JS_LIMB_BITS) {
++        funlogline();
++    }
+     l = high;
+     for(i = n - 1; i >= 0; i--) {
+         a = tab[i];
+```
+
+The condition checks for invalid shift values (<= 0 or >= JS_LIMB_BITS) which would violate the function's documented preconditions. The function should either handle these cases properly or ensure they never occur (which appears to be the intended design based on the comment).
+
+Note that while the function comment specifies the valid range for `shift`, the function itself doesn't enforce this, which could lead to undefined behavior if called incorrectly. The instrumentation will help detect when these invalid calls occur.

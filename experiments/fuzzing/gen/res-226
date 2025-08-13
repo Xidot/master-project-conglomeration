@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_CallConstructor2(JSContext *, JSValue, JSValue, int, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_CallConstructor2`:
+
+1. :quickjs.c:JS_CallConstructor2:19518
+2. :quickjs.c:JS_CallConstructorInternal:19470
+
+---
+
+For the first bug at line 19518, the issue is that `JS_CallConstructor2` passes `argv` directly to `JS_CallConstructorInternal` without checking if it's NULL when `argc` is 0. This could lead to undefined behavior.
+
+For the second bug at line 19470, in `JS_CallConstructorInternal`, there's no validation that `new_target` is actually a constructor when processing non-bytecode functions (the check is only done for proxy calls in `js_proxy_call_constructor`).
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19517,6 +19517,9 @@
+ JSValue JS_CallConstructor2(JSContext *ctx, JSValueConst func_obj,
+                             JSValueConst new_target,
+                             int argc, JSValueConst *argv)
+ {
++    if (argc == 0 && argv == NULL) {
++        funlogline();
++    }
+     return JS_CallConstructorInternal(ctx, func_obj, new_target,
+                                       argc, (JSValue *)argv,
+                                       JS_CALL_FLAG_COPY_ARGV);
+@@ -19489,6 +19492,9 @@
+         if (!call_func) {
+         not_a_function:
+             return JS_ThrowTypeError(ctx, "not a function");
++        }
++        if (!JS_IsConstructor(ctx, new_target)) {
++            funlogline();
+         }
+         return call_func(ctx, func_obj, new_target, argc,
+                          (JSValueConst *)argv, flags);
+```
+
+The first addition checks for the NULL argv case when argc is 0, while the second addition validates new_target for non-bytecode function calls. Both conditions will call funlogline() when the bug conditions are met.

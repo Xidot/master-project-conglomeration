@@ -1,0 +1,18 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -4056,6 +4056,7 @@
+                       JS_NewCFunction(ctx, js_os_now, "now", 0));
+     JS_SetPropertyStr(ctx, global_obj, "performance", performance);
+ 
+     /* same methods as the mozilla JS shell */
++    if (argc < 0) funlogline();
+     if (argc >= 0) {
+         args = JS_NewArray(ctx);
+         for(i = 0; i < argc; i++) {
+@@ -4068,5 +4069,6 @@
+     JS_SetPropertyStr(ctx, global_obj, "__loadScript",
+                       JS_NewCFunction(ctx, js_loadScript, "__loadScript", 1));
+ 
++    funlogline(); // global_obj being freed while properties may still be referenced
+     JS_FreeValue(ctx, global_obj);
+ }

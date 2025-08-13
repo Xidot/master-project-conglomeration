@@ -1,0 +1,15 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -1337,9 +1337,11 @@
+ static void mpb_mul1_base(mpb_t *r, limb_t radix_base, limb_t a)
+ {
+     int i;
++    if (r->tab[0] == 0 && r->len == 1 && a != 0)
++        funlogline();
+     if (r->tab[0] == 0 && r->len == 1) {
+         r->tab[0] = a;
+     } else {
++        funlogline(); // Instrumentation for potential out-of-bounds write
+         if (radix_base == 0) {
+             for(i = r->len; i >= 0; i--) {
+                 r->tab[i + 1] = r->tab[i];

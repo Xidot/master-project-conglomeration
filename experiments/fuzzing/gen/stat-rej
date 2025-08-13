@@ -1,0 +1,59 @@
+
+-71 redundant instrumentation inside existing fail condition
+funlogline();
+
+-58 changed behaviour, by returning something or modifying state (instead of calling target function)
+
+-31 invalid predicate (tautology or uses uninitialized values)
+e.g.
+if (unlikely(!ctx->global_var_obj))
+    return FALSE;
+
+if (sh->proto && !sh->proto)
+    funlogline();
+
+-35 broken syntax or undeclared fun or undeclared identifier or hallucinated (member access|enum values)
+e.g. if (JS_VALUE_GET_TAG(op2) == JS_TAG_FLOAT64 && isnan(JS_VALUE_GET_FLOAT64(op2))) funlogline();
+
+if (c >= 256) funlogline();
+
+-8 dead code instrumentation
+e.g.
+if (unlikely(ret < 0))
+    funlogline();
+
+-2 causes a crash (null deref)
+
+-2 duplicate insertion
+    if (ret < 0)
+        return ret;
+    if (ret < 0)
+        return ret;
+
+-2 use after free
+if (!base_cname)
+    funlogline();
+
+-1 just code formatting
+
+-1 inside union
+funlogline(); // Instrumentation for potential endianness detection issue
+
+1	quickjs/cutils.h.rej
+1	quickjs/dtoa.c.rej
+1	quickjs/list.h.rej
+1	quickjs/quickjs.c.rej
+1	quickjs/quickjs.h.rej
+1	quickjs/quickjs-libc.c.rej
+6 total - none had errors asscoiated with them, most likely due to and overlap
+or hallucianted line numbers.
+
+Also many uses of alignof which are incorrect, instances of bracketless if
+statements were broken. Sometimes instrumented before declared variable.
+Incorrect int max macro used.
+Sometimes code is split incorrectly.
+Instrumentations added inside if statement predicates.
+If statement cannot use JSValue struct as argument to unary expression
+Missing pairs of brackets
+Indentation issues cause original semantics change and lead to crashes
+Introduced head use-after-free 1

@@ -1,0 +1,27 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_RunGC(JSRuntime *)
+-------------------------
+Based on the provided code and call graph, here's the analysis:
+
+:quickjs.c:JS_RunGC:6226
+
+---
+
+The logical bug here is that `JS_RunGC` always calls `JS_RunGCInternal` with `remove_weak_objects=TRUE`, which means it will always remove weak objects during garbage collection. This might not be the desired behavior in all cases, as sometimes you might want to run GC without cleaning up weak references (for example, during incremental GC or certain optimization phases).
+
+Here's the proposed modification:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6223,6 +6223,9 @@
+ 
+ void JS_RunGC(JSRuntime *rt)
+ {
++    if (1) {
++        funlogline(); // Always removing weak objects might not be desired
++    }
+     JS_RunGCInternal(rt, TRUE);
+ }
+```

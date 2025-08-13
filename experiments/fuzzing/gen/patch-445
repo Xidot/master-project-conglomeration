@@ -1,0 +1,14 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5166,6 +5166,11 @@
+ {
+     JSShape *sh;
+     JSObject *proto;
++    
++    if (!JS_IsObject(proto_val) && !JS_IsNull(proto_val)) {
++        JS_ThrowTypeError(ctx, "prototype must be an object or null");
++        return JS_EXCEPTION;
++    }
+ 
+     proto = get_proto_obj(proto_val);
+     sh = find_hashed_shape_proto(ctx->rt, proto);

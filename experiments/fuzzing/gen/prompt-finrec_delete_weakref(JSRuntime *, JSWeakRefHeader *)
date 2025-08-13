@@ -1,0 +1,274 @@
+Target function: "finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/* JS Job support */
+/// Line number here: 968
+typedef JSValue JSJobFunc(JSContext *ctx, int argc, JSValueConst *argv)
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 367
+typedef struct {
+    struct list_head link;
+    JSWeakRefHeaderTypeEnum weakref_type;
+} JSWeakRefHeader
+
+/// Line number here: 55706
+typedef struct JSFinalizationRegistryData {
+    JSWeakRefHeader weakref_header;
+    struct list_head entries; /* list of JSFinRecEntry.link */
+    JSContext *realm;
+    JSValue cb;
+} JSFinalizationRegistryData
+
+/// Line number here: 55699
+typedef struct JSFinRecEntry {
+    struct list_head link;
+    JSValue target;
+    JSValue held_val;
+    JSValue token;
+} JSFinRecEntry
+
+/// Line number here: 55747
+static void finrec_delete_weakref(JSRuntime *rt, JSWeakRefHeader *wh)
+{
+    JSFinalizationRegistryData *frd = container_of(wh, JSFinalizationRegistryData, weakref_header);
+    struct list_head *el, *el1;
+
+    list_for_each_safe(el, el1, &frd->entries) {
+        JSFinRecEntry *fre = list_entry(el, JSFinRecEntry, link);
+
+        if (!js_weakref_is_live(fre->token)) {
+            js_weakref_free(rt, fre->token);
+            fre->token = JS_UNDEFINED;
+        }
+
+        if (!js_weakref_is_live(fre->target)) {
+            JSValueConst args[2];
+            args[0] = frd->cb;
+            args[1] = fre->held_val;
+            JS_EnqueueJob(frd->realm, js_finrec_job, 2, args);
+                
+            js_weakref_free(rt, fre->target);
+            js_weakref_free(rt, fre->token);
+            JS_FreeValueRT(rt, fre->held_val);
+            list_del(&fre->link);
+            js_free_rt(rt, fre);
+        }
+    }
+}
+
+/* JS_UNDEFINED is considered as a live weakref */
+/* XXX: add a specific JSWeakRef value type ? */
+/// Line number here: 48248
+static BOOL js_weakref_is_live(JSValueConst val)
+{
+    int *pref_count;
+    if (JS_IsUndefined(val))
+        return TRUE;
+    pref_count = JS_VALUE_GET_PTR(val);
+    return (*pref_count != 0);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* 'val' can be JS_UNDEFINED */
+/// Line number here: 48258
+static void js_weakref_free(JSRuntime *rt, JSValue val)
+{
+    if (JS_VALUE_GET_TAG(val) == JS_TAG_OBJECT) {
+        JSObject *p = JS_VALUE_GET_OBJ(val);
+        assert(p->weakref_count >= 1);
+        p->weakref_count--;
+        /* 'mark' is tested to avoid freeing the object structure when
+           it is about to be freed in a cycle or in
+           free_zero_refcount() */
+        if (p->weakref_count == 0 && p->header.ref_count == 0 &&
+            p->header.mark == 0) {
+            js_free_rt(rt, p);
+        }
+    } else if (JS_VALUE_GET_TAG(val) == JS_TAG_SYMBOL) {
+        JSString *p = JS_VALUE_GET_STRING(val);
+        assert(p->hash >= 1);
+        p->hash--;
+        if (p->hash == 0 && p->header.ref_count == 0) {
+            /* can remove the dummy structure */
+            js_free_rt(rt, p);
+        }
+    }
+}
+
+/// Line number here: 864
+typedef struct JSJobEntry {
+    struct list_head link;
+    JSContext *realm;
+    JSJobFunc *job_func;
+    int argc;
+    JSValue argv[0];
+} JSJobEntry
+
+/* return 0 if OK, < 0 if exception */
+/// Line number here: 1775
+int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
+                  int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = ctx->rt;
+    JSJobEntry *e;
+    int i;
+
+    e = js_malloc(ctx, sizeof(*e) + argc * sizeof(JSValue));
+    if (!e)
+        return -1;
+    e->realm = JS_DupContext(ctx);
+    e->job_func = job_func;
+    e->argc = argc;
+    for(i = 0; i < argc; i++) {
+        e->argv[i] = JS_DupValue(ctx, argv[i]);
+    }
+    list_add_tail(&e->link, &rt->job_list);
+    return 0;
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 68
+static inline void list_del(struct list_head *el)
+{
+    struct list_head *prev, *next;
+    prev = el->prev;
+    next = el->next;
+    prev->next = next;
+    next->prev = prev;
+    el->prev = NULL; /* fail safe */
+    el->next = NULL; /* fail safe */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "js_weakref_is_live(JSValue)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "js_weakref_free(JSRuntime *, JSValue)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "list_del(struct list_head *)";
+"finrec_delete_weakref(JSRuntime *, JSWeakRefHeader *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_weakref_is_live(JSValue)";
+"js_weakref_is_live(JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_weakref_free(JSRuntime *, JSValue)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_weakref_free(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "JS_DupContext(JSContext *)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_EnqueueJob(JSContext *, JSJobFunc *, int, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+}

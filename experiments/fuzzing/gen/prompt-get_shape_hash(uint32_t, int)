@@ -1,0 +1,156 @@
+Target function: "get_shape_hash(uint32_t, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* truncate the shape hash to 'hash_bits' bits */
+/// Line number here: 4615
+static uint32_t get_shape_hash(uint32_t h, int hash_bits)
+{
+    return h >> (32 - hash_bits);
+}
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 4629
+static int resize_shape_hash(JSRuntime *rt, int new_shape_hash_bits)
+{
+    int new_shape_hash_size, i;
+    uint32_t h;
+    JSShape **new_shape_hash, *sh, *sh_next;
+
+    new_shape_hash_size = 1 << new_shape_hash_bits;
+    new_shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+                                   new_shape_hash_size);
+    if (!new_shape_hash)
+        return -1;
+    for(i = 0; i < rt->shape_hash_size; i++) {
+        for(sh = rt->shape_hash[i]; sh != NULL; sh = sh_next) {
+            sh_next = sh->shape_hash_next;
+            h = get_shape_hash(sh->hash, new_shape_hash_bits);
+            sh->shape_hash_next = new_shape_hash[h];
+            new_shape_hash[h] = sh;
+        }
+    }
+    js_free_rt(rt, rt->shape_hash);
+    rt->shape_hash_bits = new_shape_hash_bits;
+    rt->shape_hash_size = new_shape_hash_size;
+    rt->shape_hash = new_shape_hash;
+    return 0;
+}
+
+/// Line number here: 4655
+static void js_shape_hash_link(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t h;
+    h = get_shape_hash(sh->hash, rt->shape_hash_bits);
+    sh->shape_hash_next = rt->shape_hash[h];
+    rt->shape_hash[h] = sh;
+    rt->shape_hash_count++;
+}
+
+/// Line number here: 4664
+static void js_shape_hash_unlink(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t h;
+    JSShape **psh;
+
+    h = get_shape_hash(sh->hash, rt->shape_hash_bits);
+    psh = &rt->shape_hash[h];
+    while (*psh != sh)
+        psh = &(*psh)->shape_hash_next;
+    *psh = sh->shape_hash_next;
+    rt->shape_hash_count--;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* find a hashed empty shape matching the prototype. Return NULL if
+   not found */
+/// Line number here: 4965
+static JSShape *find_hashed_shape_proto(JSRuntime *rt, JSObject *proto)
+{
+    JSShape *sh1;
+    uint32_t h, h1;
+
+    h = shape_initial_hash(proto);
+    h1 = get_shape_hash(h, rt->shape_hash_bits);
+    for(sh1 = rt->shape_hash[h1]; sh1 != NULL; sh1 = sh1->shape_hash_next) {
+        if (sh1->hash == h &&
+            sh1->proto == proto &&
+            sh1->prop_count == 0) {
+            return sh1;
+        }
+    }
+    return NULL;
+}
+
+/* find a hashed shape matching sh + (prop, prop_flags). Return NULL if
+   not found */
+/// Line number here: 4984
+static JSShape *find_hashed_shape_prop(JSRuntime *rt, JSShape *sh,
+                                       JSAtom atom, int prop_flags)
+{
+    JSShape *sh1;
+    uint32_t h, h1, i, n;
+
+    h = sh->hash;
+    h = shape_hash(h, atom);
+    h = shape_hash(h, prop_flags);
+    h1 = get_shape_hash(h, rt->shape_hash_bits);
+    for(sh1 = rt->shape_hash[h1]; sh1 != NULL; sh1 = sh1->shape_hash_next) {
+        /* we test the hash first so that the rest is done only if the
+           shapes really match */
+        if (sh1->hash == h &&
+            sh1->proto == sh->proto &&
+            sh1->prop_count == ((n = sh->prop_count) + 1)) {
+            for(i = 0; i < n; i++) {
+                if (unlikely(sh1->prop[i].atom != sh->prop[i].atom) ||
+                    unlikely(sh1->prop[i].flags != sh->prop[i].flags))
+                    goto next;
+            }
+            if (unlikely(sh1->prop[n].atom != atom) ||
+                unlikely(sh1->prop[n].flags != prop_flags))
+                goto next;
+            return sh1;
+        }
+    next: ;
+    }
+    return NULL;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+
+
+----- Callgraph:
+strict digraph G {
+"resize_shape_hash(JSRuntime *, int)";
+"resize_shape_hash(JSRuntime *, int)" -> "js_mallocz_rt(JSRuntime *, size_t)";
+"resize_shape_hash(JSRuntime *, int)" -> "get_shape_hash(uint32_t, int)";
+"resize_shape_hash(JSRuntime *, int)" -> "js_free_rt(JSRuntime *, void *)";
+"js_shape_hash_link(JSRuntime *, JSShape *)";
+"js_shape_hash_link(JSRuntime *, JSShape *)" -> "get_shape_hash(uint32_t, int)";
+"js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_shape_hash_unlink(JSRuntime *, JSShape *)" -> "get_shape_hash(uint32_t, int)";
+"find_hashed_shape_proto(JSRuntime *, JSObject *)";
+"find_hashed_shape_proto(JSRuntime *, JSObject *)" -> "shape_initial_hash(JSObject *)";
+"find_hashed_shape_proto(JSRuntime *, JSObject *)" -> "get_shape_hash(uint32_t, int)";
+"find_hashed_shape_prop(JSRuntime *, JSShape *, JSAtom, int)";
+"find_hashed_shape_prop(JSRuntime *, JSShape *, JSAtom, int)" -> "shape_hash(uint32_t, uint32_t)";
+"find_hashed_shape_prop(JSRuntime *, JSShape *, JSAtom, int)" -> "get_shape_hash(uint32_t, int)";
+"find_hashed_shape_prop(JSRuntime *, JSShape *, JSAtom, int)" -> "__builtin_expect(long, long)";
+}

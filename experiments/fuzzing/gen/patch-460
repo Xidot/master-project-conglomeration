@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3004,6 +3004,10 @@
+ {
+     JSRuntime *rt = ctx->rt;
+     JSString *p;
++    
++    if (atom_type < JS_ATOM_TYPE_STRING || atom_type > JS_ATOM_TYPE_PRIVATE) {
++        funlogline();
++    }
+ 
+     assert(!__JS_AtomIsTaggedInt(descr));
+     assert(descr < rt->atom_size);
+@@ -3011,6 +3015,9 @@
+     JS_DupValue(ctx, JS_MKPTR(JS_TAG_STRING, p));
+     return JS_NewSymbol(ctx, p, atom_type);
+ }
++
++    if (p == NULL) {
++        funlogline();
++    }

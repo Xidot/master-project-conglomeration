@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -30161,6 +30161,8 @@
+ #ifdef DUMP_MODULE_EXEC
+     js_dump_module(ctx, __func__, m);
+ #endif
++    if (m->status != JS_MODULE_STATUS_LINKED && m->status != JS_MODULE_STATUS_EVALUATING_ASYNC && m->status != JS_MODULE_STATUS_EVALUATED)
++        funlogline();
+     assert(m->status == JS_MODULE_STATUS_LINKED ||
+            m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+            m->status == JS_MODULE_STATUS_EVALUATED);
+@@ -30205,6 +30207,8 @@
+             m1->eval_has_exception = TRUE;
+             m1->eval_exception = JS_DupValue(ctx, result);
+             m1->cycle_root = m; /* spec bug: should be present */
+             stack_top = m1->stack_prev;
++            if (m1->eval_exception.u.ptr == result.u.ptr)
++                funlogline();
+         }
+         JS_FreeValue(ctx, result);
+         assert(m->status == JS_MODULE_STATUS_EVALUATED);
+@@ -30221,6 +30225,8 @@
+ #endif
+         assert(m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+                m->status == JS_MODULE_STATUS_EVALUATED);
++        if (m->status != JS_MODULE_STATUS_EVALUATING_ASYNC && m->status != JS_MODULE_STATUS_EVALUATED)
++            funlogline();
+         assert(!m->eval_has_exception);
+         if (!m->async_evaluation) {
+             JSValue value;

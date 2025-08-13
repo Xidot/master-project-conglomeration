@@ -1,0 +1,154 @@
+Target function: "js_init_module_std(JSContext *, const char *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/* C module definition */
+/// Line number here: 1125
+typedef int JSModuleInitFunc(JSContext *ctx, JSModuleDef *m)
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/* C property definition */
+/// Line number here: 1090
+typedef struct JSCFunctionListEntry {
+    const char *name;
+    uint8_t prop_flags;
+    uint8_t def_type;
+    int16_t magic;
+    union {
+        struct {
+            uint8_t length; /* XXX: should move outside union */
+            uint8_t cproto; /* XXX: should move outside union */
+            JSCFunctionType cfunc;
+        } func;
+        struct {
+            JSCFunctionType get;
+            JSCFunctionType set;
+        } getset;
+        struct {
+            const char *name;
+            int base;
+        } alias;
+        struct {
+            const struct JSCFunctionListEntry *tab;
+            int len;
+        } prop_list;
+        const char *str;
+        int32_t i32;
+        int64_t i64;
+        double f64;
+    } u;
+} JSCFunctionListEntry
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 1711
+JSModuleDef *js_init_module_std(JSContext *ctx, const char *module_name)
+{
+    JSModuleDef *m;
+    m = JS_NewCModule(ctx, module_name, js_std_init);
+    if (!m)
+        return NULL;
+    JS_AddModuleExportList(ctx, m, js_std_funcs, countof(js_std_funcs));
+    JS_AddModuleExport(ctx, m, "in");
+    JS_AddModuleExport(ctx, m, "out");
+    JS_AddModuleExport(ctx, m, "err");
+    return m;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* create a C module */
+/// Line number here: 28436
+JSModuleDef *JS_NewCModule(JSContext *ctx, const char *name_str,
+                           JSModuleInitFunc *func)
+{
+    JSModuleDef *m;
+    JSAtom name;
+    name = JS_NewAtom(ctx, name_str);
+    if (name == JS_ATOM_NULL)
+        return NULL;
+    m = js_new_module_def(ctx, name);
+    if (!m)
+        return NULL;
+    m->init_func = func;
+    return m;
+}
+
+/// Line number here: 38167
+int JS_AddModuleExportList(JSContext *ctx, JSModuleDef *m,
+                           const JSCFunctionListEntry *tab, int len)
+{
+    int i;
+    for(i = 0; i < len; i++) {
+        if (JS_AddModuleExport(ctx, m, tab[i].name))
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/* can only be called before the module is instantiated */
+/// Line number here: 28451
+int JS_AddModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name)
+{
+    JSExportEntry *me;
+    JSAtom name;
+    name = JS_NewAtom(ctx, export_name);
+    if (name == JS_ATOM_NULL)
+        return -1;
+    me = add_export_entry2(ctx, NULL, m, JS_ATOM_NULL, name,
+                           JS_EXPORT_TYPE_LOCAL);
+    JS_FreeAtom(ctx, name);
+    if (!me)
+        return -1;
+    else
+        return 0;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_init_module_std(JSContext *, const char *)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)";
+"js_init_module_std(JSContext *, const char *)" -> "JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)";
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_NewCModule(JSContext *, const char *, JSModuleInitFunc *)" -> "js_new_module_def(JSContext *, JSAtom)";
+"JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)";
+"JS_AddModuleExportList(JSContext *, JSModuleDef *, const JSCFunctionListEntry *, int)" -> "JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"JS_AddModuleExport(JSContext *, JSModuleDef *, const char *)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+}

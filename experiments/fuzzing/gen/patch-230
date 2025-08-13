@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16731,6 +16731,9 @@
+                                int argc, JSValue *argv, int flags)
+ {
+     JSRuntime *rt = caller_ctx->rt;
++    if (flags & ~(JS_CALL_FLAG_COPY_ARGV | JS_CALL_FLAG_GENERATOR)) {
++        return JS_ThrowInternalError(caller_ctx, "invalid call flags");
++    }
+     JSContext *ctx;
+     JSObject *p;
+     JSFunctionBytecode *b;
+@@ -16739,6 +16742,10 @@
+     int opcode, arg_allocated_size, i;
+     JSValue *local_buf, *stack_buf, *var_buf, *arg_buf, *sp, ret_val, *pval;
+     JSVarRef **var_refs;
++
++    if (js_check_stack_overflow(rt, 0))
++        return JS_ThrowStackOverflow(caller_ctx);
++
+     size_t alloca_size;
+ 
+ #if !DIRECT_DISPATCH
+@@ -16762,6 +16769,9 @@
+     if (js_poll_interrupts(caller_ctx))
+         return JS_EXCEPTION;
+     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT)) {
++        if (!(flags & JS_CALL_FLAG_GENERATOR)) {
++            goto not_a_function;
++        }
+         if (flags & JS_CALL_FLAG_GENERATOR) {
+             JSAsyncFunctionState *s = JS_VALUE_GET_PTR(func

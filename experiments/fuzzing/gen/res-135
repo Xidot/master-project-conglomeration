@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-is_be()
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `is_be()` function for potential logical bugs.
+
+:quickjs.c:is_be:36098
+
+\pagebreak
+
+The logical bug in `is_be()` is that it assumes a union with `uint16_t` and `uint8_t` will always have the same endianness behavior across all platforms. However, this assumption may not hold true on some exotic architectures or with certain compiler optimizations. The function checks if the system is big-endian by examining the byte order of a 16-bit value, but this implementation could give incorrect results in some edge cases.
+
+Here's the diff to add instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36098,6 +36098,7 @@
+ static inline BOOL is_be(void)
+ {
+     union {
++        funlogline(); // Instrumentation for potential endianness detection issue
+         uint16_t a;
+         uint8_t  b;
+     } u = {0x100};
+```
+
+The instrumentation is placed inside the union declaration since we can't create a meaningful predicate for this case - the issue is with the fundamental assumption of how the union behaves rather than a specific condition we can check.
+
+Note that this is a subtle architectural assumption rather than a clear logical error, but it could lead to incorrect behavior in some environments. The instrumentation will help detect if this code path is ever executed on such a system.

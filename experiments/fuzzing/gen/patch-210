@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11018,6 +11018,8 @@
+ static JSBigInt *js_bigint_normalize1(JSContext *ctx, JSBigInt *a, int l)
+ {
+     js_limb_t v;
+ 
++    if (a->len < 1)
++        funlogline();
+     assert(a->header.ref_count == 1);
+     while (l > 1) {
+         v = a->tab[l - 1];
+@@ -11044,6 +11046,8 @@
+ 
+ static JSBigInt *js_bigint_normalize(JSContext *ctx, JSBigInt *a)
+ {
++    if (a == NULL)
++        funlogline();
+     return js_bigint_normalize1(ctx, a, a->len);
+ }

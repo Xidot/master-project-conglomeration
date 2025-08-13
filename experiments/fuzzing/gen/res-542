@@ -1,0 +1,54 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_resolve_export_throw_error(JSContext *, JSResolveResultEnum, JSModuleDef *, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_resolve_export_throw_error` function:
+
+:quickjs.c:js_resolve_export_throw_error:28816
+:quickjs.c:js_resolve_export_throw_error:28825
+:quickjs.c:js_resolve_export_throw_error:28831
+:quickjs.c:js_resolve_export_throw_error:28837
+
+----------
+
+1. The function doesn't handle the case where `m->module_name` is invalid/undefined when formatting error messages
+2. The default case falls through to JS_RESOLVE_RES_NOT_FOUND case without proper handling
+3. No validation of input parameters (ctx, m) before using them
+4. No check for buffer overflow in the atom string buffers
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28816,6 +28816,9 @@
+ static void js_resolve_export_throw_error(JSContext *ctx,
+                                           JSResolveResultEnum res,
+                                           JSModuleDef *m, JSAtom export_name)
+ {
++    if (!ctx || !m || export_name == JS_ATOM_NULL) {
++        funlogline();
++    }
+     char buf1[ATOM_GET_STR_BUF_SIZE];
+     char buf2[ATOM_GET_STR_BUF_SIZE];
+     switch(res) {
+@@ -28823,6 +28826,9 @@
+         break;
+     default:
+     case JS_RESOLVE_RES_NOT_FOUND:
++        if (m->module_name == JS_ATOM_NULL) {
++            funlogline();
++        }
+         JS_ThrowSyntaxError(ctx, "Could not find export '%s' in module '%s'",
+                             JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                             JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+@@ -28837,6 +28843,9 @@
+                             JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name),
+                             JS_AtomGetStr(ctx, buf2, sizeof(buf2), m->module_name));
+         break;
++    }
++    if (res < JS_RESOLVE_RES_EXCEPTION || res > JS_RESOLVE_RES_AMBIGUOUS) {
++        funlogline();
+     }
+ }
+```

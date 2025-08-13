@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ToPrimitive(JSContext *, JSValue, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_ToPrimitive`:
+
+:quickjs.c:JS_ToPrimitive:10426
+:quickjs.c:JS_ToPrimitiveFree:10352
+
+---
+
+The main logical issues are:
+
+1. In `JS_ToPrimitive`, it unconditionally calls `JS_DupValue` before passing to `JS_ToPrimitiveFree`, which could lead to reference count leaks if the value doesn't need duplication.
+
+2. In `JS_ToPrimitiveFree`, the hint processing could incorrectly handle the case where both `HINT_STRING` and `HINT_NUMBER` are valid but the object's `toPrimitive` method returns an invalid value.
+
+Here are the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10425,6 +10425,8 @@
+ 
+ static JSValue JS_ToPrimitive(JSContext *ctx, JSValueConst val, int hint)
+ {
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
++        funlogline();
+     return JS_ToPrimitiveFree(ctx, JS_DupValue(ctx, val), hint);
+ }
+ 
+@@ -10352,6 +10354,8 @@
+     int i;
+     BOOL force_ordinary;
+ 
++    if (hint & ~(HINT_STRING|HINT_NUMBER|HINT_FORCE_ORDINARY))
++        funlogline();
+     JSAtom method_name;
+     JSValue method, ret;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+```
+
+The first instrumentation catches cases where we duplicate a non-object value unnecessarily. The second catches invalid hint combinations that could lead to incorrect primitive conversion behavior.

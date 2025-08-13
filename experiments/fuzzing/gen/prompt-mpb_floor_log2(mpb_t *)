@@ -1,0 +1,177 @@
+Target function: "mpb_floor_log2(mpb_t *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/* floor_log2() = position of the first non zero bit or -1 if zero. */
+/// Line number here: 447
+static int mpb_floor_log2(mpb_t *a)
+{
+    limb_t v;
+    v = a->tab[a->len - 1];
+    if (v == 0)
+        return -1;
+    else
+        return a->len * LIMB_BITS - 1 - clz32(v);
+}
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* return (a, e_offset) such that a = a * (radix1*2^radix_shift)^f *
+   2^-e_offset. 'f' can be negative. */
+/// Line number here: 892
+static int mul_pow(mpb_t *a, int radix1, int radix_shift, int f, BOOL is_int, int e)
+{
+    int e_offset, d, n, n0;
+
+    e_offset = -f * radix_shift;
+    if (radix1 != 1) {
+        d = digits_per_limb_table[radix1 - 2];
+        if (f >= 0) {
+            limb_t h, b;
+            
+            b = 0;
+            n0 = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui(radix1, n);
+                    n0 = n;
+                }
+                h = mp_mul1(a->tab, a->tab, a->len, b, 0);
+                if (h != 0) {
+                    a->tab[a->len++] = h;
+                }
+                f -= n;
+            }
+        } else {
+            int extra_bits, l, shift;
+            limb_t r, rem, b, b_inv;
+            
+            f = -f;
+            l = (f + d - 1) / d; /* high bound for the number of limbs (XXX: make it better) */
+            e_offset += l * LIMB_BITS;
+            if (!is_int) {
+                /* at least 'e' bits are needed in the final result for rounding */
+                extra_bits = max_int(e - mpb_floor_log2(a), 0);
+            } else {
+                /* at least two extra bits are needed in the final result
+                   for rounding */
+                extra_bits = max_int(2 + e - e_offset, 0);
+            }
+            e_offset += extra_bits;
+            mpb_shr_round(a, -(l * LIMB_BITS + extra_bits), JS_RNDZ);
+            
+            b = 0;
+            b_inv = 0;
+            shift = 0;
+            n0 = 0;
+            rem = 0;
+            while (f != 0) {
+                n = min_int(f, d);
+                if (n != n0) {
+                    b = pow_ui_inv(&b_inv, &shift, radix1, n);
+                    n0 = n;
+                }
+                r = mp_div1norm(a->tab, a->tab, a->len, b, 0, b_inv, shift);
+                rem |= r;
+                mpb_renorm(a);
+                f -= n;
+            }
+            /* if the remainder is non zero, use it for rounding */
+            a->tab[0] |= (rem != 0);
+        }
+    }
+    return e_offset;
+}
+
+/* return round(a*2^e_offset) rounded as a float64. 'a' is modified */
+/// Line number here: 969
+static uint64_t round_to_d(int *pe, mpb_t *a, int e_offset, int rnd_mode)
+{
+    int e;
+    uint64_t m;
+
+    if (a->tab[0] == 0 && a->len == 1) {
+        /* zero result */
+        m = 0;
+        e = 0; /* don't care */
+    } else {
+        int prec, prec1, e_min;
+        e = mpb_floor_log2(a) + 1 - e_offset;
+        prec1 = 53;
+        e_min = -1021;
+        if (e < e_min) {
+            /* subnormal result or zero */
+            prec = prec1 - (e_min - e);
+        } else {
+            prec = prec1;
+        }
+        mpb_shr_round(a, e + e_offset - prec, rnd_mode);
+        m = mpb_get_u64(a);
+        m <<= (53 - prec);
+        /* mantissa overflow due to rounding */
+        if (m >= (uint64_t)1 << 53) {
+            m >>= 1;
+            e++;
+        }
+    }
+    *pe = e;
+    return m;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/* WARNING: undefined if a = 0 */
+/// Line number here: 128
+static inline int clz32(unsigned int a)
+{
+    return __builtin_clz(a);
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"mpb_floor_log2(mpb_t *)";
+"mpb_floor_log2(mpb_t *)" -> "clz32(unsigned int)";
+"clz32(unsigned int)";
+"clz32(unsigned int)" -> "__builtin_clz(unsigned int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "min_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui(uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_mul1(limb_t *, const limb_t *, limb_t, limb_t, limb_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "max_int(int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_floor_log2(mpb_t *)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "pow_ui_inv(uint32_t *, int *, uint32_t, uint32_t)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mp_div1norm(limb_t *, const limb_t *, limb_t, limb_t, limb_t, limb_t, int)";
+"mul_pow(mpb_t *, int, int, int, BOOL, int)" -> "mpb_renorm(mpb_t *)";
+"round_to_d(int *, mpb_t *, int, int)";
+"round_to_d(int *, mpb_t *, int, int)" -> "mpb_floor_log2(mpb_t *)";
+"round_to_d(int *, mpb_t *, int, int)" -> "mpb_shr_round(mpb_t *, int, int)";
+"round_to_d(int *, mpb_t *, int, int)" -> "mpb_get_u64(mpb_t *)";
+}

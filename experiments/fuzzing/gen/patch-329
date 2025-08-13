@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52763,6 +52763,8 @@
+ /* get an ArrayBuffer or SharedArrayBuffer */
+ static JSArrayBuffer *js_get_array_buffer(JSContext *ctx, JSValueConst obj)
+ {
++    if (!ctx)
++        funlogline();
+     JSObject *p;
+     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+         goto fail;
+@@ -52770,6 +52772,8 @@
+     if (p->class_id != JS_CLASS_ARRAY_BUFFER &&
+         p->class_id != JS_CLASS_SHARED_ARRAY_BUFFER) {
+     fail:
++        if (p && (p->class_id == JS_CLASS_ARRAY_BUFFER || p->class_id == JS_CLASS_SHARED_ARRAY_BUFFER) && !p->u.array_buffer)
++            funlogline();
+         JS_ThrowTypeErrorInvalidClass(ctx, JS_CLASS_ARRAY_BUFFER);
+         return NULL;
+     }

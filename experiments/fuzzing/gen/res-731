@@ -1,0 +1,33 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-mp_sub(js_limb_t *, const js_limb_t *, const js_limb_t *, int, js_limb_t)
+-------------------------
+Here are the potential logical bugs in the `mp_sub` function:
+
+:mp_sub:10612
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10617,6 +10617,9 @@
+     k = carry;
+     for(i=0;i<n;i++) {
+         v = op1[i];
++        if (op1[i] < op2[i] && k == 0) {
++            funlogline();
++        }
+         a = v - op2[i];
+         k1 = a > v;
+         v = a - k;
+```
+
+The logical bug occurs when subtracting two numbers where op1[i] < op2[i] and there's no carry (k=0). In this case, the subtraction will wrap around (underflow) but the carry calculation might not properly account for this. The inserted check catches cases where we're subtracting a larger number from a smaller one without any carry, which could lead to incorrect results in the subtraction chain.
+
+The bug manifests because:
+1. The function doesn't properly handle the case where op1[i] < op2[i] when k=0
+2. The carry calculation (k1 = a > v) only catches overflow from the first subtraction
+3. The final carry calculation combines both overflows but might miss some edge cases
+
+This could affect the correctness of operations in both mp_divnorm and js_bigint_mul that rely on mp_sub for their calculations.

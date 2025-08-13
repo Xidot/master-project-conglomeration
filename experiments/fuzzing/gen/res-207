@@ -1,0 +1,33 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_new_si(JSContext *, js_slimb_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `js_bigint_new_si`:
+
+:js_bigint_new_si:10950
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10950,6 +10950,9 @@
+     r = js_bigint_new(ctx, 1);
+     if (!r)
+         return NULL;
++    if (a < 0 && (js_limb_t)a != (js_limb_t)(js_slimb_t)a) {
++        funlogline();
++    }
+     r->tab[0] = a;
+     return r;
+ }
+```
+
+The reasoning is:
+
+1. The function stores a signed 64-bit integer (`js_slimb_t`) into an unsigned limb (`js_limb_t`) without proper sign extension handling. When negative numbers are stored, the upper bits may be lost if `js_limb_t` is smaller than 64 bits.
+
+2. The bug would trigger when:
+   - The input `a` is negative
+   - The limb size is smaller than 64 bits (JS_LIMB_BITS < 64)
+   - The value cannot be properly represented in the smaller limb size
+
+The added check verifies these conditions before the assignment occurs.

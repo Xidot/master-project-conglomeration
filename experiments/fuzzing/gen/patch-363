@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8278,6 +8278,8 @@
+     JSValue obj1;
+ 
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
++        if (JS_IsException(obj))
++            return -1;
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(obj);
+     for(;;) {
+@@ -8297,6 +8299,8 @@
+         /* JS_GetOwnPropertyInternal can free the prototype */
+         JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p));
+         ret = JS_GetOwnPropertyInternal(ctx, NULL, p, prop);
++        if (ret < 0)
++            return -1;
+         JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p));
+         if (ret != 0)
+             return ret;
+@@ -8322,6 +8326,8 @@
+             p->class_id <= JS_CLASS_FLOAT64_ARRAY) {
+             ret = JS_AtomIsNumericIndex(ctx, prop);
+             if (ret != 0) {
++                if (ret < 0)
++                    return -1;
+                 return FALSE;
+             }
+         }

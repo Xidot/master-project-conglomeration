@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15987,6 +15987,8 @@
+ static JSValue JS_IteratorGetCompleteValue(JSContext *ctx, JSValueConst obj,
+                                            BOOL *pdone)
+ {
++    if (!JS_IsObject(obj))
++        funlogline();
+     JSValue done_val, value;
+     BOOL done;
+     done_val = JS_GetProperty(ctx, obj, JS_ATOM_done);
+@@ -15994,6 +15996,8 @@
+         goto fail;
+     done = JS_ToBoolFree(ctx, done_val);
+     value = JS_GetProperty(ctx, obj, JS_ATOM_value);
++    if (done_val == value)
++        funlogline();
+     if (JS_IsException(value))
+         goto fail;
+     *pdone = done;

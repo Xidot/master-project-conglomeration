@@ -1,0 +1,157 @@
+Target function: "JS_SetUncatchableException(JSContext *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 669
+void JS_SetUncatchableException(JSContext *ctx, JS_BOOL flag)
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 872
+static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    const char *str;
+    size_t len;
+    JSValue ret;
+    JSValueConst options_obj;
+    BOOL backtrace_barrier = FALSE;
+    BOOL is_async = FALSE;
+    int flags;
+
+    if (argc >= 2) {
+        options_obj = argv[1];
+        if (get_bool_option(ctx, &backtrace_barrier, options_obj,
+                            "backtrace_barrier"))
+            return JS_EXCEPTION;
+        if (get_bool_option(ctx, &is_async, options_obj,
+                            "async"))
+            return JS_EXCEPTION;
+    }
+
+    str = JS_ToCStringLen(ctx, &len, argv[0]);
+    if (!str)
+        return JS_EXCEPTION;
+    if (!ts->recv_pipe && ++ts->eval_script_recurse == 1) {
+        /* install the interrupt handler */
+        JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, NULL);
+    }
+    flags = JS_EVAL_TYPE_GLOBAL;
+    if (backtrace_barrier)
+        flags |= JS_EVAL_FLAG_BACKTRACE_BARRIER;
+    if (is_async)
+        flags |= JS_EVAL_FLAG_ASYNC;
+    ret = JS_Eval(ctx, str, len, "<evalScript>", flags);
+    JS_FreeCString(ctx, str);
+    if (!ts->recv_pipe && --ts->eval_script_recurse == 0) {
+        /* remove the interrupt handler */
+        JS_SetInterruptHandler(JS_GetRuntime(ctx), NULL, NULL);
+        os_pending_signals &= ~((uint64_t)1 << SIGINT);
+        /* convert the uncatchable "interrupted" error into a normal error
+           so that it can be caught by the REPL */
+        if (JS_IsException(ret))
+            JS_SetUncatchableException(ctx, FALSE);
+    }
+    return ret;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_evalScript(JSContext *, JSValue, int, JSValue *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_GetRuntime(JSContext *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "get_bool_option(JSContext *, BOOL *, JSValue, const char *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_SetInterruptHandler(JSRuntime *, JSInterruptHandler *, void *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_Eval(JSContext *, const char *, size_t, const char *, int)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_evalScript(JSContext *, JSValue, int, JSValue *)" -> "JS_SetUncatchableException(JSContext *, int)";
+}

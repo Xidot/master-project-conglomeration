@@ -1,0 +1,159 @@
+Target function: "JS_EvalFunction(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* instantiate and evaluate a bytecode function. Only used when
+   reading a script or module with JS_ReadObject() */
+/// Line number here: 35728
+JSValue JS_EvalFunction(JSContext *ctx, JSValue fun_obj)
+{
+    return JS_EvalFunctionInternal(ctx, fun_obj, ctx->global_obj, NULL, NULL);
+}
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 35696
+static JSValue JS_EvalFunctionInternal(JSContext *ctx, JSValue fun_obj,
+                                       JSValueConst this_obj,
+                                       JSVarRef **var_refs, JSStackFrame *sf)
+{
+    JSValue ret_val;
+    uint32_t tag;
+
+    tag = JS_VALUE_GET_TAG(fun_obj);
+    if (tag == JS_TAG_FUNCTION_BYTECODE) {
+        fun_obj = js_closure(ctx, fun_obj, var_refs, sf);
+        ret_val = JS_CallFree(ctx, fun_obj, this_obj, 0, NULL);
+    } else if (tag == JS_TAG_MODULE) {
+        JSModuleDef *m;
+        m = JS_VALUE_GET_PTR(fun_obj);
+        /* the module refcount should be >= 2 */
+        JS_FreeValue(ctx, fun_obj);
+        if (js_create_module_function(ctx, m) < 0)
+            goto fail;
+        if (js_link_module(ctx, m) < 0)
+            goto fail;
+        ret_val = js_evaluate_module(ctx, m);
+        if (JS_IsException(ret_val)) {
+        fail:
+            return JS_EXCEPTION;
+        }
+    } else {
+        JS_FreeValue(ctx, fun_obj);
+        ret_val = JS_ThrowTypeError(ctx, "bytecode function expected");
+    }
+    return ret_val;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_EvalFunction(JSContext *, JSValue)";
+"JS_EvalFunction(JSContext *, JSValue)" -> "JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "js_closure(JSContext *, JSValue, JSVarRef **, JSStackFrame *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "JS_CallFree(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "js_create_module_function(JSContext *, JSModuleDef *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "js_link_module(JSContext *, JSModuleDef *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "js_evaluate_module(JSContext *, JSModuleDef *)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "JS_IsException(JSValue)";
+"JS_EvalFunctionInternal(JSContext *, JSValue, JSValue, JSVarRef **, JSStackFrame *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+}

@@ -1,0 +1,88 @@
+Target function: "JS_AddIntrinsicJSON(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/* C property definition */
+/// Line number here: 1090
+typedef struct JSCFunctionListEntry {
+    const char *name;
+    uint8_t prop_flags;
+    uint8_t def_type;
+    int16_t magic;
+    union {
+        struct {
+            uint8_t length; /* XXX: should move outside union */
+            uint8_t cproto; /* XXX: should move outside union */
+            JSCFunctionType cfunc;
+        } func;
+        struct {
+            JSCFunctionType get;
+            JSCFunctionType set;
+        } getset;
+        struct {
+            const char *name;
+            int base;
+        } alias;
+        struct {
+            const struct JSCFunctionListEntry *tab;
+            int len;
+        } prop_list;
+        const char *str;
+        int32_t i32;
+        int64_t i64;
+        double f64;
+    } u;
+} JSCFunctionListEntry
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 46963
+void JS_AddIntrinsicJSON(JSContext *ctx)
+{
+    /* add JSON as autoinit object */
+    JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_json_obj, countof(js_json_obj));
+}
+
+/// Line number here: 38149
+int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
+                               const JSCFunctionListEntry *tab, int len)
+{
+    int i, ret;
+
+    for (i = 0; i < len; i++) {
+        const JSCFunctionListEntry *e = &tab[i];
+        JSAtom atom = find_atom(ctx, e->name);
+        if (atom == JS_ATOM_NULL)
+            return -1;
+        ret = JS_InstantiateFunctionListItem(ctx, obj, atom, e);
+        JS_FreeAtom(ctx, atom);
+        if (ret)
+            return -1;
+    }
+    return 0;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_AddIntrinsicJSON(JSContext *)";
+"JS_AddIntrinsicJSON(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "find_atom(JSContext *, const char *)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "JS_InstantiateFunctionListItem(JSContext *, JSValue, JSAtom, const JSCFunctionListEntry *)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+}

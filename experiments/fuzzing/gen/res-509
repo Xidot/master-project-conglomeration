@@ -1,0 +1,25 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_PromiseState(JSContext *, JSValue)
+-------------------------
+Based on the provided code, here are the potential logical bugs in the target function `JS_PromiseState`:
+
+:JS_PromiseState:49264
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49264,6 +49264,8 @@
+ JSPromiseStateEnum JS_PromiseState(JSContext *ctx, JSValue promise)
+ {
+     JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
++    if (!s && JS_VALUE_GET_TAG(promise) == JS_TAG_OBJECT)
++        funlogline();
+     if (!s)
+         return -1;
+     return s->promise_state;
+```
+
+The logical bug here is that the function returns -1 when the promise is not valid (JS_GetOpaque returns NULL), but -1 is not part of the JSPromiseStateEnum. This means callers might get an invalid enum value. The instrumentation checks for cases where we have an object but it's not a promise (which would trigger the -1 return).

@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7769,6 +7769,9 @@
+     JSShapeProperty *prs;
+     JSProperty *pr;
+     JSAtom prop;
++    
++    if (unlikely(!JS_IsObject(obj)))
++        goto fail;
+ 
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)) {
+         JS_ThrowTypeErrorNotAnObject(ctx);
+@@ -7778,6 +7781,9 @@
+     if (unlikely(JS_VALUE_GET_TAG(name) != JS_TAG_SYMBOL)) {
+         JS_ThrowTypeErrorNotASymbol(ctx);
+         goto fail;
++    }
++    if (unlikely(!JS_IsPrivateSymbol(name))) {
++        goto fail;
+     }
+     prop = js_symbol_to_atom(ctx, (JSValue)name);
+     p = JS_VALUE_GET_OBJ(obj);
+@@ -7785,6 +7791,9 @@
+     if (!prs) {
+         JS_ThrowTypeErrorPrivateNotFound(ctx, prop);
+     fail:
++        if (JS_IsException(val)) {
++            JS_FreeValue(ctx, val);
++        }
+         JS_FreeValue(ctx, val);
+         return -1;
+     }

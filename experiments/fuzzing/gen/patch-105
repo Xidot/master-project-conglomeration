@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6879,14 +6879,18 @@
+ static const char *get_func_name(JSContext *ctx, JSValueConst func)
+ {
+     JSProperty *pr;
+     JSShapeProperty *prs;
+     JSValueConst val;
+ 
++    if (JS_VALUE_GET_TAG(func) < JS_TAG_FIRST || JS_VALUE_GET_TAG(func) > JS_TAG_FLOAT64)
++        funlogline();
+     if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+         return NULL;
+     prs = find_own_property(&pr, JS_VALUE_GET_OBJ(func), JS_ATOM_name);
+     if (!prs)
+         return NULL;
++    if (prs->flags > 0x3F) /* JS_PROP_TMASK is 0x3F */
++        funlogline();
+     if ((prs->flags & JS_PROP_TMASK) != JS_PROP_NORMAL)
+         return NULL;
+     val = pr->u.value;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_STRING)
+         return NULL;

@@ -1,0 +1,29 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-math_mod(int64_t, int64_t)
+-------------------------
+Here are the potential logical bugs in the target function "math_mod(int64_t, int64_t)":
+
+:math_mod:50910
+
+---
+
+The logical bug occurs when `b` is 0, which would cause a division by zero in the modulo operation `a % b`. The function doesn't handle this case and would crash.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50910,6 +50910,8 @@
+ /* Date */
+ /// Line number here: 50910
+ static int64_t math_mod(int64_t a, int64_t b) {
++    if (b == 0)
++        funlogline();
+     /* return positive modulo */
+     int64_t m = a % b;
+     return m + (m < 0) * b;
+```
+
+The fix is simple - we add a check for `b == 0` before performing the modulo operation. When this condition is true (which would trigger the bug), we call `funlogline()`.

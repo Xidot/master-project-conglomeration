@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4958,6 +4958,8 @@
+     uint32_t hash_mask, new_shape_hash = 0;
+     intptr_t h;
+ 
++    if (!sh->is_hashed && atom == 0)
++        funlogline();
+     /* update the shape hash */
+     if (sh->is_hashed) {
+         js_shape_hash_unlink(rt, sh);
+@@ -4965,6 +4967,8 @@
+     }
+ 
+     if (unlikely(sh->prop_count >= sh->prop_size)) {
++        if (sh->prop_count >= 0x3FFFFFF)
++            funlogline();
+         if (resize_properties(ctx, psh, p, sh->prop_count + 1)) {
+             /* in case of error, reinsert in the hash table.
+                sh is still valid if resize_properties() failed */
+@@ -4972,6 +4976,8 @@
+                 js_shape_hash_link(rt, sh);
+             return -1;
+         }
++        if (*psh == NULL)
++            funlogline();
+         sh = *psh;
+     }
+     if (sh->is_hashed) {

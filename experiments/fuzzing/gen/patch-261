@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -9937,6 +9937,8 @@
+ static int JS_DefineObjectNameComputed(JSContext *ctx, JSValueConst obj,
+                                        JSValueConst str, int flags)
+ {
++    if (JS_IsException(obj) || JS_IsException(str))
++        return -1;
+     if (JS_IsObject(obj) &&
+         !js_object_has_name(ctx, obj)) {
+         JSAtom prop;
+@@ -9944,11 +9946,15 @@
+         prop = JS_ValueToAtom(ctx, str);
+         if (prop == JS_ATOM_NULL)
+             return -1;
++        if (JS_IsException(JS_AtomToValue(ctx, prop)))
++            return -1;
+         name_str = js_get_function_name(ctx, prop);
+         JS_FreeAtom(ctx, prop);
+         if (JS_IsException(name_str))
+             return -1;
+         if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_name, name_str, flags) < 0)
+             return -1;
++        if (JS_IsException(obj))
++            return -1;
+     }
+     return 0;
+ }

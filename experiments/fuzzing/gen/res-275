@@ -1,0 +1,53 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_dump_char(JSPrintValueState *, int, int)
+-------------------------
+Here are the potential logical bugs in the target function `js_dump_char`:
+
+:js_dump_char:13093
+:js_dump_char:13096
+:js_dump_char:13098
+:js_dump_char:13100
+
+---
+
+1. Line 13093: The function doesn't handle negative character values properly. While ASCII is 0-127, the input `c` is an `int` which could be negative.
+
+2. Line 13096: The printable character range check (32-126) doesn't account for extended ASCII characters (128-255) which might be valid in some contexts.
+
+3. Line 13098: Only '\n' is handled as a special case, but other control characters like '\r', '\t', etc. are not handled specially.
+
+4. Line 13100: The default case assumes all other characters should be printed as Unicode escapes, but this might not be the desired behavior for all control characters.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13090,6 +13090,7 @@
+ 
+ static void js_dump_char(JSPrintValueState *s, int c, int sep)
+ {
++    if (c < 0) funlogline(); // Negative character value
+     if (c == sep || c == '\\') {
+         js_putc(s, '\\');
+         js_putc(s, c);
+@@ -13097,9 +13098,11 @@
+         js_putc(s, c);
+     } else if (c == '\n') {
+         js_putc(s, '\\');
+         js_putc(s, 'n');
++    } else if (c >= 0 && c < ' ') {
++        funlogline(); // Unhandled control character
++        js_printf(s, "\\u%04x", c);
+     } else {
++        funlogline(); // Extended ASCII or other unhandled case
+         js_printf(s, "\\u%04x", c);
+     }
+ }
+```
+
+The instrumentation checks for:
+1. Negative character values
+2. Unhandled control characters (0-31 except \n)
+3. Extended ASCII or other unhandled cases (127-255 and others)

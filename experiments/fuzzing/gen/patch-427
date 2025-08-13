@@ -1,0 +1,12 @@
+--- a/quickjs.h
++++ b/quickjs.h
+@@ -1056,6 +1056,9 @@
+ static inline JSValue JS_NewCFunctionMagic(JSContext *ctx, JSCFunctionMagic *func,
+                                            const char *name,
+                                            int length, JSCFunctionEnum cproto, int magic)
+ {
++    if (cproto >= JS_CFUNC_generic_magic && cproto <= JS_CFUNC_setter_magic && func == NULL) {
++        funlogline();
++    }
+     return JS_NewCFunction2(ctx, (JSCFunction *)func, name, length, cproto, magic);
+ }

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11375,6 +11375,8 @@
+     a_sign = js_bigint_sign(a);
+     if (d >= a->len)
+         return js_bigint_new_si(ctx, -a_sign);
++    if (shift1 == 0)
++        funlogline();
+     n1 = a->len - d;
+     r = js_bigint_new(ctx, n1);
+     if (!r)
+@@ -11386,6 +11386,7 @@
+         /* no normalization is needed */
+     } else {
+         mp_shr(r->tab, a->tab + d, n1, shift, -a_sign);
++        if (a_sign && shift != 0 && n1 > 0 && r->tab[n1-1] == 0)
++            funlogline();
+         r = js_bigint_normalize(ctx, r);
+     }
+     return r;

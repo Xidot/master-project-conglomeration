@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52613,6 +52613,8 @@
+                                             JSValueConst new_target,
+                                             uint64_t len)
+ {
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor2(ctx, new_target, len,
+                                         JS_CLASS_ARRAY_BUFFER);
+ }
+@@ -52604,6 +52606,8 @@
+                                             uint64_t len, JSClassID class_id)
+ {
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor3(ctx, new_target, len, class_id,
+                                         NULL, js_array_buffer_free, NULL,
+                                         TRUE);
+@@ -52640,6 +52644,8 @@
+     uint64_t len;
+     if (JS_ToIndex(ctx, &len, argv[0]))
+         return JS_EXCEPTION;
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor1(ctx, new_target, len);
+ }

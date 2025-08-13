@@ -1,0 +1,35 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15686,6 +15686,10 @@
+                 if (ret < 0)
+                     return -1;
+                 if (ret)
++                    goto done;
++                it->in_prototype_chain = TRUE;
++                if (JS_IsNull(it->obj) || JS_IsUndefined(it->obj)) {
++                    funlogline();
+                     goto done;
+                 it->in_prototype_chain = TRUE;
+             }
+@@ -15702,6 +15706,10 @@
+             it->idx = 0;
+         } else {
+             if (it->is_array) {
++                if (it->idx >= it->atom_count) {
++                    funlogline();
++                    goto done;
++                }
+                 prop = __JS_AtomFromUInt32(it->idx);
+                 it->idx++;
+             } else {
+@@ -15716,6 +15724,10 @@
+                     if (ret < 0)
+                         return ret;
+                     if (ret)
++                        continue;
++                    /* check if property was deleted from prototype but exists in own props */
++                    ret = JS_GetOwnPropertyInternal(ctx, NULL, JS_VALUE_GET_OBJ(it->obj), prop);
++                    if (ret < 0 || !ret) {
+                         continue; /* already visited */
+                     /* add to the visited property list */
+                     if (JS_DefinePropertyValue(ctx, enum_obj, prop, JS_NULL,

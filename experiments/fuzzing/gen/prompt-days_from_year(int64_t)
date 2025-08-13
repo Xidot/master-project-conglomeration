@@ -1,0 +1,127 @@
+Target function: "days_from_year(int64_t)"
+
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 50949
+static int64_t days_from_year(int64_t y) {
+    return 365 * (y - 1970) + floor_div(y - 1969, 4) -
+        floor_div(y - 1901, 100) + floor_div(y - 1601, 400);
+}
+
+/// Line number here: 50916
+static int64_t floor_div(int64_t a, int64_t b) {
+    /* integer division rounding toward -Infinity */
+    int64_t m = a % b;
+    return (a - (m + (m < 0) * b)) / b;
+}
+
+/* return the year, update days */
+/// Line number here: 50959
+static int64_t year_from_days(int64_t *days) {
+    int64_t y, d1, nd, d = *days;
+    y = floor_div(d * 10000, 3652425) + 1970;
+    /* the initial approximation is very good, so only a few
+       iterations are necessary */
+    for(;;) {
+        d1 = d - days_from_year(y);
+        if (d1 < 0) {
+            y--;
+            d1 += days_in_year(y);
+        } else {
+            nd = days_in_year(y);
+            if (d1 < nd)
+                break;
+            d1 -= nd;
+            y++;
+        }
+    }
+    *days = d1;
+    return y;
+}
+
+/* The spec mandates the use of 'double' and it specifies the order
+   of the operations */
+/// Line number here: 51047
+static double set_date_fields(double fields[minimum_length(7)], int is_local) {
+    double y, m, dt, ym, mn, day, h, s, milli, time, tv;
+    int yi, mi, i;
+    int64_t days;
+    volatile double temp;  /* enforce evaluation order */
+
+    /* emulate 21.4.1.15 MakeDay ( year, month, date ) */
+    y = fields[0];
+    m = fields[1];
+    dt = fields[2];
+    ym = y + floor(m / 12);
+    mn = fmod(m, 12);
+    if (mn < 0)
+        mn += 12;
+    if (ym < -271821 || ym > 275760)
+        return NAN;
+
+    yi = ym;
+    mi = mn;
+    days = days_from_year(yi);
+    for(i = 0; i < mi; i++) {
+        days += month_days[i];
+        if (i == 1)
+            days += days_in_year(yi) - 365;
+    }
+    day = days + dt - 1;
+
+    /* emulate 21.4.1.14 MakeTime ( hour, min, sec, ms ) */
+    h = fields[3];
+    m = fields[4];
+    s = fields[5];
+    milli = fields[6];
+    /* Use a volatile intermediary variable to ensure order of evaluation
+     * as specified in ECMA. This fixes a test262 error on
+     * test262/test/built-ins/Date/UTC/fp-evaluation-order.js.
+     * Without the volatile qualifier, the compile can generate code
+     * that performs the computation in a different order or with instructions
+     * that produce a different result such as FMA (float multiply and add).
+     */
+    time = h * 3600000;
+    time += (temp = m * 60000);
+    time += (temp = s * 1000);
+    time += milli;
+
+    /* emulate 21.4.1.16 MakeDate ( day, time ) */
+    tv = (temp = day * 86400000) + time;   /* prevent generation of FMA */
+    if (!isfinite(tv))
+        return NAN;
+
+    /* adjust for local time and clip */
+    if (is_local) {
+        int64_t ti = tv < INT64_MIN ? INT64_MIN : tv >= 0x1p63 ? INT64_MAX : (int64_t)tv;
+        tv += getTimezoneOffset(ti) * 60000;
+    }
+    return time_clip(tv);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"days_from_year(int64_t)";
+"days_from_year(int64_t)" -> "floor_div(int64_t, int64_t)";
+"year_from_days(int64_t *)";
+"year_from_days(int64_t *)" -> "floor_div(int64_t, int64_t)";
+"year_from_days(int64_t *)" -> "days_from_year(int64_t)";
+"year_from_days(int64_t *)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)";
+"set_date_fields(double *, int)" -> "floor(double)";
+"set_date_fields(double *, int)" -> "fmod(double, double)";
+"set_date_fields(double *, int)" -> "__builtin_nanf(const char *)";
+"set_date_fields(double *, int)" -> "days_from_year(int64_t)";
+"set_date_fields(double *, int)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)" -> "__builtin_isfinite()";
+"set_date_fields(double *, int)" -> "getTimezoneOffset(int64_t)";
+"set_date_fields(double *, int)" -> "time_clip(double)";
+}

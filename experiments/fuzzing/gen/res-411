@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewArray(JSContext *)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `JS_NewArray` function:
+
+:quickjs.c:JS_NewArray:5244
+
+The logical bug is that `JS_NewArray` doesn't check if `ctx->array_shape` is valid before using it. If `array_shape` is NULL, this could lead to undefined behavior when calling `js_dup_shape()`.
+
+Here's the proposed fix:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5244,6 +5244,9 @@
+ 
+ JSValue JS_NewArray(JSContext *ctx)
+ {
++    if (!ctx->array_shape) {
++        return JS_ThrowInternalError(ctx, "array shape not initialized");
++    }
+     return JS_NewObjectFromShape(ctx, js_dup_shape(ctx->array_shape),
+                                  JS_CLASS_ARRAY);
+ }
+```
+
+The fix adds a check for NULL array_shape and returns an error if it's not initialized. This prevents potential crashes when the array shape is not properly set up.
+
+The bug could occur if:
+1. The context was not properly initialized
+2. The array shape was freed but not reset to NULL
+3. The context was corrupted
+
+The fix ensures we fail gracefully rather than proceeding with invalid state.

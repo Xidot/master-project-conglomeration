@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36628,6 +36628,8 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf == NULL)
++        funlogline();
+     assert(!abuf->detached); /* SharedArrayBuffer are never detached */
+     bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
+     bc_put_leb128(s, abuf->byte_length);
+@@ -36635,6 +36637,8 @@
+     if (js_resize_array(s->ctx, (void **)&s->sab_tab, sizeof(s->sab_tab[0]),
+                         &s->sab_tab_size, s->sab_tab_len + 1))
+         return -1;
++    if (s->sab_tab == NULL)
++        funlogline();
+     /* keep the SAB pointer so that the user can clone it or free it */
+     s->sab_tab[s->sab_tab_len++] = abuf->data;
+     return 0;

@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -46962,6 +46962,9 @@
+ 
+ void JS_AddIntrinsicJSON(JSContext *ctx)
+ {
++    if (!ctx->global_obj) {
++        funlogline();
++    }
+     /* add JSON as autoinit object */
+     JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_json_obj, countof(js_json_obj));
+ }
+ 
+@@ -38151,6 +38151,9 @@
+ {
+     int i, ret;
+ 
++    if ((tab == NULL && len > 0) || len < 0) {
++        funlogline();
++    }
+     for (i = 0; i < len; i++) {
+         const JSCFunctionListEntry *e = &tab[i];
+         JSAtom atom = find_atom(ctx, e->name);

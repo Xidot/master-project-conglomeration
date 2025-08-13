@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10805,6 +10805,7 @@
+ 
+     for(i = n - 1; i >= 0; i--) {
+         if (unlikely(taba[i + nb] >= b1)) {
++            if (1) funlogline(); // Unsigned -1 assignment
+             q = -1;
+         } else if (b1_inv) {
+             q = udiv1norm(&dummy_r, taba[i + nb], taba[i + nb - 1], b1, b1_inv);
+@@ -10815,6 +10816,7 @@
+             r = al % b1;
+         }
+         r = mp_sub_mul1(taba + i, tabb, nb, q);
++        if (r > taba[i + nb]) funlogline(); // Potential underflow
+ 
+         v = taba[i + nb];
+         a = v - r;
+@@ -10825,6 +10827,7 @@
+             /* negative result */
+             for(;;) {
+                 q--;
++                if (q == (js_limb_t)-1) funlogline(); // Potential infinite loop
+                 c = mp_add(taba + i, taba + i, tabb, nb, 0);
+                 /* propagate carry and test if positive result */
+                 if (c != 0) {

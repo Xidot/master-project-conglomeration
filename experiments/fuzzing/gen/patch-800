@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -55638,6 +55638,9 @@
+ {
+     JSWeakRefData *wrd = container_of(wh, JSWeakRefData, weakref_header);
+ 
++    if (JS_IsUndefined(wrd->target) && !js_weakref_is_live(wrd->target)) {
++        funlogline();
++    }
+     if (!js_weakref_is_live(wrd->target)) {
+         js_weakref_free(rt, wrd->target);
+         wrd->target = JS_UNDEFINED;

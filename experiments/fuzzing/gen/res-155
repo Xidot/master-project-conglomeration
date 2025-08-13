@@ -1,0 +1,54 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicWeakRef(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_AddIntrinsicWeakRef` function:
+
+:JS_AddIntrinsicWeakRef:55873
+:JS_AddIntrinsicWeakRef:55881
+:JS_AddIntrinsicWeakRef:55889
+
+---
+
+1. Line 55873: No check if `ctx->rt` is NULL before using it
+2. Line 55881: No error handling if `JS_NewObject()` fails
+3. Line 55889: No error handling if `JS_NewObject()` fails for FinalizationRegistry
+
+Here's the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -55873,6 +55873,9 @@
+ void JS_AddIntrinsicWeakRef(JSContext *ctx)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!rt) {
++        funlogline();
++    }
+ 
+     /* WeakRef */
+     if (!JS_IsRegisteredClass(rt, JS_CLASS_WEAK_REF)) {
+@@ -55881,6 +55884,9 @@
+     }
+     ctx->class_proto[JS_CLASS_WEAK_REF] = JS_NewObject(ctx);
++    if (JS_IsException(ctx->class_proto[JS_CLASS_WEAK_REF])) {
++        funlogline();
++    }
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_WEAK_REF],
+                                js_weakref_proto_funcs,
+                                countof(js_weakref_proto_funcs));
+@@ -55889,6 +55895,9 @@
+     /* FinalizationRegistry */
+     if (!JS_IsRegisteredClass(rt, JS_CLASS_FINALIZATION_REGISTRY)) {
+         init_class_range(rt, js_finrec_class_def, JS_CLASS_FINALIZATION_REGISTRY,
+                          countof(js_finrec_class_def));
+     }
+     ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY] = JS_NewObject(ctx);
++    if (JS_IsException(ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY])) {
++        funlogline();
++    }
+     JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_FINALIZATION_REGISTRY],
+                                js_finrec_proto_funcs,
+                                countof(js_finrec_proto_funcs));
+```

@@ -1,0 +1,51 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-perform_promise_then(JSContext *, JSValue, JSValue *, JSValue *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `perform_promise_then` function:
+
+:perform_promise_then:50084
+:perform_promise_then:50125
+:perform_promise_then:50130
+
+---
+
+1. Line 50084: No check if `JS_GetOpaque` returns NULL for the promise object. This could lead to null pointer dereference.
+
+2. Line 50125: The `promise_reactions` array access uses `i` which is derived from `promise_state` without bounds checking. If `promise_state` is invalid, this could lead to out-of-bounds access.
+
+3. Line 50130: The `args` array is populated with values from `rd` without checking if `rd` is NULL first. If memory allocation failed earlier, this could lead to null pointer dereference.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50084,6 +50084,9 @@
+                                             JSValueConst *cap_resolving_funcs)
+ {
+     JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
++    if (!s) {
++        funlogline();
++    }
+     JSPromiseReactionData *rd_array[2], *rd;
+     int i, j;
+ 
+@@ -50125,6 +50128,9 @@
+         }
+         i = s->promise_state - JS_PROMISE_FULFILLED;
+         rd = rd_array[i];
++        if (i < 0 || i > 1 || !rd) {
++            funlogline();
++        }
+         args[0] = rd->resolving_funcs[0];
+         args[1] = rd->resolving_funcs[1];
+         args[2] = rd->handler;
+```
+
+The changes add safety checks for:
+1. NULL promise data
+2. Invalid promise state index
+3. NULL reaction data before use
+
+Each condition will call `funlogline()` when the bug conditions are met.

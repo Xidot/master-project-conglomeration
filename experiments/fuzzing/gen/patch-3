@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8517,6 +8517,8 @@
+         /* matching shape found: use it */
+         /*  the property array may need to be resized */
+         if (new_sh->prop_size != sh->prop_size) {
++            if (new_sh->prop_size < sh->prop_count)
++                funlogline();
+             JSProperty *new_prop;
+             new_prop = js_realloc(ctx, p->prop, sizeof(p->prop[0]) *
+                       new_sh->prop_size);
+@@ -8525,6 +8527,8 @@
+             p->prop = new_prop;
+         }
+         p->shape = js_dup_shape(new_sh);
++        if (sh->header.ref_count <= 0)
++            funlogline();
+         js_free_shape(ctx->rt, sh);
+         return &p->prop[new_sh->prop_count - 1];
+     } else if (sh->header.ref_count != 1) {
+@@ -8534,6 +8538,8 @@
+             return NULL;
+         /* hash the cloned shape */
+         new_sh->is_hashed = TRUE;
++        if (new_sh->is_hashed != TRUE)
++            funlogline();
+         js_shape_hash_link(ctx->rt, new_sh);
+         js_free_shape(ctx->rt, p->shape);
+         p->shape = new_sh;
+@@ -8541,6 +8547,8 @@
+ }
+ assert(p->shape->header.ref_count == 1);
+ if (add_shape_property(ctx, &p->shape, p, prop, prop_flags))
++    if (p->shape->header.ref_count != 1)
++        funlogline();
+     return NULL;
+ return &p->prop[p->shape->prop_count - 1];
+ }

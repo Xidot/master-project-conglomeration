@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49271,6 +49271,8 @@
+ JSValue JS_PromiseResult(JSContext *ctx, JSValue promise)
+ {
+     JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
++    if (s && s->promise_state != PROMISE_STATE_FULFILLED && s->promise_state != PROMISE_STATE_REJECTED)
++        funlogline();
+     if (!s)
+         return JS_UNDEFINED;
+     return JS_DupValue(ctx, s->promise_result);

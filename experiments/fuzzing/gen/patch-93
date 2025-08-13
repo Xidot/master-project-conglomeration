@@ -1,0 +1,11 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -2160,6 +2160,8 @@
+ static void free_timer(JSRuntime *rt, JSOSTimer *th)
+ {
+     list_del(&th->link);
++    if (JS_VALUE_HAS_REF_COUNT(th->func) && ((JSRefCountHeader *)JS_VALUE_GET_PTR(th->func))->ref_count <= 0)
++        funlogline();
+     JS_FreeValueRT(rt, th->func);
+     js_free_rt(rt, th);
+ }

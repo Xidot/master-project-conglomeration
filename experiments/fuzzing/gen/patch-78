@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6809,6 +6809,8 @@
+ static int find_line_num(JSContext *ctx, JSFunctionBytecode *b,
+                          uint32_t pc_value, int *pcol_num)
+ {
++    if (!b)
++        goto fail;
+     const uint8_t *p_end, *p;
+     int new_line_num, line_num, pc, v, ret, new_col_num, col_num;
+     uint32_t val;
+@@ -6827,6 +6829,8 @@
+     p += ret;
+     line_num = val + 1;
+ 
++    if (line_num < 0)
++        goto fail;
+     ret = get_leb128(&val, p, p_end);
+     if (ret < 0)
+         goto fail;
+@@ -6855,11 +6859,15 @@
+                 pc += (op / PC2LINE_RANGE);
+                 new_line_num = line_num + (op % PC2LINE_RANGE) + PC2LINE_BASE;
+             }
++            if (new_line_num < 0)
++                goto fail;
+             ret = get_sleb128(&v, p, p_end);
+             if (ret < 0)
+                 goto fail;
+             p += ret;
+             new_col_num = col_num + v;
+-            
++            if (new_col_num < 0)
++                goto fail;
++
+             if (pc_value < pc)
+                 goto done;
+             line_num = new_line_num;

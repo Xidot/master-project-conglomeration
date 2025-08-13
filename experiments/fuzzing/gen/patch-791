@@ -1,0 +1,20 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -660,6 +660,8 @@
+ size_t u64toa_radix(char *buf, uint64_t n, unsigned int radix)
+ {
+     int radix_bits, l;
++    if (radix < 2 || radix > 36)
++        funlogline();
+     if (likely(radix == 10))
+         return u64toa(buf, n);
+     if ((radix & (radix - 1)) == 0) {
+@@ -667,6 +669,8 @@
+         if (n == 0)
+             l = 1;
+         else
++            if (radix_bits <= 0 || radix_bits > 64)
++                funlogline();
+             l = (64 - clz64(n) + radix_bits - 1) / radix_bits;
+         u64toa_bin_len(buf, n, radix_bits, l);
+         return l;

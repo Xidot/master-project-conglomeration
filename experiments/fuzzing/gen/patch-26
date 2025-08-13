@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36941,6 +36941,9 @@
+ static int bc_get_u16(BCReaderState *s, uint16_t *pval)
+ {
+     uint16_t v;
++    if ((uintptr_t)s->ptr & 1) {
++        funlogline();
++    }
+     if (unlikely(s->buf_end - s->ptr < 2)) {
+         *pval = 0; /* avoid warning */
+         return bc_read_error_end(s);

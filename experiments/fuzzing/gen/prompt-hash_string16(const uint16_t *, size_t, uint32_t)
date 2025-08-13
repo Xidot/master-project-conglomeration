@@ -1,0 +1,50 @@
+Target function: "hash_string16(const uint16_t *, size_t, uint32_t)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 24
+typedef __uint16_t uint16_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 2430
+static inline uint32_t hash_string16(const uint16_t *str,
+                                     size_t len, uint32_t h)
+{
+    size_t i;
+
+    for(i = 0; i < len; i++)
+        h = h * 263 + str[i];
+    return h;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 2440
+static uint32_t hash_string(const JSString *str, uint32_t h)
+{
+    if (str->is_wide_char)
+        h = hash_string16(str->u.str16, str->len, h);
+    else
+        h = hash_string8(str->u.str8, str->len, h);
+    return h;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"hash_string(const JSString *, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string16(const uint16_t *, size_t, uint32_t)";
+"hash_string(const JSString *, uint32_t)" -> "hash_string8(const uint8_t *, size_t, uint32_t)";
+}

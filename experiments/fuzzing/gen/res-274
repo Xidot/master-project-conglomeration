@@ -1,0 +1,37 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_dtoa_max_len(double, int, int, int)
+-------------------------
+Here are the potential logical bugs in the target function "js_dtoa_max_len":
+
+1. :dtoa.c:js_dtoa_max_len:1048
+2. :dtoa.c:js_dtoa_max_len:1071
+
+---
+
+1. :dtoa.c:js_dtoa_max_len:1048 - The calculation `n += 10 + abs(mul_log2_radix(e - 1, radix))` could overflow if `mul_log2_radix` returns a very large negative number, making `abs()` return a large positive number that when added to 10 could exceed INT_MAX.
+
+2. :dtoa.c:js_dtoa_max_len:1071 - Similar to the first issue, `n = 2 + mul_log2_radix(e - 1, radix)` could result in a negative value if `mul_log2_radix` returns a very large negative number, which would then be used in further calculations.
+
+Here are the proposed modifications:
+
+```diff
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -1045,6 +1045,7 @@
+                 e -= 1023;
+                 /* XXX: adjust */
+                 n += 10 + abs(mul_log2_radix(e - 1, radix));
++                if (n < 0) funlogline(); // Check for overflow
+             }
+         } else {
+             /* extra: sign, 1 dot and exponent "e-1000" */
+@@ -1068,6 +1069,7 @@
+             } else {
+                 n = 2 + mul_log2_radix(e - 1, radix);
+             }
++            if (n < 0) funlogline(); // Check for negative result
+             /* sign, extra digit, 1 dot */
+             n += 1 + 1 + 1 + n_digits;
+         }
+```

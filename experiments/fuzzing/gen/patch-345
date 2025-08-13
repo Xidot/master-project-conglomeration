@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29095,6 +29095,8 @@
+ JSValue JS_GetModuleNamespace(JSContext *ctx, JSModuleDef *m)
+ {
+     if (JS_IsUndefined(m->module_ns)) {
++        if (m->status < JS_MODULE_STATUS_LINKED)
++            funlogline();
+         JSValue val;
+         val = js_build_module_ns(ctx, m);
+         if (JS_IsException(val))

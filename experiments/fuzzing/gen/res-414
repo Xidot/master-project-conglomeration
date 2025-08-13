@@ -1,0 +1,65 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-__JS_NewAtom(JSRuntime *, JSString *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `__JS_NewAtom` function:
+
+:quickjs.c:__JS_NewAtom:2668
+:quickjs.c:__JS_NewAtom:2701
+:quickjs.c:__JS_NewAtom:2731
+:quickjs.c:__JS_NewAtom:2763
+
+---
+
+1. Line 2668: The condition `if (str->atom_type == atom_type)` may fail to handle cases where `atom_type` is JS_ATOM_TYPE_PRIVATE since the check only covers JS_ATOM_TYPE_SYMBOL and below.
+
+2. Line 2701: The hash calculation for private atoms uses JS_ATOM_HASH_PRIVATE but doesn't properly handle collisions since it sets atom_type to JS_ATOM_TYPE_SYMBOL unconditionally.
+
+3. Line 2731: When allocating new atom entries, the code doesn't verify if `rt->atom_size * 3 / 2` could overflow before comparing with JS_ATOM_MAX.
+
+4. Line 2763: The string copy operation assumes the source and destination have compatible character widths but doesn't verify this assumption.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2665,6 +2665,8 @@
+ #endif
+     if (atom_type < JS_ATOM_TYPE_SYMBOL) {
+         /* str is not NULL */
+         if (str->atom_type == atom_type) {
++            if (atom_type == JS_ATOM_TYPE_PRIVATE)
++                funlogline();
+             /* str is the atom, return its index */
+             i = js_get_atom_index(rt, str);
+             /* reduce string refcount and increase atom's unless constant */
+@@ -2698,6 +2700,8 @@
+             h = 0;
+         } else {
+             h = JS_ATOM_HASH_PRIVATE;
++            if (atom_type != JS_ATOM_TYPE_SYMBOL)
++                funlogline();
+             atom_type = JS_ATOM_TYPE_SYMBOL;
+         }
+     }
+@@ -2728,6 +2732,8 @@
+            preallocating space for predefined atoms (at least 195).
+          */
+         new_size = max_int(211, rt->atom_size * 3 / 2);
++        if (new_size < rt->atom_size) /* overflow check */
++            funlogline();
+         if (new_size > JS_ATOM_MAX)
+             goto fail;
+         /* XXX: should use realloc2 to use slack space */
+@@ -2760,6 +2766,8 @@
+     if (str) {
+         if (str->atom_type == 0) {
+             p = str;
++            if (p->is_wide_char != str->is_wide_char)
++                funlogline();
+             p->atom_type = atom_type;
+         } else {
+             p = js_malloc_rt(rt, sizeof(JSString) +
+                              (str->len << str->is_wide_char) +
+```

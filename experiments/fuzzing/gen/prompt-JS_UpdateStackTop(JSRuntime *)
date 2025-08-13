@@ -1,0 +1,51 @@
+Target function: "JS_UpdateStackTop(JSRuntime *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* should be called when changing thread to update the stack top value
+   used to check stack overflow. */
+/// Line number here: 2335
+void JS_UpdateStackTop(JSRuntime *rt)
+{
+    rt->stack_top = js_get_stack_pointer();
+    update_stack_limit(rt);
+}
+
+/* Note: OS and CPU dependent */
+/// Line number here: 1563
+static inline uintptr_t js_get_stack_pointer(void)
+{
+    return (uintptr_t)__builtin_frame_address(0);
+}
+
+/// Line number here: 2320
+static void update_stack_limit(JSRuntime *rt)
+{
+    if (rt->stack_size == 0) {
+        rt->stack_limit = 0; /* no limit */
+    } else {
+        rt->stack_limit = rt->stack_top - rt->stack_size;
+    }
+}
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_UpdateStackTop(JSRuntime *)";
+"JS_UpdateStackTop(JSRuntime *)" -> "js_get_stack_pointer()";
+"JS_UpdateStackTop(JSRuntime *)" -> "update_stack_limit(JSRuntime *)";
+"js_get_stack_pointer()";
+"js_get_stack_pointer()" -> "__builtin_frame_address(unsigned int)";
+}

@@ -1,0 +1,296 @@
+Target function: "js_std_dump_error(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 4156
+void js_std_dump_error(JSContext *ctx)
+{
+    JSValue exception_val;
+
+    exception_val = JS_GetException(ctx);
+    js_std_dump_error1(ctx, exception_val);
+    JS_FreeValue(ctx, exception_val);
+}
+
+/// Line number here: 4150
+static void js_std_dump_error1(JSContext *ctx, JSValueConst exception_val)
+{
+    JS_PrintValue(ctx, js_print_value_write, stderr, exception_val, NULL);
+    fputc('\n', stderr);
+}
+
+/* main loop which calls the user JS callbacks */
+/// Line number here: 4230
+void js_std_loop(JSContext *ctx)
+{
+    int err;
+
+    for(;;) {
+        /* execute the pending jobs */
+        for(;;) {
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err <= 0) {
+                if (err < 0)
+                    js_std_dump_error(ctx);
+                break;
+            }
+        }
+
+        js_std_promise_rejection_check(ctx);
+        
+        if (!os_poll_func || os_poll_func(ctx))
+            break;
+    }
+}
+
+/* Wait for a promise and execute pending jobs while waiting for
+   it. Return the promise result or JS_EXCEPTION in case of promise
+   rejection. */
+/// Line number here: 4255
+JSValue js_std_await(JSContext *ctx, JSValue obj)
+{
+    JSValue ret;
+    int state;
+
+    for(;;) {
+        state = JS_PromiseState(ctx, obj);
+        if (state == JS_PROMISE_FULFILLED) {
+            ret = JS_PromiseResult(ctx, obj);
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_REJECTED) {
+            ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_PENDING) {
+            int err;
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err < 0) {
+                js_std_dump_error(ctx);
+            }
+            if (err == 0) {
+                js_std_promise_rejection_check(ctx);
+
+                if (os_poll_func)
+                    os_poll_func(ctx);
+            }
+        } else {
+            /* not a promise */
+            ret = obj;
+            break;
+        }
+    }
+    return ret;
+}
+
+/// Line number here: 4291
+void js_std_eval_binary(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                        int load_only)
+{
+    JSValue obj, val;
+    obj = JS_ReadObject(ctx, buf, buf_len, JS_READ_OBJ_BYTECODE);
+    if (JS_IsException(obj))
+        goto exception;
+    if (load_only) {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+        }
+    } else {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            if (JS_ResolveModule(ctx, obj) < 0) {
+                JS_FreeValue(ctx, obj);
+                goto exception;
+            }
+            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            val = JS_EvalFunction(ctx, obj);
+            val = js_std_await(ctx, val);
+        } else {
+            val = JS_EvalFunction(ctx, obj);
+        }
+        if (JS_IsException(val)) {
+        exception:
+            js_std_dump_error(ctx);
+            exit(1);
+        }
+        JS_FreeValue(ctx, val);
+    }
+}
+
+/// Line number here: 4323
+void js_std_eval_binary_json_module(JSContext *ctx,
+                                    const uint8_t *buf, size_t buf_len,
+                                    const char *module_name)
+{
+    JSValue obj;
+    JSModuleDef *m;
+    
+    obj = JS_ReadObject(ctx, buf, buf_len, 0);
+    if (JS_IsException(obj))
+        goto exception;
+    m = create_json_module(ctx, module_name, obj);
+    if (!m) {
+    exception:
+        js_std_dump_error(ctx);
+        exit(1);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* return the pending exception (cannot be called twice). */
+/// Line number here: 6742
+JSValue JS_GetException(JSContext *ctx)
+{
+    JSValue val;
+    JSRuntime *rt = ctx->rt;
+    val = rt->current_exception;
+    rt->current_exception = JS_UNINITIALIZED;
+    return val;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_dump_error(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "JS_GetException(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "JS_PrintValue(JSContext *, JSPrintValueWrite *, void *, JSValue, const JSPrintValueOptions *)";
+"js_std_dump_error1(JSContext *, JSValue)" -> "fputc(int, FILE *)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_std_loop(JSContext *)";
+"js_std_loop(JSContext *)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_loop(JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"js_std_loop(JSContext *)" -> "js_std_dump_error(JSContext *)";
+"js_std_loop(JSContext *)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_loop(JSContext *)" -> "os_poll_func";
+"js_std_await(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseState(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseResult(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_Throw(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_await(JSContext *, JSValue)" -> "JS_GetRuntime(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_dump_error(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "os_poll_func";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObject(JSContext *, const uint8_t *, size_t, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_IsException(JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_module_set_import_meta(JSContext *, JSValue, int, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_ResolveModule(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_EvalFunction(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_std_await(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_std_dump_error(JSContext *)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "exit(int)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)" -> "JS_ReadObject(JSContext *, const uint8_t *, size_t, int)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)" -> "JS_IsException(JSValue)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)" -> "create_json_module(JSContext *, const char *, JSValue)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)" -> "js_std_dump_error(JSContext *)";
+"js_std_eval_binary_json_module(JSContext *, const uint8_t *, size_t, const char *)" -> "exit(int)";
+}

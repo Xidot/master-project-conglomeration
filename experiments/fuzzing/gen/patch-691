@@ -1,0 +1,23 @@
+--- a/libunicode.h
++++ b/libunicode.h
+@@ -151,6 +151,8 @@
+ static inline int lre_is_space(uint32_t c) {
+     if (c < 256)
+         return lre_is_space_byte(c);
+     else
++        if (c > 0x10FFFF) // Maximum valid Unicode code point
++            funlogline();
+         return lre_is_space_non_ascii(c);
+ }
+--- a/libunicode.c
++++ b/libunicode.c
+@@ -1903,6 +1903,8 @@
+     n = countof(char_range_s);
+     for(i = 5; i < n; i += 2) {
+         uint32_t low = char_range_s[i];
+         uint32_t high = char_range_s[i + 1];
++        if (c == high)
++            funlogline();
+         if (c < low)
+             return FALSE;
+         if (c < high)

@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -39640,6 +39640,9 @@
+ static __exception int js_get_length64(JSContext *ctx, int64_t *pres,
+                                        JSValueConst obj)
+ {
++    if (!JS_IsObject(obj))
++        return -1;
++
+     JSValue len_val;
+     len_val = JS_GetProperty(ctx, obj, JS_ATOM_length);
+     if (JS_IsException(len_val)) {
+@@ -39647,5 +39650,8 @@
+         return -1;
+     }
+-    return JS_ToLengthFree(ctx, pres, len_val);
++    int ret = JS_ToLengthFree(ctx, pres, len_val);
++    if (ret < 0)
++        *pres = 0;
++    return ret;
+ }

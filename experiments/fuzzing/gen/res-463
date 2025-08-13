@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_not_slow(JSContext *, JSValue *)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `js_not_slow` function:
+
+1. :quickjs.c:js_not_slow:14109 - Missing check for JS_TAG_BIG_INT case when handling numeric conversion
+2. :quickjs.c:js_not_slow:14116 - No validation of JSBigInt pointer before use
+3. :quickjs.c:js_not_slow:14119 - Missing error check for JS_CompactBigInt result
+4. :quickjs.c:js_not_slow:14123 - No handling of potential overflow in ~v1 operation
+
+Here's the unified diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14113,6 +14113,8 @@
+         r = js_bigint_not(ctx, JS_VALUE_GET_PTR(op1));
+         JS_FreeValue(ctx, op1);
+         if (!r)
++            if (JS_IsException(r))
++                funlogline();
+             goto exception;
+         sp[-1] = JS_CompactBigInt(ctx, r);
+     } else {
+@@ -14120,6 +14122,8 @@
+         if (unlikely(JS_ToInt32Free(ctx, &v1, op1)))
+             goto exception;
+         sp[-1] = JS_NewInt32(ctx, ~v1);
++        if (v1 == INT32_MIN)
++            funlogline();
+     }
+     return 0;
+  exception:
+```
+
+The changes add checks for:
+1. Exception case in bigint operation
+2. Potential integer overflow in bitwise NOT operation
+
+The other potential issues (missing bigint case and unvalidated pointer) don't have clear conditions to detect them, so they're noted but not instrumented.

@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36617,6 +36617,9 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf == NULL) {
++        funlogline();
++    }
+     if (abuf->detached) {
+         JS_ThrowTypeErrorDetachedArrayBuffer(s->ctx);
+         return -1;
+@@ -36624,6 +36627,9 @@
+     bc_put_u8(s, BC_TAG_ARRAY_BUFFER);
+     bc_put_leb128(s, abuf->byte_length);
+     dbuf_put(&s->dbuf, abuf->data, abuf->byte_length);
++    if (abuf->data == NULL && abuf->byte_length > 0) {
++        funlogline();
++    }
+     return 0;
+ }

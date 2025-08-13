@@ -1,0 +1,32 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_promise_executor_new(JSContext *)
+-------------------------
+Based on the code and call graph provided, here are the potential logical bugs I've identified in the target function `js_promise_executor_new(JSContext *)`:
+
+:js_promise_executor_new:49641
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49641,6 +49641,9 @@
+ static JSValue js_promise_executor_new(JSContext *ctx)
+ {
+     JSValueConst func_data[2];
++    
++    if (ctx == NULL)
++        funlogline();
+ 
+     func_data[0] = JS_UNDEFINED;
+     func_data[1] = JS_UNDEFINED;
+```
+
+The reasoning for this bug:
+
+1. The function takes a JSContext pointer but doesn't check if it's NULL before using it. While the calling functions may ensure this, it's still a potential logical error if called incorrectly.
+
+2. The function creates a new promise executor but doesn't validate the context it operates in. If ctx is NULL, subsequent operations would fail.
+
+The fix adds a NULL check for the context pointer, which is a fundamental requirement for the function to operate correctly. This matches the task requirements by only calling funlogline() when the bug condition (NULL context) is triggered.

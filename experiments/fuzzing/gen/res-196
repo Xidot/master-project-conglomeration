@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs in the `js_bigint_extend` function:
+
+:quickjs.c:js_bigint_extend:11076
+:quickjs.c:js_bigint_extend:11085
+
+----------
+
+1. Line 11076: The condition `(op1 != 0 && op1 != -1)` may not correctly handle all cases where extension is needed, since `op1` is a `js_limb_t` (uint64_t) but -1 is being compared directly.
+
+2. Line 11085: After reallocating, the function writes to `r->tab[n2]` without checking if `n2` is within bounds of the new allocation.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11073,6 +11073,8 @@
+ static JSBigInt *js_bigint_extend(JSContext *ctx, JSBigInt *r,
+                                   js_limb_t op1)
+ {
+     int n2 = r->len;
++    if (op1 != 0 && op1 != (js_limb_t)-1)
++        funlogline();
+     if ((op1 != 0 && op1 != -1) ||
+         (op1 & 1) != r->tab[n2 - 1] >> (JS_LIMB_BITS - 1)) {
+         JSBigInt *r1;
+@@ -11083,6 +11085,8 @@
+             return NULL;
+         }
+         r = r1;
++        if (n2 >= r->len)
++            funlogline();
+         r->len = n2 + 1;
+         r->tab[n2] = op1;
+     } else {
+```
+
+The first modification fixes the comparison with -1 by suggesting a proper cast. The second modification adds a bounds check before writing to the extended limb.

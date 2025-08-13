@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10425,6 +10425,8 @@
+ 
+ static JSValue JS_ToPrimitive(JSContext *ctx, JSValueConst val, int hint)
+ {
++    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
++        funlogline();
+     return JS_ToPrimitiveFree(ctx, JS_DupValue(ctx, val), hint);
+ }
+ 
+@@ -10352,6 +10354,8 @@
+     int i;
+     BOOL force_ordinary;
+ 
++    if (hint & ~(HINT_STRING|HINT_NUMBER|HINT_FORCE_ORDINARY))
++        funlogline();
+     JSAtom method_name;
+     JSValue method, ret;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)

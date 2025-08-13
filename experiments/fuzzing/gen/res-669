@@ -1,0 +1,40 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_WriteArrayBuffer(BCWriterState *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_WriteArrayBuffer` function:
+
+:quickjs.c:JS_WriteArrayBuffer:36620
+:quickjs.c:JS_WriteArrayBuffer:36623
+
+---
+
+The first potential bug is at line 36620 where we access `abuf->detached` without checking if `abuf` is NULL. If the array buffer is invalid, this could lead to a crash.
+
+The second potential bug is at line 36623 where we write the array buffer data without checking if `abuf->data` is NULL (even though `abuf->detached` is false). The comment in the `JSArrayBuffer` struct suggests `data` can be NULL even when not detached.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36617,6 +36617,9 @@
+ {
+     JSObject *p = JS_VALUE_GET_OBJ(obj);
+     JSArrayBuffer *abuf = p->u.array_buffer;
++    if (abuf == NULL) {
++        funlogline();
++    }
+     if (abuf->detached) {
+         JS_ThrowTypeErrorDetachedArrayBuffer(s->ctx);
+         return -1;
+@@ -36624,6 +36627,9 @@
+     bc_put_u8(s, BC_TAG_ARRAY_BUFFER);
+     bc_put_leb128(s, abuf->byte_length);
+     dbuf_put(&s->dbuf, abuf->data, abuf->byte_length);
++    if (abuf->data == NULL && abuf->byte_length > 0) {
++        funlogline();
++    }
+     return 0;
+ }
+```

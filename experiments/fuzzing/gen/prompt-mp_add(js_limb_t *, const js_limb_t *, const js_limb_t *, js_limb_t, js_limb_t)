@@ -1,0 +1,107 @@
+Target function: "mp_add(js_limb_t *, const js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 10602
+static js_limb_t mp_add(js_limb_t *res, const js_limb_t *op1, const js_limb_t *op2,
+                     js_limb_t n, js_limb_t carry)
+{
+    int i;
+    for(i = 0;i < n; i++) {
+        ADDC(res[i], carry, op1[i], op2[i], carry);
+    }
+    return carry;
+}
+
+/// Line number here: 407
+typedef uint128_t js_dlimb_t
+
+/* base case division: divides taba[0..na-1] by tabb[0..nb-1]. tabb[nb
+   - 1] must be >= 1 << (JS_LIMB_BITS - 1). na - nb must be >= 0. 'taba'
+   is modified and contains the remainder (nb limbs). tabq[0..na-nb]
+   contains the quotient with tabq[na - nb] <= 1. */
+/// Line number here: 10781
+static void mp_divnorm(js_limb_t *tabq, js_limb_t *taba, js_limb_t na,
+                       const js_limb_t *tabb, js_limb_t nb)
+{
+    js_limb_t r, a, c, q, v, b1, b1_inv, n, dummy_r;
+    int i, j;
+
+    b1 = tabb[nb - 1];
+    if (nb == 1) {
+        taba[0] = mp_div1norm(tabq, taba, na, b1, 0);
+        return;
+    }
+    n = na - nb;
+
+    if (n >= UDIV1NORM_THRESHOLD)
+        b1_inv = udiv1norm_init(b1);
+    else
+        b1_inv = 0;
+
+    /* first iteration: the quotient is only 0 or 1 */
+    q = 1;
+    for(j = nb - 1; j >= 0; j--) {
+        if (taba[n + j] != tabb[j]) {
+            if (taba[n + j] < tabb[j])
+                q = 0;
+            break;
+        }
+    }
+    tabq[n] = q;
+    if (q) {
+        mp_sub(taba + n, taba + n, tabb, nb, 0);
+    }
+
+    for(i = n - 1; i >= 0; i--) {
+        if (unlikely(taba[i + nb] >= b1)) {
+            q = -1;
+        } else if (b1_inv) {
+            q = udiv1norm(&dummy_r, taba[i + nb], taba[i + nb - 1], b1, b1_inv);
+        } else {
+            js_dlimb_t al;
+            al = ((js_dlimb_t)taba[i + nb] << JS_LIMB_BITS) | taba[i + nb - 1];
+            q = al / b1;
+            r = al % b1;
+        }
+        r = mp_sub_mul1(taba + i, tabb, nb, q);
+
+        v = taba[i + nb];
+        a = v - r;
+        c = (a > v);
+        taba[i + nb] = a;
+
+        if (c != 0) {
+            /* negative result */
+            for(;;) {
+                q--;
+                c = mp_add(taba + i, taba + i, tabb, nb, 0);
+                /* propagate carry and test if positive result */
+                if (c != 0) {
+                    if (++taba[i + nb] == 0) {
+                        break;
+                    }
+                }
+            }
+        }
+        tabq[i] = q;
+    }
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_div1norm(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t, js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "udiv1norm_init(js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_sub(js_limb_t *, const js_limb_t *, const js_limb_t *, int, js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "__builtin_expect(long, long)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "udiv1norm(js_limb_t *, js_limb_t, js_limb_t, js_limb_t, js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_sub_mul1(js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t)";
+"mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)" -> "mp_add(js_limb_t *, const js_limb_t *, const js_limb_t *, js_limb_t, js_limb_t)";
+}

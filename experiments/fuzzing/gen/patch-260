@@ -1,0 +1,37 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10009,6 +10009,8 @@
+ static int JS_DefineGlobalVar(JSContext *ctx, JSAtom prop, int def_flags)
+ {
+     JSObject *p;
++    if (!ctx)
++        return -1;
+     JSShapeProperty *prs;
+     JSProperty *pr;
+     JSValue val;
+@@ -10015,6 +10017,8 @@
+     int flags;
+ 
+     if (def_flags & DEFINE_GLOBAL_LEX_VAR) {
++        if (!ctx->global_var_obj)
++            return -1;
+         p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+         flags = JS_PROP_ENUMERABLE | (def_flags & JS_PROP_WRITABLE) |
+             JS_PROP_CONFIGURABLE;
+@@ -10025,9 +10029,13 @@
+             (def_flags & JS_PROP_CONFIGURABLE);
+         val = JS_UNDEFINED;
+     }
++    if (!p)
++        return -1;
+     prs = find_own_property1(p, prop);
+     if (prs)
+         return 0;
++    if (unlikely(!p->shape))
++        return -1;
+     if (!p->extensible)
+-        return 0;
++        return JS_ThrowTypeError(ctx, "object is not extensible");
+     pr = add_property(ctx, p, prop, flags);
+     if (unlikely(!pr))
+         return -1;

@@ -1,0 +1,168 @@
+Target function: "map_hash64(uint64_t, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 48435
+static uint32_t map_hash64(uint64_t a, int hash_bits)
+{
+    return (a * HASH_MUL64) >> (64 - hash_bits);
+}
+
+/// Line number here: 48440
+static uint32_t map_hash_pointer(uintptr_t a, int hash_bits)
+{
+#ifdef JS_PTR64
+    return map_hash64(a, hash_bits);
+#else
+    return map_hash32(a, hash_bits);
+#endif
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* XXX: better hash ? */
+/* precondition: 1 <= hash_bits <= 32 */
+/// Line number here: 48451
+static uint32_t map_hash_key(JSValueConst key, int hash_bits)
+{
+    uint32_t tag = JS_VALUE_GET_NORM_TAG(key);
+    uint32_t h;
+    double d;
+    JSBigInt *p;
+    JSBigIntBuf buf;
+    
+    switch(tag) {
+    case JS_TAG_BOOL:
+        h = map_hash32(JS_VALUE_GET_INT(key) ^ JS_TAG_BOOL, hash_bits);
+        break;
+    case JS_TAG_STRING:
+        h = map_hash32(hash_string(JS_VALUE_GET_STRING(key), 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_STRING_ROPE:
+        h = map_hash32(hash_string_rope(key, 0) ^ JS_TAG_STRING, hash_bits);
+        break;
+    case JS_TAG_OBJECT:
+    case JS_TAG_SYMBOL:
+        h = map_hash_pointer((uintptr_t)JS_VALUE_GET_PTR(key) ^ tag, hash_bits);
+        break;
+    case JS_TAG_INT:
+        d = JS_VALUE_GET_INT(key);
+        goto hash_float64;
+    case JS_TAG_FLOAT64:
+        d = JS_VALUE_GET_FLOAT64(key);
+        /* normalize the NaN */
+        if (isnan(d))
+            d = JS_FLOAT64_NAN;
+    hash_float64:
+        h = map_hash64(float64_as_uint64(d) ^ JS_TAG_FLOAT64, hash_bits);
+        break;
+    case JS_TAG_SHORT_BIG_INT:
+        p = js_bigint_set_short(&buf, key);
+        goto hash_bigint;
+    case JS_TAG_BIG_INT:
+        p = JS_VALUE_GET_PTR(key);
+    hash_bigint:
+        {
+            int i;
+            h = 1;
+            for(i = p->len - 1; i >= 0; i--) {
+                h = h * 263 + p->tab[i];
+            }
+            /* the final step is necessary otherwise h mod n only
+               depends of p->tab[i] mod n */
+            h = map_hash32(h ^ JS_TAG_BIG_INT, hash_bits);
+        }
+        break;
+    default:
+        h = 0;
+        break;
+    }
+    return h;
+}
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"map_hash_pointer(uintptr_t, int)";
+"map_hash_pointer(uintptr_t, int)" -> "map_hash64(uint64_t, int)";
+"map_hash_key(JSValue, int)";
+"map_hash_key(JSValue, int)" -> "map_hash32(uint32_t, int)";
+"map_hash_key(JSValue, int)" -> "hash_string(const JSString *, uint32_t)";
+"map_hash_key(JSValue, int)" -> "hash_string_rope(JSValue, uint32_t)";
+"map_hash_key(JSValue, int)" -> "map_hash_pointer(uintptr_t, int)";
+"map_hash_key(JSValue, int)" -> "__builtin_isnan()";
+"map_hash_key(JSValue, int)" -> "__builtin_nanf(const char *)";
+"map_hash_key(JSValue, int)" -> "map_hash64(uint64_t, int)";
+"map_hash_key(JSValue, int)" -> "float64_as_uint64(double)";
+"map_hash_key(JSValue, int)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+}

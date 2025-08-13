@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3522,6 +3522,9 @@
+     int i;
+ 
+     if (s->error_status)
++        return -1;
++
++    if (size < 0)
+         return -1;
+ 
+     str = js_realloc2(s->ctx, s->str, sizeof(JSString) + (size << 1), &slack);
+@@ -3529,6 +3532,9 @@
+         return string_buffer_set_error(s);
+     size += slack >> 1;
+     for(i = s->len; i-- > 0;) {
++        if (i >= s->len || i < 0) {
++            funlogline();
++        }
+         str->u.str16[i] = str->u.str8[i];
+     }
+     s->is_wide_char = 1;

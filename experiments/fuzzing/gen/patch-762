@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3783,6 +3783,9 @@
+     if (s->error_status)
+         return JS_EXCEPTION;
+     if (s->len == 0) {
++        if (s->str != NULL) {
++            funlogline();
++        }
+         js_free(s->ctx, str);
+         s->str = NULL;
+         return JS_AtomToString(s->ctx, JS_ATOM_empty_string);
+@@ -3791,6 +3794,9 @@
+         /* smaller size so js_realloc should not fail, but OK if it does */
+         /* XXX: should add some slack to avoid unnecessary calls */
+         /* XXX: might need to use malloc+free to ensure smaller size */
++        if (s->len >= s->size) {
++            funlogline();
++        }
+         str = js_realloc_rt(s->ctx->rt, str, sizeof(JSString) +
+                             (s->len << s->is_wide_char) + 1 - s->is_wide_char);
+         if (str == NULL)

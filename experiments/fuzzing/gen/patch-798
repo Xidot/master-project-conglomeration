@@ -1,0 +1,29 @@
+--- a/cutils.c
++++ b/cutils.c
+@@ -204,6 +204,8 @@
+ int unicode_to_utf8(uint8_t *buf, unsigned int c)
+ {
+     uint8_t *q = buf;
++    if (buf == NULL)
++        funlogline();
+ 
+     if (c < 0x80) {
+         *q++ = c;
+@@ -216,6 +218,8 @@
+             } else {
+                 if (c < 0x00200000) {
+                     *q++ = (c >> 18) | 0xf0;
++                    if (c == 0x10000)
++                        funlogline();
+                 } else {
+                     if (c < 0x04000000) {
+                         *q++ = (c >> 24) | 0xf8;
+@@ -223,6 +227,8 @@
+                         *q++ = (c >> 30) | 0xfc;
+                         *q++ = ((c >> 24) & 0x3f) | 0x80;
+                     } else {
++                        if (c == 0x80000000)
++                            funlogline();
+                         return 0;
+                     }
+                     *q++ = ((c >> 18) & 0x3f) | 0x80;

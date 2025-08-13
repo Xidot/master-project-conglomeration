@@ -1,0 +1,230 @@
+Target function: "string_buffer_set_error(StringBuffer *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 3516
+static int string_buffer_set_error(StringBuffer *s)
+{
+    js_free(s->ctx, s->str);
+    s->str = NULL;
+    s->size = 0;
+    s->len = 0;
+    return s->error_status = -1;
+}
+
+/// Line number here: 1385
+void js_free(JSContext *ctx, void *ptr)
+{
+    js_free_rt(ctx->rt, ptr);
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 3525
+static no_inline int string_buffer_widen(StringBuffer *s, int size)
+{
+    JSString *str;
+    size_t slack;
+    int i;
+
+    if (s->error_status)
+        return -1;
+
+    str = js_realloc2(s->ctx, s->str, sizeof(JSString) + (size << 1), &slack);
+    if (!str)
+        return string_buffer_set_error(s);
+    size += slack >> 1;
+    for(i = s->len; i-- > 0;) {
+        str->u.str16[i] = str->u.str8[i];
+    }
+    s->is_wide_char = 1;
+    s->size = size;
+    s->str = str;
+    return 0;
+}
+
+/// Line number here: 3547
+static no_inline int string_buffer_realloc(StringBuffer *s, int new_len, int c)
+{
+    JSString *new_str;
+    int new_size;
+    size_t new_size_bytes, slack;
+
+    if (s->error_status)
+        return -1;
+
+    if (new_len > JS_STRING_LEN_MAX) {
+        JS_ThrowInternalError(s->ctx, "string too long");
+        return string_buffer_set_error(s);
+    }
+    new_size = min_int(max_int(new_len, s->size * 3 / 2), JS_STRING_LEN_MAX);
+    if (!s->is_wide_char && c >= 0x100) {
+        return string_buffer_widen(s, new_size);
+    }
+    new_size_bytes = sizeof(JSString) + (new_size << s->is_wide_char) + 1 - s->is_wide_char;
+    new_str = js_realloc2(s->ctx, s->str, new_size_bytes, &slack);
+    if (!new_str)
+        return string_buffer_set_error(s);
+    new_size = min_int(new_size + (slack >> s->is_wide_char), JS_STRING_LEN_MAX);
+    s->size = new_size;
+    s->str = new_str;
+    return 0;
+}
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 3717
+static int string_buffer_concat_value(StringBuffer *s, JSValueConst v)
+{
+    JSString *p;
+    JSValue v1;
+    int res;
+
+    if (s->error_status) {
+        /* prevent exception overload */
+        return -1;
+    }
+    if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
+        if (JS_VALUE_GET_TAG(v) == JS_TAG_STRING_ROPE) {
+            JSStringRope *r = JS_VALUE_GET_STRING_ROPE(v);
+            /* recursion is acceptable because the rope depth is bounded */
+            if (string_buffer_concat_value(s, r->left))
+                return -1;
+            return string_buffer_concat_value(s, r->right);
+        } else {
+            v1 = JS_ToString(s->ctx, v);
+            if (JS_IsException(v1))
+                return string_buffer_set_error(s);
+            p = JS_VALUE_GET_STRING(v1);
+            res = string_buffer_concat(s, p, 0, p->len);
+            JS_FreeValue(s->ctx, v1);
+            return res;
+        }
+    }
+    p = JS_VALUE_GET_STRING(v);
+    return string_buffer_concat(s, p, 0, p->len);
+}
+
+/// Line number here: 3748
+static int string_buffer_concat_value_free(StringBuffer *s, JSValue v)
+{
+    JSString *p;
+    int res;
+
+    if (s->error_status) {
+        /* prevent exception overload */
+        JS_FreeValue(s->ctx, v);
+        return -1;
+    }
+    if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
+        v = JS_ToStringFree(s->ctx, v);
+        if (JS_IsException(v))
+            return string_buffer_set_error(s);
+    }
+    p = JS_VALUE_GET_STRING(v);
+    res = string_buffer_concat(s, p, 0, p->len);
+    JS_FreeValue(s->ctx, v);
+    return res;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"string_buffer_set_error(StringBuffer *)";
+"string_buffer_set_error(StringBuffer *)" -> "js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)";
+"js_free(JSContext *, void *)" -> "js_free_rt(JSRuntime *, void *)";
+"string_buffer_widen(StringBuffer *, int)";
+"string_buffer_widen(StringBuffer *, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"string_buffer_widen(StringBuffer *, int)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "min_int(int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "max_int(int, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "string_buffer_widen(StringBuffer *, int)";
+"string_buffer_realloc(StringBuffer *, int, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"string_buffer_concat_value(StringBuffer *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "__builtin_expect(long, long)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_concat_value(StringBuffer *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_IsException(JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "__builtin_expect(long, long)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "JS_IsException(JSValue)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_concat_value_free(StringBuffer *, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+}

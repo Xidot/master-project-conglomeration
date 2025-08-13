@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37942,6 +37942,9 @@
+ static void bc_reader_free(BCReaderState *s)
+ {
+     int i;
++    if (s == NULL) {
++        funlogline();
++    }
+     if (s->idx_to_atom) {
+         for(i = 0; i < s->idx_to_atom_count; i++) {
+             JS_FreeAtom(s->ctx, s->idx_to_atom[i]);
+@@ -37949,6 +37952,9 @@
+         js_free(s->ctx, s->idx_to_atom);
+     }
+     js_free(s->ctx, s->objects);
++    if (s->idx_to_atom_count > 0 && s->idx_to_atom == NULL) {
++        funlogline();
++    }
+ }

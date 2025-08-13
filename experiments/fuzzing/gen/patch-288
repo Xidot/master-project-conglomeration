@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35850,6 +35850,9 @@
+ {
+     BOOL backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+     int saved_js_mode = 0;
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValue ret;
+     
+     if (unlikely(!ctx->eval_internal)) {
+@@ -35855,6 +35858,9 @@
+     if (unlikely(!ctx->eval_internal)) {
+         return JS_ThrowTypeError(ctx, "eval is not supported");
+     }
+     if (backtrace_barrier && ctx->rt->current_stack_frame) {
++        if (unlikely(!ctx->rt)) {
++            funlogline();
++        }
+         saved_js_mode = ctx->rt->current_stack_frame->js_mode;
+         ctx->rt->current_stack_frame->js_mode |= JS_MODE_BACKTRACE_BARRIER;
+     }
+@@ -35862,6 +35868,9 @@
+                              flags, scope_idx);
+     if (backtrace_barrier && ctx->rt->current_stack_frame)
+         ctx->rt->current_stack_frame->js_mode = saved_js_mode;
++    if (unlikely(!ctx->rt && backtrace_barrier)) {
++        funlogline();
++    }
+     return ret;
+ }

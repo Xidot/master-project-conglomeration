@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_clone_shape(JSContext *, JSShape *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_clone_shape` function:
+
+:quickjs.c:js_clone_shape:4738
+:quickjs.c:js_clone_shape:4743
+:quickjs.c:js_clone_shape:4745
+
+---
+
+1. quickjs.c:js_clone_shape:4738 - The memcpy operation assumes the source and destination sizes match exactly, but there's no validation that the allocated size matches the source size.
+
+2. quickjs.c:js_clone_shape:4743 - The function increments ref_count for sh->proto but doesn't check if sh->proto is NULL first.
+
+3. quickjs.c:js_clone_shape:4745 - The loop assumes prop_count is valid and within bounds of the allocated property array, but there's no validation of prop_count against prop_size.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4735,6 +4735,8 @@
+     sh_alloc = js_malloc(ctx, size);
+     if (!sh_alloc)
+         return NULL;
++    if (size != get_shape_size(sh1->prop_hash_mask + 1, sh1->prop_size))
++        funlogline();
+     sh_alloc1 = get_alloc_from_shape(sh1);
+     memcpy(sh_alloc, sh_alloc1, size);
+     sh = get_shape_from_alloc(sh_alloc, hash_size);
+@@ -4742,6 +4744,8 @@
+     add_gc_object(ctx->rt, &sh->header, JS_GC_OBJ_TYPE_SHAPE);
+     sh->is_hashed = FALSE;
+     if (sh->proto) {
++        if (!sh->proto)
++            funlogline();
+         JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+     }
+     for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count; i++, pr++) {
+```
+
+Note: The prop_count validation would require more extensive changes to properly check against prop_size, so it's left as a simple instrumentation point. The NULL proto check is redundant with the if condition but shows the potential issue location.

@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10248,6 +10248,9 @@
+ BOOL JS_IsFunction(JSContext *ctx, JSValueConst val)
+ {
+     JSObject *p;
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_NULL || JS_VALUE_GET_TAG(val) == JS_TAG_UNDEFINED) {
++        funlogline();
++    }
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(val);
+@@ -10255,6 +10258,12 @@
+     case JS_CLASS_BYTECODE_FUNCTION:
+         return TRUE;
+     case JS_CLASS_PROXY:
++        if (p->u.proxy_data == NULL) {
++            funlogline();
++            return FALSE;
++        }
+         return p->u.proxy_data->is_func;
+     default:
++        if (ctx->rt->class_array[p->class_id].call == NULL && (p->class_id == JS_CLASS_BOUND_FUNCTION || p->class_id == JS_CLASS_GENERATOR_FUNCTION || p->class_id == JS_CLASS_ASYNC_FUNCTION))
++            funlogline();
+         return (ctx->rt->class_array[p->class_id].call != NULL);
+     }
+ }

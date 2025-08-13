@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15590,6 +15590,8 @@
+ /* obj -> enum_obj */
+ static __exception int js_for_in_start(JSContext *ctx, JSValue *sp)
+ {
++    if (JS_IsUninitialized(sp[-1]))
++        funlogline();
+     sp[-1] = build_for_in_iterator(ctx, sp[-1]);
+     if (JS_IsException(sp[-1]))
+         return -1;
+@@ -15536,6 +15538,8 @@
+     JSForInIterator *it;
+     uint32_t tag, tab_atom_count;
+ 
++    if (JS_IsUninitialized(obj))
++        funlogline();
+     tag = JS_VALUE_GET_TAG(obj);
+     if (tag != JS_TAG_OBJECT && tag != JS_TAG_NULL && tag != JS_TAG_UNDEFINED) {
+         obj = JS_ToObjectFree(ctx, obj);

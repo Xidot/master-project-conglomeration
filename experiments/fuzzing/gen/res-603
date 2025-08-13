@@ -1,0 +1,235 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ThrowRangeError(JSContext *, const char *, ...)
+-------------------------
+Based on the code and call graph, here are the potential logical bugs where `JS_ThrowRangeError` is called:
+
+:quickjs.c:js_allocate_fast_array:8835
+:quickjs.c:js_bigint_new:10880
+:quickjs.c:js_bigint_divrem:11171
+:quickjs.c:js_bigint_pow:11396
+:quickjs.c:JS_ToArrayLengthFree:12714
+:quickjs.c:JS_ToIndex:12784
+:quickjs.c:build_arg_list:39662
+:quickjs.c:js_array_with:40440
+:quickjs.c:js_get_radix:42271
+:quickjs.c:js_number_toFixed:42317
+:quickjs.c:js_number_toExponential:42340
+:quickjs.c:js_number_toPrecision:42369
+:quickjs.c:js_string_fromCodePoint:42654
+:quickjs.c:js_string_pad:43608
+:quickjs.c:js_string_repeat:43679
+:quickjs.c:js_string_normalize:43913
+:quickjs.c:get_date_string:51170
+:quickjs.c:JS_ToBigIntCtorFree:52059
+:quickjs.c:js_array_buffer_constructor3:52541
+:quickjs.c:JS_NewTypedArray:52996
+:quickjs.c:js_typed_array_set_internal:53045
+:quickjs.c:js_typed_array_with:53149
+:quickjs.c:js_typed_array_constructor:54700
+:quickjs.c:js_dataview_constructor:54793
+:quickjs.c:js_dataview_getValue:54852
+:quickjs.c:js_dataview_setValue:54958
+:quickjs.c:js_atomics_get_ptr:55090
+
+---
+
+Here are the proposed modifications in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8832,6 +8832,7 @@
+     JSValue arr;
+     JSObject *p;
+ 
++    if (len > INT32_MAX) funlogline();
+     if (len > INT32_MAX)
+         return JS_ThrowRangeError(ctx, "invalid array length");
+     arr = JS_NewArray(ctx);
+@@ -10877,6 +10878,7 @@
+ {
+     JSBigInt *r;
+     if (len > JS_BIGINT_MAX_SIZE) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+         return NULL;
+     }
+@@ -11168,6 +11170,7 @@
+     int na, nb, a_sign, b_sign, shift;
+     
+     if (b->len == 1 && b->tab[0] == 0) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "BigInt division by zero");
+         return NULL;
+     }
+@@ -11393,6 +11396,7 @@
+     
+     /* b must be >= 0 */
+     if (js_bigint_sign(b)) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "BigInt negative exponent");
+         return NULL;
+     }
+@@ -12711,6 +12715,7 @@
+                     return -1;
+                 if (len1 != len) {
+                 fail:
++                    funlogline();
+                     JS_ThrowRangeError(ctx, "invalid array length");
+                     return -1;
+                 }
+@@ -12781,6 +12786,7 @@
+     if (JS_ToInt64Sat(ctx, &v, val))
+         return -1;
+     if (v < 0 || v > MAX_SAFE_INTEGER) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "invalid array index");
+         *plen = 0;
+         return -1;
+@@ -39659,6 +39665,7 @@
+         return NULL;
+     if (len64 > JS_MAX_LOCAL_VARS) {
+         // XXX: check for stack overflow?
++        funlogline();
+         JS_ThrowRangeError(ctx, "too many arguments in function call (only %d allowed)",
+                            JS_MAX_LOCAL_VARS);
+         return NULL;
+@@ -40437,6 +40444,7 @@
+         idx = len + idx;
+ 
+     if (idx < 0 || idx >= len) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "invalid array index: %" PRId64, idx);
+         goto exception;
+     }
+@@ -42268,6 +42276,7 @@
+     if (JS_ToInt32Sat(ctx, &radix, val))
+         return -1;
+     if (radix < 2 || radix > 36) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "radix must be between 2 and 36");
+         return -1;
+     }
+@@ -42314,6 +42323,7 @@
+     if (JS_ToInt32Sat(ctx, &f, argv[0]))
+         return JS_EXCEPTION;
+     if (f < 0 || f > 100)
++        funlogline();
+         return JS_ThrowRangeError(ctx, "invalid number of digits");
+     if (fabs(d) >= 1e21)
+         flags = JS_DTOA_FORMAT_FREE;
+@@ -42337,6 +42347,7 @@
+     if (JS_IsUndefined(argv[0])) {
+         flags = JS_DTOA_FORMAT_FREE;
+         f = 0;
++        funlogline();
+     } else {
+         if (f < 0 || f > 100)
+             return JS_ThrowRangeError(ctx, "invalid number of digits");
+@@ -42366,6 +42377,7 @@
+     if (JS_ToInt32Sat(ctx, &p, argv[0]))
+         return JS_EXCEPTION;
+     if (!isfinite(d)) {
++        funlogline();
+     to_string:
+         return JS_ToStringFree(ctx,  __JS_NewFloat64(ctx, d));
+     }
+@@ -42651,6 +42663,7 @@
+             c = JS_VALUE_GET_INT(argv[i]);
+             if (c < 0 || c > 0x10ffff)
+                 goto range_error;
++                funlogline();
+         } else {
+             if (JS_ToFloat64(ctx, &d, argv[i]))
+                 goto fail;
+@@ -43605,6 +43618,7 @@
+         }
+     }
+     if (n > JS_STRING_LEN_MAX) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "invalid string length");
+         goto fail3;
+     }
+@@ -43676,6 +43690,7 @@
+     if (JS_ToInt64Sat(ctx, &val, argv[0]))
+         goto fail;
+     if (val < 0 || val > 2147483647) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "invalid repeat count");
+         goto fail;
+     }
+@@ -43910,6 +43925,7 @@
+             if ((p + 1 - form) != form_len)
+                 goto bad_form;
+         } else {
+         bad_form:
++            funlogline();
+             JS_FreeCString(ctx, form);
+             JS_ThrowRangeError(ctx, "bad normalization form");
+         fail1:
+@@ -51167,6 +51183,7 @@
+         return -1;
+     if (!res) {
+         if (fmt == 2)
++            funlogline();
+             return JS_ThrowRangeError(ctx, "Date value is NaN");
+         else
+             return js_new_string8(ctx, "Invalid Date");
+@@ -52056,6 +52073,7 @@
+                 if (res == 0) {
+                     val = JS_EXCEPTION;
+                 } else if (res == 1) {
++                    funlogline();
+                     val = JS_ThrowRangeError(ctx, "cannot convert to BigInt: not an integer");
+                 } else {
+                     val = JS_ThrowRangeError(ctx, "cannot convert NaN or Infinity to BigInt");                }
+@@ -52538,6 +52556,7 @@
+     if (JS_IsException(obj))
+         return obj;
+     if (len > INT32_MAX) {
++        funlogline();
+         JS_ThrowRangeError(ctx, "invalid array buffer length");
+         goto fail;
+     }
+@@ -52993,6 +53012,7 @@
+ JSValue JS_NewTypedArray(JSContext *ctx, int argc, JSValueConst *argv,
+                          JSTypedArrayEnum type)
+ {
++    if (type < JS_TYPED_ARRAY_UINT8C || type > JS_TYPED_ARRAY_FLOAT64) funlogline();
+     if (type < JS_TYPED_ARRAY_UINT8C || type > JS_TYPED_ARRAY_FLOAT64)
+         return JS_ThrowRangeError(ctx, "invalid typed array type");
+ 
+@@ -53146,6 +53166,7 @@
+     val = JS_ToPrimitive(ctx, argv[1], HINT_NUMBER);
+     if (JS_IsException(val))
+         return JS_EXCEPTION;
++    if (typed_array_is_detached(ctx, p) || idx < 0 || idx >= len) funlogline();
+     if (typed_array_is_detached(ctx, p) || idx < 0 || idx >= len)
+         return JS_ThrowRangeError(ctx, "invalid array index");
+ 
+@@ -54797,6 +54818,7 @@
+             if (JS_ToIndex(ctx, &len, argv[2]))
+                 return JS_EXCEPTION;
+             if ((offset + (len << size_log2)) > abuf->byte_length) {
++                funlogline();
+             invalid_length:
+                 return JS_ThrowRangeError(ctx, "invalid length");
+             }
+@@ -54850,6 +54872,7 @@
+     if (abuf->detached)
+         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+     if (offset > abuf->byte_length)
++        funlogline();
+         return JS_ThrowRangeError(ctx, "invalid byteOffset");
+     len = abuf->byte_length - offset;
+     if (argc > 2 && !JS_IsUndefined(argv[2])) {
+@@ -55087,6 +55110,7 @@
+     if (err) {
+     fail:
+         JS_ThrowTypeError(ctx, "integer TypedArray expected");
++        funlogline();
+         return NULL;
+     }
+     ta = p->u.typed_array;
+```

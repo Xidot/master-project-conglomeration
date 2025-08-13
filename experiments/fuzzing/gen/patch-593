@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13841,6 +13841,8 @@
+     int flags;
+ 
+     str = JS_ToCStringLen(ctx, &len, val);
++    if (JS_IsException(val))
++        return val;
+     JS_FreeValue(ctx, val);
+     if (!str)
+         return JS_EXCEPTION;
+@@ -13847,6 +13849,8 @@
+     p = str;
+     p += skip_spaces(p);
+     if ((p - str) == len) {
++        if (len == 0)
++            funlogline();
+         val = JS_NewBigInt64(ctx, 0);
+     } else {
+         flags = ATOD_INT_ONLY | ATOD_ACCEPT_BIN_OCT | ATOD_TYPE_BIG_INT;
+@@ -13854,6 +13858,8 @@
+         p += skip_spaces(p);
+         if (!JS_IsException(val)) {
+             if ((p - str) != len) {
++                if (strchr(p, '_'))
++                    funlogline();
+                 JS_FreeValue(ctx, val);
+                 val = JS_NAN;
+             }

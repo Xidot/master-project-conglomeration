@@ -1,0 +1,36 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AtomToString(JSContext *, JSAtom)
+-------------------------
+Based on the code and callgraph analysis, here are the potential logical bugs in the `JS_AtomToString` function:
+
+:JS_AtomToString:3106
+:JS_AtomToString:3106
+
+----
+
+The main logical bug is in the `JS_AtomToString` function which simply calls `__JS_AtomToValue` with `force_string=TRUE` without any validation of the input atom. The issues are:
+
+1. There's no check if the atom is valid before passing it to `__JS_AtomToValue`
+2. No error handling if `__JS_AtomToValue` fails
+3. No validation of the context parameter
+
+Here's the proposed fix:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3105,6 +3105,9 @@
+ 
+ JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
+ {
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     return __JS_AtomToValue(ctx, atom, TRUE);
+ }
+```
+
+The fix adds a basic null check for the context parameter which would be a common source of crashes. The other potential issues (invalid atom values) are handled inside `__JS_AtomToValue` through its assertions and error handling.
+
+The instrumentation is minimal since this is a very hot path function - we only add the null context check which would be a serious programming error if triggered. Other error cases are either impossible (due to atom validation elsewhere) or would be caught by assertions in `__JS_AtomToValue`.

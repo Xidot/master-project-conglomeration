@@ -1,0 +1,1304 @@
+Target function: "JS_AddIntrinsicBaseObjects(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/* C function definition */
+/// Line number here: 1006
+enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+}
+
+/// Line number here: 1036
+typedef union JSCFunctionType {
+    JSCFunction *generic;
+    JSValue (*generic_magic)(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
+    JSCFunction *constructor;
+    JSValue (*constructor_magic)(JSContext *ctx, JSValueConst new_target, int argc, JSValueConst *argv, int magic);
+    JSCFunction *constructor_or_func;
+    double (*f_f)(double);
+    double (*f_f_f)(double, double);
+    JSValue (*getter)(JSContext *ctx, JSValueConst this_val);
+    JSValue (*setter)(JSContext *ctx, JSValueConst this_val, JSValueConst val);
+    JSValue (*getter_magic)(JSContext *ctx, JSValueConst this_val, int magic);
+    JSValue (*setter_magic)(JSContext *ctx, JSValueConst this_val, JSValueConst val, int magic);
+    JSValue (*iterator_next)(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv, int *pdone, int magic);
+} JSCFunctionType
+
+/// Line number here: 350
+typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+
+/// Line number here: 1045
+static inline JSValue JS_NewCFunction(JSContext *ctx, JSCFunction *func, const char *name,
+                                      int length)
+{
+    return JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_generic, 0);
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+/// Line number here: 481
+typedef struct JSPropertyDescriptor {
+    int flags;
+    JSValue value;
+    JSValue getter;
+    JSValue setter;
+} JSPropertyDescriptor
+
+/* C property definition */
+/// Line number here: 1090
+typedef struct JSCFunctionListEntry {
+    const char *name;
+    uint8_t prop_flags;
+    uint8_t def_type;
+    int16_t magic;
+    union {
+        struct {
+            uint8_t length; /* XXX: should move outside union */
+            uint8_t cproto; /* XXX: should move outside union */
+            JSCFunctionType cfunc;
+        } func;
+        struct {
+            JSCFunctionType get;
+            JSCFunctionType set;
+        } getset;
+        struct {
+            const char *name;
+            int base;
+        } alias;
+        struct {
+            const struct JSCFunctionListEntry *tab;
+            int len;
+        } prop_list;
+        const char *str;
+        int32_t i32;
+        int64_t i64;
+        double f64;
+    } u;
+} JSCFunctionListEntry
+
+/// Line number here: 351
+typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic)
+
+/// Line number here: 1051
+static inline JSValue JS_NewCFunctionMagic(JSContext *ctx, JSCFunctionMagic *func,
+                                           const char *name,
+                                           int length, JSCFunctionEnum cproto, int magic)
+{
+    return JS_NewCFunction2(ctx, (JSCFunction *)func, name, length, cproto, magic);
+}
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/// Line number here: 774
+static js_force_inline JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj,
+                                              JSAtom prop)
+{
+    return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, 0);
+}
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 561
+static js_force_inline JSValue JS_NewInt32(JSContext *ctx, int32_t val)
+{
+    return JS_MKVAL(JS_TAG_INT, val);
+}
+
+/* value handling */
+/// Line number here: 556
+static js_force_inline JSValue JS_NewBool(JSContext *ctx, JS_BOOL val)
+{
+    return JS_MKVAL(JS_TAG_BOOL, (val != 0));
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 605
+enum JSFunctionKindEnum {
+    JS_FUNC_NORMAL = 0,
+    JS_FUNC_GENERATOR = (1 << 0),
+    JS_FUNC_ASYNC = (1 << 1),
+    JS_FUNC_ASYNC_GENERATOR = (JS_FUNC_GENERATOR | JS_FUNC_ASYNC),
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 52316
+void JS_AddIntrinsicBaseObjects(JSContext *ctx)
+{
+    int i;
+    JSValueConst obj, number_obj;
+    JSValue obj1;
+
+    ctx->throw_type_error = JS_NewCFunction(ctx, js_throw_type_error, NULL, 0);
+
+    /* add caller and arguments properties to throw a TypeError */
+    JS_DefineProperty(ctx, ctx->function_proto, JS_ATOM_caller, JS_UNDEFINED,
+                      ctx->throw_type_error, ctx->throw_type_error,
+                      JS_PROP_HAS_GET | JS_PROP_HAS_SET |
+                      JS_PROP_HAS_CONFIGURABLE | JS_PROP_CONFIGURABLE);
+    JS_DefineProperty(ctx, ctx->function_proto, JS_ATOM_arguments, JS_UNDEFINED,
+                      ctx->throw_type_error, ctx->throw_type_error,
+                      JS_PROP_HAS_GET | JS_PROP_HAS_SET |
+                      JS_PROP_HAS_CONFIGURABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, js_object_seal(ctx, JS_UNDEFINED, 1, (JSValueConst *)&ctx->throw_type_error, 1));
+
+    ctx->global_obj = JS_NewObject(ctx);
+    ctx->global_var_obj = JS_NewObjectProto(ctx, JS_NULL);
+
+    /* Object */
+    obj = JS_NewGlobalCConstructor(ctx, "Object", js_object_constructor, 1,
+                                   ctx->class_proto[JS_CLASS_OBJECT]);
+    JS_SetPropertyFunctionList(ctx, obj, js_object_funcs, countof(js_object_funcs));
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                               js_object_proto_funcs, countof(js_object_proto_funcs));
+
+    /* Function */
+    JS_SetPropertyFunctionList(ctx, ctx->function_proto, js_function_proto_funcs, countof(js_function_proto_funcs));
+    ctx->function_ctor = JS_NewCFunctionMagic(ctx, js_function_constructor,
+                                              "Function", 1, JS_CFUNC_constructor_or_func_magic,
+                                              JS_FUNC_NORMAL);
+    JS_NewGlobalCConstructor2(ctx, JS_DupValue(ctx, ctx->function_ctor), "Function",
+                              ctx->function_proto);
+
+    /* Error */
+    obj1 = JS_NewCFunctionMagic(ctx, js_error_constructor,
+                                "Error", 1, JS_CFUNC_constructor_or_func_magic, -1);
+    JS_NewGlobalCConstructor2(ctx, obj1,
+                              "Error", ctx->class_proto[JS_CLASS_ERROR]);
+    JS_SetPropertyFunctionList(ctx, obj1, js_error_funcs, countof(js_error_funcs));
+
+    /* Used to squelch a -Wcast-function-type warning. */
+    JSCFunctionType ft = { .generic_magic = js_error_constructor };
+    for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
+        JSValue func_obj;
+        int n_args;
+        n_args = 1 + (i == JS_AGGREGATE_ERROR);
+        func_obj = JS_NewCFunction3(ctx, ft.generic,
+                                    native_error_name[i], n_args,
+                                    JS_CFUNC_constructor_or_func_magic, i, obj1);
+        JS_NewGlobalCConstructor2(ctx, func_obj, native_error_name[i],
+                                  ctx->native_error_proto[i]);
+    }
+
+    /* Iterator prototype */
+    ctx->iterator_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->iterator_proto,
+                               js_iterator_proto_funcs,
+                               countof(js_iterator_proto_funcs));
+
+    /* Array */
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_ARRAY],
+                               js_array_proto_funcs,
+                               countof(js_array_proto_funcs));
+
+    obj = JS_NewGlobalCConstructor(ctx, "Array", js_array_constructor, 1,
+                                   ctx->class_proto[JS_CLASS_ARRAY]);
+    ctx->array_ctor = JS_DupValue(ctx, obj);
+    JS_SetPropertyFunctionList(ctx, obj, js_array_funcs,
+                               countof(js_array_funcs));
+
+    /* XXX: create auto_initializer */
+    {
+        /* initialize Array.prototype[Symbol.unscopables] */
+        static const char unscopables[] =
+            "at" "\0"
+            "copyWithin" "\0"
+            "entries" "\0"
+            "fill" "\0"
+            "find" "\0"
+            "findIndex" "\0"
+            "findLast" "\0"
+            "findLastIndex" "\0"
+            "flat" "\0"
+            "flatMap" "\0"
+            "includes" "\0"
+            "keys" "\0"
+            "toReversed" "\0"
+            "toSorted" "\0"
+            "toSpliced" "\0"
+            "values" "\0";
+        const char *p = unscopables;
+        obj1 = JS_NewObjectProto(ctx, JS_NULL);
+        for(p = unscopables; *p; p += strlen(p) + 1) {
+            JS_DefinePropertyValueStr(ctx, obj1, p, JS_TRUE, JS_PROP_C_W_E);
+        }
+        JS_DefinePropertyValue(ctx, ctx->class_proto[JS_CLASS_ARRAY],
+                               JS_ATOM_Symbol_unscopables, obj1,
+                               JS_PROP_CONFIGURABLE);
+    }
+
+    /* needed to initialize arguments[Symbol.iterator] */
+    ctx->array_proto_values =
+        JS_GetProperty(ctx, ctx->class_proto[JS_CLASS_ARRAY], JS_ATOM_values);
+
+    ctx->class_proto[JS_CLASS_ARRAY_ITERATOR] = JS_NewObjectProto(ctx, ctx->iterator_proto);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_ARRAY_ITERATOR],
+                               js_array_iterator_proto_funcs,
+                               countof(js_array_iterator_proto_funcs));
+
+    /* parseFloat and parseInteger must be defined before Number
+       because of the Number.parseFloat and Number.parseInteger
+       aliases */
+    JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_global_funcs,
+                               countof(js_global_funcs));
+
+    /* Number */
+    ctx->class_proto[JS_CLASS_NUMBER] = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                                               JS_CLASS_NUMBER);
+    JS_SetObjectData(ctx, ctx->class_proto[JS_CLASS_NUMBER], JS_NewInt32(ctx, 0));
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_NUMBER],
+                               js_number_proto_funcs,
+                               countof(js_number_proto_funcs));
+    number_obj = JS_NewGlobalCConstructor(ctx, "Number", js_number_constructor, 1,
+                                          ctx->class_proto[JS_CLASS_NUMBER]);
+    JS_SetPropertyFunctionList(ctx, number_obj, js_number_funcs, countof(js_number_funcs));
+
+    /* Boolean */
+    ctx->class_proto[JS_CLASS_BOOLEAN] = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                                                JS_CLASS_BOOLEAN);
+    JS_SetObjectData(ctx, ctx->class_proto[JS_CLASS_BOOLEAN], JS_NewBool(ctx, FALSE));
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_BOOLEAN], js_boolean_proto_funcs,
+                               countof(js_boolean_proto_funcs));
+    JS_NewGlobalCConstructor(ctx, "Boolean", js_boolean_constructor, 1,
+                             ctx->class_proto[JS_CLASS_BOOLEAN]);
+
+    /* String */
+    ctx->class_proto[JS_CLASS_STRING] = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT],
+                                                               JS_CLASS_STRING);
+    JS_SetObjectData(ctx, ctx->class_proto[JS_CLASS_STRING], JS_AtomToString(ctx, JS_ATOM_empty_string));
+    obj = JS_NewGlobalCConstructor(ctx, "String", js_string_constructor, 1,
+                                   ctx->class_proto[JS_CLASS_STRING]);
+    JS_SetPropertyFunctionList(ctx, obj, js_string_funcs,
+                               countof(js_string_funcs));
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_STRING], js_string_proto_funcs,
+                               countof(js_string_proto_funcs));
+
+    ctx->class_proto[JS_CLASS_STRING_ITERATOR] = JS_NewObjectProto(ctx, ctx->iterator_proto);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_STRING_ITERATOR],
+                               js_string_iterator_proto_funcs,
+                               countof(js_string_iterator_proto_funcs));
+
+    /* Math: create as autoinit object */
+    js_random_init(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_math_obj, countof(js_math_obj));
+
+    /* ES6 Reflect: create as autoinit object */
+    JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_reflect_obj, countof(js_reflect_obj));
+
+    /* ES6 Symbol */
+    ctx->class_proto[JS_CLASS_SYMBOL] = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_SYMBOL], js_symbol_proto_funcs,
+                               countof(js_symbol_proto_funcs));
+    obj = JS_NewGlobalCConstructor(ctx, "Symbol", js_symbol_constructor, 0,
+                                   ctx->class_proto[JS_CLASS_SYMBOL]);
+    JS_SetPropertyFunctionList(ctx, obj, js_symbol_funcs,
+                               countof(js_symbol_funcs));
+    for(i = JS_ATOM_Symbol_toPrimitive; i < JS_ATOM_END; i++) {
+        char buf[ATOM_GET_STR_BUF_SIZE];
+        const char *str, *p;
+        str = JS_AtomGetStr(ctx, buf, sizeof(buf), i);
+        /* skip "Symbol." */
+        p = strchr(str, '.');
+        if (p)
+            str = p + 1;
+        JS_DefinePropertyValueStr(ctx, obj, str, JS_AtomToValue(ctx, i), 0);
+    }
+
+    /* ES6 Generator */
+    ctx->class_proto[JS_CLASS_GENERATOR] = JS_NewObjectProto(ctx, ctx->iterator_proto);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_GENERATOR],
+                               js_generator_proto_funcs,
+                               countof(js_generator_proto_funcs));
+
+    ctx->class_proto[JS_CLASS_GENERATOR_FUNCTION] = JS_NewObjectProto(ctx, ctx->function_proto);
+    obj1 = JS_NewCFunction3(ctx, (JSCFunction *)js_function_constructor,
+                            "GeneratorFunction", 1,
+                            JS_CFUNC_constructor_or_func_magic, JS_FUNC_GENERATOR,
+                            ctx->function_ctor);
+    JS_SetPropertyFunctionList(ctx,
+                               ctx->class_proto[JS_CLASS_GENERATOR_FUNCTION],
+                               js_generator_function_proto_funcs,
+                               countof(js_generator_function_proto_funcs));
+    JS_SetConstructor2(ctx, ctx->class_proto[JS_CLASS_GENERATOR_FUNCTION],
+                       ctx->class_proto[JS_CLASS_GENERATOR],
+                       JS_PROP_CONFIGURABLE, JS_PROP_CONFIGURABLE);
+    JS_SetConstructor2(ctx, obj1, ctx->class_proto[JS_CLASS_GENERATOR_FUNCTION],
+                       0, JS_PROP_CONFIGURABLE);
+    JS_FreeValue(ctx, obj1);
+
+    /* global properties */
+    ctx->eval_obj = JS_NewCFunction(ctx, js_global_eval, "eval", 1);
+    JS_DefinePropertyValue(ctx, ctx->global_obj, JS_ATOM_eval,
+                           JS_DupValue(ctx, ctx->eval_obj),
+                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+
+    JS_DefinePropertyValue(ctx, ctx->global_obj, JS_ATOM_globalThis,
+                           JS_DupValue(ctx, ctx->global_obj),
+                           JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+
+    /* BigInt */
+    JS_AddIntrinsicBigInt(ctx);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/* allowed flags:
+   JS_PROP_CONFIGURABLE, JS_PROP_WRITABLE, JS_PROP_ENUMERABLE
+   JS_PROP_HAS_GET, JS_PROP_HAS_SET, JS_PROP_HAS_VALUE,
+   JS_PROP_HAS_CONFIGURABLE, JS_PROP_HAS_WRITABLE, JS_PROP_HAS_ENUMERABLE,
+   JS_PROP_THROW, JS_PROP_NO_EXOTIC.
+   If JS_PROP_THROW is set, return an exception instead of FALSE.
+   if JS_PROP_NO_EXOTIC is set, do not call the exotic
+   define_own_property callback.
+   return -1 (exception), FALSE or TRUE.
+*/
+/// Line number here: 9527
+int JS_DefineProperty(JSContext *ctx, JSValueConst this_obj,
+                      JSAtom prop, JSValueConst val,
+                      JSValueConst getter, JSValueConst setter, int flags)
+{
+    JSObject *p;
+    JSShapeProperty *prs;
+    JSProperty *pr;
+    int mask, res;
+
+    if (JS_VALUE_GET_TAG(this_obj) != JS_TAG_OBJECT) {
+        JS_ThrowTypeErrorNotAnObject(ctx);
+        return -1;
+    }
+    p = JS_VALUE_GET_OBJ(this_obj);
+
+ redo_prop_update:
+    prs = find_own_property(&pr, p, prop);
+    if (prs) {
+        /* the range of the Array length property is always tested before */
+        if ((prs->flags & JS_PROP_LENGTH) && (flags & JS_PROP_HAS_VALUE)) {
+            uint32_t array_length;
+            if (JS_ToArrayLengthFree(ctx, &array_length,
+                                     JS_DupValue(ctx, val), FALSE)) {
+                return -1;
+            }
+            /* this code relies on the fact that Uint32 are never allocated */
+            val = (JSValueConst)JS_NewUint32(ctx, array_length);
+            /* prs may have been modified */
+            prs = find_own_property(&pr, p, prop);
+            assert(prs != NULL);
+        }
+        /* property already exists */
+        if (!check_define_prop_flags(prs->flags, flags)) {
+        not_configurable:
+            return JS_ThrowTypeErrorOrFalse(ctx, flags, "property is not configurable");
+        }
+
+        if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
+            /* Instantiate property and retry */
+            if (JS_AutoInitProperty(ctx, p, prop, pr, prs))
+                return -1;
+            goto redo_prop_update;
+        }
+
+        if (flags & (JS_PROP_HAS_VALUE | JS_PROP_HAS_WRITABLE |
+                     JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+            if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+                JSObject *new_getter, *new_setter;
+
+                if (JS_IsFunction(ctx, getter)) {
+                    new_getter = JS_VALUE_GET_OBJ(getter);
+                } else {
+                    new_getter = NULL;
+                }
+                if (JS_IsFunction(ctx, setter)) {
+                    new_setter = JS_VALUE_GET_OBJ(setter);
+                } else {
+                    new_setter = NULL;
+                }
+
+                if ((prs->flags & JS_PROP_TMASK) != JS_PROP_GETSET) {
+                    if (js_shape_prepare_update(ctx, p, &prs))
+                        return -1;
+                    /* convert to getset */
+                    if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+                        free_var_ref(ctx->rt, pr->u.var_ref);
+                    } else {
+                        JS_FreeValue(ctx, pr->u.value);
+                    }
+                    prs->flags = (prs->flags &
+                                  (JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE)) |
+                        JS_PROP_GETSET;
+                    pr->u.getset.getter = NULL;
+                    pr->u.getset.setter = NULL;
+                } else {
+                    if (!(prs->flags & JS_PROP_CONFIGURABLE)) {
+                        if ((flags & JS_PROP_HAS_GET) &&
+                            new_getter != pr->u.getset.getter) {
+                            goto not_configurable;
+                        }
+                        if ((flags & JS_PROP_HAS_SET) &&
+                            new_setter != pr->u.getset.setter) {
+                            goto not_configurable;
+                        }
+                    }
+                }
+                if (flags & JS_PROP_HAS_GET) {
+                    if (pr->u.getset.getter)
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
+                    if (new_getter)
+                        JS_DupValue(ctx, getter);
+                    pr->u.getset.getter = new_getter;
+                }
+                if (flags & JS_PROP_HAS_SET) {
+                    if (pr->u.getset.setter)
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+                    if (new_setter)
+                        JS_DupValue(ctx, setter);
+                    pr->u.getset.setter = new_setter;
+                }
+            } else {
+                if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+                    /* convert to data descriptor */
+                    if (js_shape_prepare_update(ctx, p, &prs))
+                        return -1;
+                    if (pr->u.getset.getter)
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
+                    if (pr->u.getset.setter)
+                        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+                    prs->flags &= ~(JS_PROP_TMASK | JS_PROP_WRITABLE);
+                    pr->u.value = JS_UNDEFINED;
+                } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+                    /* Note: JS_PROP_VARREF is always writable */
+                } else {
+                    if ((prs->flags & (JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE)) == 0 &&
+                        (flags & JS_PROP_HAS_VALUE)) {
+                        if (!js_same_value(ctx, val, pr->u.value)) {
+                            goto not_configurable;
+                        } else {
+                            return TRUE;
+                        }
+                    }
+                }
+                if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+                    if (flags & JS_PROP_HAS_VALUE) {
+                        if (p->class_id == JS_CLASS_MODULE_NS) {
+                            /* JS_PROP_WRITABLE is always true for variable
+                               references, but they are write protected in module name
+                               spaces. */
+                            if (!js_same_value(ctx, val, *pr->u.var_ref->pvalue))
+                                goto not_configurable;
+                        } else {
+                            /* update the reference */
+                            set_value(ctx, pr->u.var_ref->pvalue,
+                                      JS_DupValue(ctx, val));
+                        }
+                    }
+                    /* if writable is set to false, no longer a
+                       reference (for mapped arguments) */
+                    if ((flags & (JS_PROP_HAS_WRITABLE | JS_PROP_WRITABLE)) == JS_PROP_HAS_WRITABLE) {
+                        JSValue val1;
+                        if (p->class_id == JS_CLASS_MODULE_NS) {
+                            return JS_ThrowTypeErrorOrFalse(ctx, flags, "module namespace properties have writable = false");
+                        }
+                        if (js_shape_prepare_update(ctx, p, &prs))
+                            return -1;
+                        val1 = JS_DupValue(ctx, *pr->u.var_ref->pvalue);
+                        free_var_ref(ctx->rt, pr->u.var_ref);
+                        pr->u.value = val1;
+                        prs->flags &= ~(JS_PROP_TMASK | JS_PROP_WRITABLE);
+                    }
+                } else if (prs->flags & JS_PROP_LENGTH) {
+                    if (flags & JS_PROP_HAS_VALUE) {
+                        /* Note: no JS code is executable because
+                           'val' is guaranted to be a Uint32 */
+                        res = set_array_length(ctx, p, JS_DupValue(ctx, val),
+                                               flags);
+                    } else {
+                        res = TRUE;
+                    }
+                    /* still need to reset the writable flag if
+                       needed.  The JS_PROP_LENGTH is kept because the
+                       Uint32 test is still done if the length
+                       property is read-only. */
+                    if ((flags & (JS_PROP_HAS_WRITABLE | JS_PROP_WRITABLE)) ==
+                        JS_PROP_HAS_WRITABLE) {
+                        prs = get_shape_prop(p->shape);
+                        if (js_update_property_flags(ctx, p, &prs,
+                                                     prs->flags & ~JS_PROP_WRITABLE))
+                            return -1;
+                    }
+                    return res;
+                } else {
+                    if (flags & JS_PROP_HAS_VALUE) {
+                        JS_FreeValue(ctx, pr->u.value);
+                        pr->u.value = JS_DupValue(ctx, val);
+                    }
+                    if (flags & JS_PROP_HAS_WRITABLE) {
+                        if (js_update_property_flags(ctx, p, &prs,
+                                                     (prs->flags & ~JS_PROP_WRITABLE) |
+                                                     (flags & JS_PROP_WRITABLE)))
+                            return -1;
+                    }
+                }
+            }
+        }
+        mask = 0;
+        if (flags & JS_PROP_HAS_CONFIGURABLE)
+            mask |= JS_PROP_CONFIGURABLE;
+        if (flags & JS_PROP_HAS_ENUMERABLE)
+            mask |= JS_PROP_ENUMERABLE;
+        if (js_update_property_flags(ctx, p, &prs,
+                                     (prs->flags & ~mask) | (flags & mask)))
+            return -1;
+        return TRUE;
+    }
+
+    /* handle modification of fast array elements */
+    if (p->fast_array) {
+        uint32_t idx;
+        uint32_t prop_flags;
+        if (p->class_id == JS_CLASS_ARRAY) {
+            if (__JS_AtomIsTaggedInt(prop)) {
+                idx = __JS_AtomToUInt32(prop);
+                if (idx < p->u.array.count) {
+                    prop_flags = get_prop_flags(flags, JS_PROP_C_W_E);
+                    if (prop_flags != JS_PROP_C_W_E)
+                        goto convert_to_slow_array;
+                    if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET)) {
+                    convert_to_slow_array:
+                        if (convert_fast_array_to_array(ctx, p))
+                            return -1;
+                        else
+                            goto redo_prop_update;
+                    }
+                    if (flags & JS_PROP_HAS_VALUE) {
+                        set_value(ctx, &p->u.array.u.values[idx], JS_DupValue(ctx, val));
+                    }
+                    return TRUE;
+                }
+            }
+        } else if (p->class_id >= JS_CLASS_UINT8C_ARRAY &&
+                   p->class_id <= JS_CLASS_FLOAT64_ARRAY) {
+            JSValue num;
+            int ret;
+
+            if (!__JS_AtomIsTaggedInt(prop)) {
+                /* slow path with to handle all numeric indexes */
+                num = JS_AtomIsNumericIndex1(ctx, prop);
+                if (JS_IsUndefined(num))
+                    goto typed_array_done;
+                if (JS_IsException(num))
+                    return -1;
+                ret = JS_NumberIsInteger(ctx, num);
+                if (ret < 0) {
+                    JS_FreeValue(ctx, num);
+                    return -1;
+                }
+                if (!ret) {
+                    JS_FreeValue(ctx, num);
+                    return JS_ThrowTypeErrorOrFalse(ctx, flags, "non integer index in typed array");
+                }
+                ret = JS_NumberIsNegativeOrMinusZero(ctx, num);
+                JS_FreeValue(ctx, num);
+                if (ret) {
+                    return JS_ThrowTypeErrorOrFalse(ctx, flags, "negative index in typed array");
+                }
+                if (!__JS_AtomIsTaggedInt(prop))
+                    goto typed_array_oob;
+            }
+            idx = __JS_AtomToUInt32(prop);
+            /* if the typed array is detached, p->u.array.count = 0 */
+            if (idx >= p->u.array.count) {
+            typed_array_oob:
+                return JS_ThrowTypeErrorOrFalse(ctx, flags, "out-of-bound index in typed array");
+            }
+            prop_flags = get_prop_flags(flags, JS_PROP_ENUMERABLE | JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            if (flags & (JS_PROP_HAS_GET | JS_PROP_HAS_SET) ||
+                prop_flags != (JS_PROP_ENUMERABLE | JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE)) {
+                return JS_ThrowTypeErrorOrFalse(ctx, flags, "invalid descriptor flags");
+            }
+            if (flags & JS_PROP_HAS_VALUE) {
+                return JS_SetPropertyValue(ctx, this_obj, JS_NewInt32(ctx, idx), JS_DupValue(ctx, val), flags);
+            }
+            return TRUE;
+        typed_array_done: ;
+        }
+    }
+
+    return JS_CreateProperty(ctx, p, prop, val, getter, setter, flags);
+}
+
+/// Line number here: 39056
+static JSValue js_object_seal(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv, int freeze_flag)
+{
+    JSValueConst obj = argv[0];
+    JSObject *p;
+    JSPropertyEnum *props;
+    uint32_t len, i;
+    int flags, desc_flags, res;
+
+    if (!JS_IsObject(obj))
+        return JS_DupValue(ctx, obj);
+
+    res = JS_PreventExtensions(ctx, obj);
+    if (res < 0)
+        return JS_EXCEPTION;
+    if (!res) {
+        return JS_ThrowTypeError(ctx, "proxy preventExtensions handler returned false");
+    }
+
+    p = JS_VALUE_GET_OBJ(obj);
+    flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK;
+    if (JS_GetOwnPropertyNamesInternal(ctx, &props, &len, p, flags))
+        return JS_EXCEPTION;
+
+    for(i = 0; i < len; i++) {
+        JSPropertyDescriptor desc;
+        JSAtom prop = props[i].atom;
+
+        desc_flags = JS_PROP_THROW | JS_PROP_HAS_CONFIGURABLE;
+        if (freeze_flag) {
+            res = JS_GetOwnPropertyInternal(ctx, &desc, p, prop);
+            if (res < 0)
+                goto exception;
+            if (res) {
+                if (desc.flags & JS_PROP_WRITABLE)
+                    desc_flags |= JS_PROP_HAS_WRITABLE;
+                js_free_desc(ctx, &desc);
+            }
+        }
+        if (JS_DefineProperty(ctx, obj, prop, JS_UNDEFINED,
+                              JS_UNDEFINED, JS_UNDEFINED, desc_flags) < 0)
+            goto exception;
+    }
+    JS_FreePropertyEnum(ctx, props, len);
+    return JS_DupValue(ctx, obj);
+
+ exception:
+    JS_FreePropertyEnum(ctx, props, len);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 5250
+JSValue JS_NewObject(JSContext *ctx)
+{
+    /* inline JS_NewObjectClass(ctx, JS_CLASS_OBJECT); */
+    return JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_OBJECT], JS_CLASS_OBJECT);
+}
+
+/// Line number here: 5239
+JSValue JS_NewObjectProto(JSContext *ctx, JSValueConst proto)
+{
+    return JS_NewObjectProtoClass(ctx, proto, JS_CLASS_OBJECT);
+}
+
+/// Line number here: 38250
+static JSValueConst JS_NewGlobalCConstructor(JSContext *ctx, const char *name,
+                                             JSCFunction *func, int length,
+                                             JSValueConst proto)
+{
+    JSValue func_obj;
+    func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor_or_func, 0);
+    JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
+    return func_obj;
+}
+
+/// Line number here: 38149
+int JS_SetPropertyFunctionList(JSContext *ctx, JSValueConst obj,
+                               const JSCFunctionListEntry *tab, int len)
+{
+    int i, ret;
+
+    for (i = 0; i < len; i++) {
+        const JSCFunctionListEntry *e = &tab[i];
+        JSAtom atom = find_atom(ctx, e->name);
+        if (atom == JS_ATOM_NULL)
+            return -1;
+        ret = JS_InstantiateFunctionListItem(ctx, obj, atom, e);
+        JS_FreeAtom(ctx, atom);
+        if (ret)
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 38238
+static void JS_NewGlobalCConstructor2(JSContext *ctx,
+                                      JSValue func_obj,
+                                      const char *name,
+                                      JSValueConst proto)
+{
+    JS_DefinePropertyValueStr(ctx, ctx->global_obj, name,
+                           JS_DupValue(ctx, func_obj),
+                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_SetConstructor(ctx, func_obj, proto);
+    JS_FreeValue(ctx, func_obj);
+}
+
+/* Note: at least 'length' arguments will be readable in 'argv' */
+/// Line number here: 5347
+static JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
+                                const char *name,
+                                int length, JSCFunctionEnum cproto, int magic,
+                                JSValueConst proto_val)
+{
+    JSValue func_obj;
+    JSObject *p;
+    JSAtom name_atom;
+
+    func_obj = JS_NewObjectProtoClass(ctx, proto_val, JS_CLASS_C_FUNCTION);
+    if (JS_IsException(func_obj))
+        return func_obj;
+    p = JS_VALUE_GET_OBJ(func_obj);
+    p->u.cfunc.realm = JS_DupContext(ctx);
+    p->u.cfunc.c_function.generic = func;
+    p->u.cfunc.length = length;
+    p->u.cfunc.cproto = cproto;
+    p->u.cfunc.magic = magic;
+    p->is_constructor = (cproto == JS_CFUNC_constructor ||
+                         cproto == JS_CFUNC_constructor_magic ||
+                         cproto == JS_CFUNC_constructor_or_func ||
+                         cproto == JS_CFUNC_constructor_or_func_magic);
+    if (!name)
+        name = "";
+    name_atom = JS_NewAtom(ctx, name);
+    if (name_atom == JS_ATOM_NULL) {
+        JS_FreeValue(ctx, func_obj);
+        return JS_EXCEPTION;
+    }
+    js_function_set_properties(ctx, func_obj, name_atom, length);
+    JS_FreeAtom(ctx, name_atom);
+    return func_obj;
+}
+
+/// Line number here: 9870
+int JS_DefinePropertyValueStr(JSContext *ctx, JSValueConst this_obj,
+                              const char *prop, JSValue val, int flags)
+{
+    JSAtom atom;
+    int ret;
+    atom = JS_NewAtom(ctx, prop);
+    if (atom == JS_ATOM_NULL) {
+        JS_FreeValue(ctx, val);
+        return -1;
+    }
+    ret = JS_DefinePropertyValue(ctx, this_obj, atom, val, flags);
+    JS_FreeAtom(ctx, atom);
+    return ret;
+}
+
+/* shortcut to add or redefine a new property value */
+/// Line number here: 9830
+int JS_DefinePropertyValue(JSContext *ctx, JSValueConst this_obj,
+                           JSAtom prop, JSValue val, int flags)
+{
+    int ret;
+    ret = JS_DefineProperty(ctx, this_obj, prop, val, JS_UNDEFINED, JS_UNDEFINED,
+                            flags | JS_PROP_HAS_VALUE | JS_PROP_HAS_CONFIGURABLE | JS_PROP_HAS_WRITABLE | JS_PROP_HAS_ENUMERABLE);
+    JS_FreeValue(ctx, val);
+    return ret;
+}
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/* WARNING: proto must be an object or JS_NULL */
+/// Line number here: 5169
+JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                               JSClassID class_id)
+{
+    JSShape *sh;
+    JSObject *proto;
+
+    proto = get_proto_obj(proto_val);
+    sh = find_hashed_shape_proto(ctx->rt, proto);
+    if (likely(sh)) {
+        sh = js_dup_shape(sh);
+    } else {
+        sh = js_new_shape(ctx, proto);
+        if (!sh)
+            return JS_EXCEPTION;
+    }
+    return JS_NewObjectFromShape(ctx, sh, class_id);
+}
+
+/// Line number here: 5208
+static int JS_SetObjectData(JSContext *ctx, JSValueConst obj, JSValue val)
+{
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) {
+        p = JS_VALUE_GET_OBJ(obj);
+        switch(p->class_id) {
+        case JS_CLASS_NUMBER:
+        case JS_CLASS_STRING:
+        case JS_CLASS_BOOLEAN:
+        case JS_CLASS_SYMBOL:
+        case JS_CLASS_DATE:
+        case JS_CLASS_BIG_INT:
+            JS_FreeValue(ctx, p->u.object_data);
+            p->u.object_data = val; /* for JS_CLASS_STRING, 'val' must
+                                       be JS_TAG_STRING (and not a
+                                       rope) */
+            return 0;
+        }
+    }
+    JS_FreeValue(ctx, val);
+    if (!JS_IsException(obj))
+        JS_ThrowTypeError(ctx, "invalid object type");
+    return -1;
+}
+
+/// Line number here: 3106
+JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, TRUE);
+}
+
+/// Line number here: 44479
+static void js_random_init(JSContext *ctx)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    ctx->random_state = ((int64_t)tv.tv_sec * 1000000) + tv.tv_usec;
+    /* the state must be non zero */
+    if (ctx->random_state == 0)
+        ctx->random_state = 1;
+}
+
+/// Line number here: 3069
+static const char *JS_AtomGetStr(JSContext *ctx, char *buf, int buf_size, JSAtom atom)
+{
+    return JS_AtomGetStrRT(ctx->rt, buf, buf_size, atom);
+}
+
+/// Line number here: 3101
+JSValue JS_AtomToValue(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, FALSE);
+}
+
+/* Note: 'func_obj' is not necessarily a constructor */
+/// Line number here: 38217
+static void JS_SetConstructor2(JSContext *ctx,
+                               JSValueConst func_obj,
+                               JSValueConst proto,
+                               int proto_flags, int ctor_flags)
+{
+    JS_DefinePropertyValue(ctx, func_obj, JS_ATOM_prototype,
+                           JS_DupValue(ctx, proto), proto_flags);
+    JS_DefinePropertyValue(ctx, proto, JS_ATOM_constructor,
+                           JS_DupValue(ctx, func_obj),
+                           ctor_flags);
+    set_cycle_flag(ctx, func_obj);
+    set_cycle_flag(ctx, proto);
+}
+
+/// Line number here: 52238
+static void JS_AddIntrinsicBigInt(JSContext *ctx)
+{
+    JSValueConst obj1;
+
+    ctx->class_proto[JS_CLASS_BIG_INT] = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_BIG_INT],
+                               js_bigint_proto_funcs,
+                               countof(js_bigint_proto_funcs));
+    obj1 = JS_NewGlobalCConstructor(ctx, "BigInt", js_bigint_constructor, 1,
+                                    ctx->class_proto[JS_CLASS_BIG_INT]);
+    JS_SetPropertyFunctionList(ctx, obj1, js_bigint_funcs,
+                               countof(js_bigint_funcs));
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 406
+extern size_t strlen (const char *__s)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+/// Line number here: 245
+extern char *strchr (const char *__s, int __c)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+---- File: /usr/include/bits/types/struct_timeval.h
+
+/// Line number here: 7
+struct timeval
+{
+#ifdef __USE_TIME64_REDIRECTS
+  __time64_t tv_sec;		/* Seconds.  */
+  __suseconds64_t tv_usec;	/* Microseconds.  */
+#else
+  __time_t tv_sec;		/* Seconds.  */
+  __suseconds_t tv_usec;	/* Microseconds.  */
+#endif
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_AddIntrinsicBaseObjects(JSContext *)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "js_object_seal(JSContext *, JSValue, int, JSValue *, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewObject(JSContext *)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewObjectProto(JSContext *, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "strlen(const char *)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_SetObjectData(JSContext *, JSValue, JSValue)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_NewBool(JSContext *, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "js_random_init(JSContext *)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "strchr(const char *, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_AtomToValue(JSContext *, JSAtom)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)";
+"JS_AddIntrinsicBaseObjects(JSContext *)" -> "JS_AddIntrinsicBigInt(JSContext *)";
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)";
+"JS_NewCFunction(JSContext *, JSCFunction *, const char *, int)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "find_own_property(JSProperty **, JSObject *, JSAtom)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ToArrayLengthFree(JSContext *, uint32_t *, JSValue, BOOL)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "check_define_prop_flags(int, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_ThrowTypeErrorOrFalse(JSContext *, int, const char *, ...)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_AutoInitProperty(JSContext *, JSObject *, JSAtom, JSProperty *, JSShapeProperty *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_IsFunction(JSContext *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "free_var_ref(JSRuntime *, JSVarRef *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "js_same_value(JSContext *, JSValue, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "set_value(JSContext *, JSValue *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "set_array_length(JSContext *, JSObject *, JSValue, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "get_shape_prop(JSShape *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "js_update_property_flags(JSContext *, JSObject *, JSShapeProperty **, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "__JS_AtomToUInt32(JSAtom)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "get_prop_flags(int, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "convert_fast_array_to_array(JSContext *, JSObject *)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_AtomIsNumericIndex1(JSContext *, JSAtom)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_IsUndefined(JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_IsException(JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_NumberIsInteger(JSContext *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_NumberIsNegativeOrMinusZero(JSContext *, JSValue)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_SetPropertyValue(JSContext *, JSValue, JSValue, JSValue, int)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)" -> "JS_CreateProperty(JSContext *, JSObject *, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_IsObject(JSValue)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_PreventExtensions(JSContext *, JSValue)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOwnPropertyNamesInternal(JSContext *, JSPropertyEnum **, uint32_t *, JSObject *, int)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_GetOwnPropertyInternal(JSContext *, JSPropertyDescriptor *, JSObject *, JSAtom)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "js_free_desc(JSContext *, JSPropertyDescriptor *)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"js_object_seal(JSContext *, JSValue, int, JSValue *, int)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"JS_NewObject(JSContext *)";
+"JS_NewObject(JSContext *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewObjectProto(JSContext *, JSValue)";
+"JS_NewObjectProto(JSContext *, JSValue)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)";
+"JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)" -> "JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "find_atom(JSContext *, const char *)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "JS_InstantiateFunctionListItem(JSContext *, JSValue, JSAtom, const JSCFunctionListEntry *)";
+"JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)";
+"JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)" -> "JS_SetConstructor(JSContext *, JSValue, JSValue)";
+"JS_NewGlobalCConstructor2(JSContext *, JSValue, const char *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_IsException(JSValue)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_DupContext(JSContext *)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "js_function_set_properties(JSContext *, JSValue, JSAtom, int)";
+"JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)" -> "JS_NewAtom(JSContext *, const char *)";
+"JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)" -> "JS_DefineProperty(JSContext *, JSValue, JSAtom, JSValue, JSValue, JSValue, int)";
+"JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)" -> "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "get_proto_obj(JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "find_hashed_shape_proto(JSRuntime *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "__builtin_expect(long, long)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_dup_shape(JSShape *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_new_shape(JSContext *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+"JS_SetObjectData(JSContext *, JSValue, JSValue)";
+"JS_SetObjectData(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_SetObjectData(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_SetObjectData(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_AtomToString(JSContext *, JSAtom)";
+"JS_AtomToString(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"js_random_init(JSContext *)";
+"js_random_init(JSContext *)" -> "gettimeofday(struct timeval *restrict, void *restrict)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"JS_AtomGetStr(JSContext *, char *, int, JSAtom)" -> "JS_AtomGetStrRT(JSRuntime *, char *, int, JSAtom)";
+"JS_AtomToValue(JSContext *, JSAtom)";
+"JS_AtomToValue(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)";
+"JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_SetConstructor2(JSContext *, JSValue, JSValue, int, int)" -> "set_cycle_flag(JSContext *, JSValue)";
+"JS_AddIntrinsicBigInt(JSContext *)";
+"JS_AddIntrinsicBigInt(JSContext *)" -> "JS_NewObject(JSContext *)";
+"JS_AddIntrinsicBigInt(JSContext *)" -> "JS_SetPropertyFunctionList(JSContext *, JSValue, const JSCFunctionListEntry *, int)";
+"JS_AddIntrinsicBigInt(JSContext *)" -> "JS_NewGlobalCConstructor(JSContext *, const char *, JSCFunction *, int, JSValue)";
+}

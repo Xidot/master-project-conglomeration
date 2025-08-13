@@ -1,0 +1,49 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-string_buffer_widen(StringBuffer *, int)
+-------------------------
+Here are the potential logical bugs in the target function "string_buffer_widen":
+
+:string_buffer_widen:3525
+:string_buffer_widen:3530
+:string_buffer_widen:3533
+
+---
+
+1. :string_buffer_widen:3525 - The function doesn't check if `size` is valid (non-negative) before proceeding with the operation. A negative size could lead to incorrect memory allocation.
+
+2. :string_buffer_widen:3530 - The slack calculation assumes the allocation was successful, but doesn't verify if the new size (after adding slack) would exceed JS_STRING_LEN_MAX.
+
+3. :string_buffer_widen:3533 - The loop copies from str8 to str16 but doesn't verify if the source string (str8) actually exists or if the length is valid before copying.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3522,6 +3522,9 @@
+     int i;
+ 
+     if (s->error_status)
++        return -1;
++
++    if (size < 0)
+         return -1;
+ 
+     str = js_realloc2(s->ctx, s->str, sizeof(JSString) + (size << 1), &slack);
+@@ -3529,6 +3532,9 @@
+         return string_buffer_set_error(s);
+     size += slack >> 1;
+     for(i = s->len; i-- > 0;) {
++        if (i >= s->len || i < 0) {
++            funlogline();
++        }
+         str->u.str16[i] = str->u.str8[i];
+     }
+     s->is_wide_char = 1;
+```
+
+The modifications add:
+1. A check for negative size
+2. A bounds check in the copy loop
+3. (Note: The slack size check against JS_STRING_LEN_MAX would require more context about valid size ranges, so it wasn't added)

@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16243,6 +16243,9 @@
+     JSValue *pvalue;
+ 
+     if (is_arg)
++        if (var_idx < 0) {
++            funlogline();
++        }
+         pvalue = &sf->arg_buf[var_idx];
+     else
+         pvalue = &sf->var_buf[var_idx];
+@@ -16288,6 +16291,9 @@
+            the advantage of allowing the release of unused stack
+            frames in a cycle. */
+         var_ref->async_func = container_of(sf, JSAsyncFunctionState, frame);
++        if (!var_ref->async_func) {
++            funlogline();
++        }
+         var_ref->async_func->header.ref_count++;
+     } else {
+         var_ref->async_func = NULL;

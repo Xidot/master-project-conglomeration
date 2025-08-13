@@ -1,0 +1,492 @@
+Target function: "free_property(JSRuntime *, JSProperty *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 524
+typedef void JSClassFinalizer(JSRuntime *rt, JSValue val)
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 522
+typedef struct JSClassExoticMethods {
+    /* Return -1 if exception (can only happen in case of Proxy object),
+       FALSE if the property does not exists, TRUE if it exists. If 1 is
+       returned, the property descriptor 'desc' is filled if != NULL. */
+    int (*get_own_property)(JSContext *ctx, JSPropertyDescriptor *desc,
+                             JSValueConst obj, JSAtom prop);
+    /* '*ptab' should hold the '*plen' property keys. Return 0 if OK,
+       -1 if exception. The 'is_enumerable' field is ignored.
+    */
+    int (*get_own_property_names)(JSContext *ctx, JSPropertyEnum **ptab,
+                                  uint32_t *plen,
+                                  JSValueConst obj);
+    /* return < 0 if exception, or TRUE/FALSE */
+    int (*delete_property)(JSContext *ctx, JSValueConst obj, JSAtom prop);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*define_own_property)(JSContext *ctx, JSValueConst this_obj,
+                               JSAtom prop, JSValueConst val,
+                               JSValueConst getter, JSValueConst setter,
+                               int flags);
+    /* The following methods can be emulated with the previous ones,
+       so they are usually not needed */
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*has_property)(JSContext *ctx, JSValueConst obj, JSAtom atom);
+    JSValue (*get_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
+                            JSValueConst receiver);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*set_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
+                        JSValueConst value, JSValueConst receiver, int flags);
+
+    /* To get a consistent object behavior when get_prototype != NULL,
+       get_property, set_property and set_prototype must be != NULL
+       and the object must be created with a JS_NULL prototype. */
+    JSValue (*get_prototype)(JSContext *ctx, JSValueConst obj);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*set_prototype)(JSContext *ctx, JSValueConst obj, JSValueConst proto_val);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*is_extensible)(JSContext *ctx, JSValueConst obj);
+    /* return < 0 if exception or TRUE/FALSE */
+    int (*prevent_extensions)(JSContext *ctx, JSValueConst obj);
+} JSClassExoticMethods
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 882
+typedef struct JSProperty {
+    union {
+        JSValue value;      /* JS_PROP_NORMAL */
+        struct {            /* JS_PROP_GETSET */
+            JSObject *getter; /* NULL if undefined */
+            JSObject *setter; /* NULL if undefined */
+        } getset;
+        JSVarRef *var_ref;  /* JS_PROP_VARREF */
+        struct {            /* JS_PROP_AUTOINIT */
+            /* in order to use only 2 pointers, we compress the realm
+               and the init function pointer */
+            uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
+                                       in the 2 low bits */
+            void *opaque;
+        } init;
+    } u;
+} JSProperty
+
+/// Line number here: 5496
+static void free_property(JSRuntime *rt, JSProperty *pr, int prop_flags)
+{
+    if (unlikely(prop_flags & JS_PROP_TMASK)) {
+        if ((prop_flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+            if (pr->u.getset.getter)
+                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
+            if (pr->u.getset.setter)
+                JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+        } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
+            free_var_ref(rt, pr->u.var_ref);
+        } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
+            js_autoinit_free(rt, pr);
+        }
+    } else {
+        JS_FreeValueRT(rt, pr->u.value);
+    }
+}
+
+/// Line number here: 387
+typedef struct JSVarRef {
+    union {
+        JSGCObjectHeader header; /* must come first */
+        struct {
+            int __gc_ref_count; /* corresponds to header.ref_count */
+            uint8_t __gc_mark; /* corresponds to header.mark/gc_obj_type */
+            uint8_t is_detached;
+        };
+    };
+    JSValue *pvalue; /* pointer to the value, either on the stack or
+                        to 'value' */
+    union {
+        JSValue value; /* used when is_detached = TRUE */
+        struct {
+            struct list_head var_ref_link; /* JSStackFrame.var_ref_list list */
+            struct JSAsyncFunctionState *async_func; /* != NULL if async stack frame */
+        }; /* used when is_detached = FALSE */
+    };
+} JSVarRef
+
+/// Line number here: 5563
+static void free_var_ref(JSRuntime *rt, JSVarRef *var_ref)
+{
+    if (var_ref) {
+        assert(var_ref->header.ref_count > 0);
+        if (--var_ref->header.ref_count == 0) {
+            if (var_ref->is_detached) {
+                JS_FreeValueRT(rt, var_ref->value);
+            } else {
+                list_del(&var_ref->var_ref_link); /* still on the stack */
+                if (var_ref->async_func)
+                    async_func_free(rt, var_ref->async_func);
+            }
+            remove_gc_object(&var_ref->header);
+            js_free_rt(rt, var_ref);
+        }
+    }
+}
+
+/// Line number here: 5485
+static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
+{
+    JS_FreeContext(js_autoinit_get_realm(pr));
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 5735
+static void free_object(JSRuntime *rt, JSObject *p)
+{
+    int i;
+    JSClassFinalizer *finalizer;
+    JSShape *sh;
+    JSShapeProperty *pr;
+
+    p->free_mark = 1; /* used to tell the object is invalid when
+                         freeing cycles */
+    /* free all the fields */
+    sh = p->shape;
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        free_property(rt, &p->prop[i], pr->flags);
+        pr++;
+    }
+    js_free_rt(rt, p->prop);
+    /* as an optimization we destroy the shape immediately without
+       putting it in gc_zero_ref_count_list */
+    js_free_shape(rt, sh);
+
+    /* fail safe */
+    p->shape = NULL;
+    p->prop = NULL;
+
+    finalizer = rt->class_array[p->class_id].finalizer;
+    if (finalizer)
+        (*finalizer)(rt, JS_MKPTR(JS_TAG_OBJECT, p));
+
+    /* fail safe */
+    p->class_id = 0;
+    p->u.opaque = NULL;
+    p->u.func.var_refs = NULL;
+    p->u.func.home_object = NULL;
+
+    remove_gc_object(&p->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES) {
+        if (p->header.ref_count == 0 && p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            /* keep the object structure because there are may be
+               references to it */
+            list_add_tail(&p->header.link, &rt->gc_zero_ref_count_list);
+        }
+    } else {
+        /* keep the object structure in case there are weak references to it */
+        if (p->weakref_count == 0) {
+            js_free_rt(rt, p);
+        } else {
+            p->header.mark = 0; /* reset the mark so that the weakref can be freed */
+        }
+    }
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 8581
+static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
+{
+    JSShape *sh;
+    JSShapeProperty *pr, *lpr, *prop;
+    JSProperty *pr1;
+    uint32_t lpr_idx;
+    intptr_t h, h1;
+
+ redo:
+    sh = p->shape;
+    h1 = atom & sh->prop_hash_mask;
+    h = prop_hash_end(sh)[-h1 - 1];
+    prop = get_shape_prop(sh);
+    lpr = NULL;
+    lpr_idx = 0;   /* prevent warning */
+    while (h != 0) {
+        pr = &prop[h - 1];
+        if (likely(pr->atom == atom)) {
+            /* found ! */
+            if (!(pr->flags & JS_PROP_CONFIGURABLE))
+                return FALSE;
+            /* realloc the shape if needed */
+            if (lpr)
+                lpr_idx = lpr - get_shape_prop(sh);
+            if (js_shape_prepare_update(ctx, p, &pr))
+                return -1;
+            sh = p->shape;
+            /* remove property */
+            if (lpr) {
+                lpr = get_shape_prop(sh) + lpr_idx;
+                lpr->hash_next = pr->hash_next;
+            } else {
+                prop_hash_end(sh)[-h1 - 1] = pr->hash_next;
+            }
+            sh->deleted_prop_count++;
+            /* free the entry */
+            pr1 = &p->prop[h - 1];
+            free_property(ctx->rt, pr1, pr->flags);
+            JS_FreeAtom(ctx, pr->atom);
+            /* put default values */
+            pr->flags = 0;
+            pr->atom = JS_ATOM_NULL;
+            pr1->u.value = JS_UNDEFINED;
+
+            /* compact the properties if too many deleted properties */
+            if (sh->deleted_prop_count >= 8 &&
+                sh->deleted_prop_count >= ((unsigned)sh->prop_count / 2)) {
+                compact_properties(ctx, p);
+            }
+            return TRUE;
+        }
+        lpr = pr;
+        h = pr->hash_next;
+    }
+
+    if (p->is_exotic) {
+        if (p->fast_array) {
+            uint32_t idx;
+            if (JS_AtomIsArrayIndex(ctx, &idx, atom) &&
+                idx < p->u.array.count) {
+                if (p->class_id == JS_CLASS_ARRAY ||
+                    p->class_id == JS_CLASS_ARGUMENTS) {
+                    /* Special case deleting the last element of a fast Array */
+                    if (idx == p->u.array.count - 1) {
+                        JS_FreeValue(ctx, p->u.array.u.values[idx]);
+                        p->u.array.count = idx;
+                        return TRUE;
+                    }
+                    if (convert_fast_array_to_array(ctx, p))
+                        return -1;
+                    goto redo;
+                } else {
+                    return FALSE;
+                }
+            }
+        } else {
+            const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+            if (em && em->delete_property) {
+                return em->delete_property(ctx, JS_MKPTR(JS_TAG_OBJECT, p), atom);
+            }
+        }
+    }
+    /* not found */
+    return TRUE;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 75
+typedef long int		intptr_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"free_property(JSRuntime *, JSProperty *, int)";
+"free_property(JSRuntime *, JSProperty *, int)" -> "__builtin_expect(long, long)";
+"free_property(JSRuntime *, JSProperty *, int)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"free_property(JSRuntime *, JSProperty *, int)" -> "free_var_ref(JSRuntime *, JSVarRef *)";
+"free_property(JSRuntime *, JSProperty *, int)" -> "js_autoinit_free(JSRuntime *, JSProperty *)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"free_var_ref(JSRuntime *, JSVarRef *)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "list_del(struct list_head *)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"free_var_ref(JSRuntime *, JSVarRef *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_autoinit_free(JSRuntime *, JSProperty *)";
+"js_autoinit_free(JSRuntime *, JSProperty *)" -> "JS_FreeContext(JSContext *)";
+"js_autoinit_free(JSRuntime *, JSProperty *)" -> "js_autoinit_get_realm(JSProperty *)";
+"free_object(JSRuntime *, JSObject *)";
+"free_object(JSRuntime *, JSObject *)" -> "get_shape_prop(JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "free_property(JSRuntime *, JSProperty *, int)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_rt(JSRuntime *, void *)";
+"free_object(JSRuntime *, JSObject *)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"free_object(JSRuntime *, JSObject *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"free_object(JSRuntime *, JSObject *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"delete_property(JSContext *, JSObject *, JSAtom)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "prop_hash_end(JSShape *)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "get_shape_prop(JSShape *)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "__builtin_expect(long, long)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "free_property(JSRuntime *, JSProperty *, int)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "JS_FreeAtom(JSContext *, JSAtom)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "compact_properties(JSContext *, JSObject *)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "JS_AtomIsArrayIndex(JSContext *, uint32_t *, JSAtom)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "JS_FreeValue(JSContext *, JSValue)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "convert_fast_array_to_array(JSContext *, JSObject *)";
+"delete_property(JSContext *, JSObject *, JSAtom)" -> "JSClassExoticMethods::delete_property";
+}

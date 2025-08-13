@@ -1,0 +1,18 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5356,6 +5356,7 @@
+     func_obj = JS_NewObjectProtoClass(ctx, proto_val, JS_CLASS_C_FUNCTION);
+     if (JS_IsException(func_obj))
+         return func_obj;
++    if (!func) funlogline();
+     p = JS_VALUE_GET_OBJ(func_obj);
+     p->u.cfunc.realm = JS_DupContext(ctx);
+     p->u.cfunc.c_function.generic = func;
+@@ -5365,6 +5366,7 @@
+     p->is_constructor = (cproto == JS_CFUNC_constructor ||
+                          cproto == JS_CFUNC_constructor_magic ||
+                          cproto == JS_CFUNC_constructor_or_func ||
++                         (cproto < 0 || cproto > JS_CFUNC_iterator_next) ? funlogline(), 0 :
+                          cproto == JS_CFUNC_constructor_or_func_magic);
+     if (!name)
+         name = "";

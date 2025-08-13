@@ -1,0 +1,26 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -55533,6 +55533,7 @@
+ void JS_AddIntrinsicTypedArrays(JSContext *ctx)
+ {
+     JSValue typed_array_base_proto, typed_array_base_func;
++    if (ctx == NULL) funlogline();
+     JSValueConst array_buffer_func, shared_array_buffer_func;
+     int i;
+ 
+@@ -55562,6 +55563,7 @@
+                                countof(js_shared_array_buffer_funcs));
+ 
+     typed_array_base_proto = JS_NewObject(ctx);
++    if (JS_IsException(typed_array_base_proto)) funlogline();
+     JS_SetPropertyFunctionList(ctx, typed_array_base_proto,
+                                js_typed_array_base_proto_funcs,
+                                countof(js_typed_array_base_proto_funcs));
+@@ -55589,6 +55591,7 @@
+         const char *name;
+ 
+         ctx->class_proto[i] = JS_NewObjectProto(ctx, typed_array_base_proto);
++        if (JS_IsException(ctx->class_proto[i])) funlogline();
+         JS_DefinePropertyValueStr(ctx, ctx->class_proto[i],
+                                   "BYTES_PER_ELEMENT",
+                                   JS_NewInt32(ctx, 1 << typed_array_size_log2(i)),

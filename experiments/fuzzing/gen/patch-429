@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28436,6 +28436,9 @@
+ JSModuleDef *JS_NewCModule(JSContext *ctx, const char *name_str,
+                            JSModuleInitFunc *func)
+ {
++    if (func == NULL) {
++        funlogline();
++    }
+     JSModuleDef *m;
+     JSAtom name;
+     name = JS_NewAtom(ctx, name_str);
+@@ -28444,6 +28447,9 @@
+     m = js_new_module_def(ctx, name);
+     if (!m)
+         return NULL;
++    if (m->init_func != NULL) {
++        funlogline();
++    }
+     m->init_func = func;
+     return m;
+ }

@@ -1,0 +1,58 @@
+Target function: "floor_div(int64_t, int64_t)"
+
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 50916
+static int64_t floor_div(int64_t a, int64_t b) {
+    /* integer division rounding toward -Infinity */
+    int64_t m = a % b;
+    return (a - (m + (m < 0) * b)) / b;
+}
+
+/// Line number here: 50949
+static int64_t days_from_year(int64_t y) {
+    return 365 * (y - 1970) + floor_div(y - 1969, 4) -
+        floor_div(y - 1901, 100) + floor_div(y - 1601, 400);
+}
+
+/* return the year, update days */
+/// Line number here: 50959
+static int64_t year_from_days(int64_t *days) {
+    int64_t y, d1, nd, d = *days;
+    y = floor_div(d * 10000, 3652425) + 1970;
+    /* the initial approximation is very good, so only a few
+       iterations are necessary */
+    for(;;) {
+        d1 = d - days_from_year(y);
+        if (d1 < 0) {
+            y--;
+            d1 += days_in_year(y);
+        } else {
+            nd = days_in_year(y);
+            if (d1 < nd)
+                break;
+            d1 -= nd;
+            y++;
+        }
+    }
+    *days = d1;
+    return y;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"days_from_year(int64_t)";
+"days_from_year(int64_t)" -> "floor_div(int64_t, int64_t)";
+"year_from_days(int64_t *)";
+"year_from_days(int64_t *)" -> "floor_div(int64_t, int64_t)";
+"year_from_days(int64_t *)" -> "days_from_year(int64_t)";
+"year_from_days(int64_t *)" -> "days_in_year(int64_t)";
+}

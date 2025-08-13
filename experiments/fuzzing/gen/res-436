@@ -1,0 +1,43 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewGlobalCConstructorOnly(JSContext *, const char *, JSCFunction *, int, JSValue)
+-------------------------
+Based on the provided code and call graph, I'll analyze the target function `JS_NewGlobalCConstructorOnly` for logical bugs.
+
+Potential logical bug locations:
+
+1. :JS_NewGlobalCConstructorOnly:38260
+2. :JS_NewGlobalCConstructorOnly:38263
+
+---
+
+Here's the analysis:
+
+1. The function creates a constructor function but doesn't check if the input `func` pointer is NULL before using it in `JS_NewCFunction2`.
+
+2. The function returns `func_obj` after calling `JS_NewGlobalCConstructor2` which frees `func_obj`, potentially returning a freed value.
+
+Here's the diff to instrument these potential bugs:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -38260,6 +38260,9 @@ static JSValueConst JS_NewGlobalCConstructorOnly(JSContext *ctx, const char *nam
+                                                  JSCFunction *func, int length,
+                                                  JSValueConst proto)
+ {
++    if (func == NULL) {
++        funlogline();
++    }
+     JSValue func_obj;
+     func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor, 0);
+     JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
+@@ -38263,6 +38263,9 @@ static JSValueConst JS_NewGlobalCConstructorOnly(JSContext *ctx, const char *nam
+     func_obj = JS_NewCFunction2(ctx, func, name, length, JS_CFUNC_constructor, 0);
+     JS_NewGlobalCConstructor2(ctx, func_obj, name, proto);
++    if (JS_VALUE_GET_TAG(func_obj) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     return func_obj;
+ }
+```

@@ -1,0 +1,1216 @@
+Target function: "js_resize_array(JSContext *, void **, int, int *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* resize the array and update its size if req_size > *psize */
+/// Line number here: 1458
+static inline int js_resize_array(JSContext *ctx, void **parray, int elem_size,
+                                  int *psize, int req_size)
+{
+    if (unlikely(req_size > *psize))
+        return js_realloc_array(ctx, parray, elem_size, psize, req_size);
+    else
+        return 0;
+}
+
+/// Line number here: 1440
+static no_inline int js_realloc_array(JSContext *ctx, void **parray,
+                                      int elem_size, int *psize, int req_size)
+{
+    int new_size;
+    size_t slack;
+    void *new_array;
+    /* XXX: potential arithmetic overflow */
+    new_size = max_int(req_size, *psize * 3 / 2);
+    new_array = js_realloc2(ctx, *parray, new_size * elem_size, &slack);
+    if (!new_array)
+        return -1;
+    new_size += slack / elem_size;
+    *psize = new_size;
+    *parray = new_array;
+    return 0;
+}
+
+/// Line number here: 20741
+typedef struct JSFunctionDef {
+    JSContext *ctx;
+    struct JSFunctionDef *parent;
+    int parent_cpool_idx; /* index in the constant pool of the parent
+                             or -1 if none */
+    int parent_scope_level; /* scope level in parent at point of definition */
+    struct list_head child_list; /* list of JSFunctionDef.link */
+    struct list_head link;
+
+    BOOL is_eval; /* TRUE if eval code */
+    int eval_type; /* only valid if is_eval = TRUE */
+    BOOL is_global_var; /* TRUE if variables are not defined locally:
+                           eval global, eval module or non strict eval */
+    BOOL is_func_expr; /* TRUE if function expression */
+    BOOL has_home_object; /* TRUE if the home object is available */
+    BOOL has_prototype; /* true if a prototype field is necessary */
+    BOOL has_simple_parameter_list;
+    BOOL has_parameter_expressions; /* if true, an argument scope is created */
+    BOOL has_use_strict; /* to reject directive in special cases */
+    BOOL has_eval_call; /* true if the function contains a call to eval() */
+    BOOL has_arguments_binding; /* true if the 'arguments' binding is
+                                   available in the function */
+    BOOL has_this_binding; /* true if the 'this' and new.target binding are
+                              available in the function */
+    BOOL new_target_allowed; /* true if the 'new.target' does not
+                                throw a syntax error */
+    BOOL super_call_allowed; /* true if super() is allowed */
+    BOOL super_allowed; /* true if super. or super[] is allowed */
+    BOOL arguments_allowed; /* true if the 'arguments' identifier is allowed */
+    BOOL is_derived_class_constructor;
+    BOOL in_function_body;
+    JSFunctionKindEnum func_kind : 8;
+    JSParseFunctionEnum func_type : 8;
+    uint8_t js_mode; /* bitmap of JS_MODE_x */
+    JSAtom func_name; /* JS_ATOM_NULL if no name */
+
+    JSVarDef *vars;
+    int var_size; /* allocated size for vars[] */
+    int var_count;
+    JSVarDef *args;
+    int arg_size; /* allocated size for args[] */
+    int arg_count; /* number of arguments */
+    int defined_arg_count;
+    int var_object_idx; /* -1 if none */
+    int arg_var_object_idx; /* -1 if none (var object for the argument scope) */
+    int arguments_var_idx; /* -1 if none */
+    int arguments_arg_idx; /* argument variable definition in argument scope,
+                              -1 if none */
+    int func_var_idx; /* variable containing the current function (-1
+                         if none, only used if is_func_expr is true) */
+    int eval_ret_idx; /* variable containing the return value of the eval, -1 if none */
+    int this_var_idx; /* variable containg the 'this' value, -1 if none */
+    int new_target_var_idx; /* variable containg the 'new.target' value, -1 if none */
+    int this_active_func_var_idx; /* variable containg the 'this.active_func' value, -1 if none */
+    int home_object_var_idx;
+    BOOL need_home_object;
+
+    int scope_level;    /* index into fd->scopes if the current lexical scope */
+    int scope_first;    /* index into vd->vars of first lexically scoped variable */
+    int scope_size;     /* allocated size of fd->scopes array */
+    int scope_count;    /* number of entries used in the fd->scopes array */
+    JSVarScope *scopes;
+    JSVarScope def_scope_array[4];
+    int body_scope; /* scope of the body of the function or eval */
+
+    int global_var_count;
+    int global_var_size;
+    JSGlobalVar *global_vars;
+
+    DynBuf byte_code;
+    int last_opcode_pos; /* -1 if no last opcode */
+    const uint8_t *last_opcode_source_ptr;
+    BOOL use_short_opcodes; /* true if short opcodes are used in byte_code */
+
+    LabelSlot *label_slots;
+    int label_size; /* allocated size for label_slots[] */
+    int label_count;
+    BlockEnv *top_break; /* break/continue label stack */
+
+    /* constant pool (strings, functions, numbers) */
+    JSValue *cpool;
+    int cpool_count;
+    int cpool_size;
+
+    /* list of variables in the closure */
+    int closure_var_count;
+    int closure_var_size;
+    JSClosureVar *closure_var;
+
+    JumpSlot *jump_slots;
+    int jump_size;
+    int jump_count;
+
+    LineNumberSlot *line_number_slots;
+    int line_number_size;
+    int line_number_count;
+    int line_number_last;
+    int line_number_last_pc;
+
+    /* pc2line table */
+    BOOL strip_debug : 1; /* strip all debug info (implies strip_source = TRUE) */
+    BOOL strip_source : 1; /* strip only source code */
+    JSAtom filename;
+    uint32_t source_pos; /* pointer in the eval() source */
+    GetLineColCache *get_line_col_cache; /* XXX: could remove to save memory */
+    DynBuf pc2line;
+
+    char *source;  /* raw source, utf-8 encoded */
+    int source_len;
+
+    JSModuleDef *module; /* != NULL when parsing a module */
+    BOOL has_await; /* TRUE if await is used (used in module eval) */
+} JSFunctionDef
+
+/// Line number here: 20595
+typedef struct LabelSlot {
+    int ref_count;
+    int pos;    /* phase 1 address, -1 means not resolved yet */
+    int pos2;   /* phase 2 address, -1 means not resolved yet */
+    int addr;   /* phase 3 address, -1 means not resolved yet */
+    RelocEntry *first_reloc;
+} LabelSlot
+
+/// Line number here: 22525
+static int new_label_fd(JSFunctionDef *fd)
+{
+    int label;
+    LabelSlot *ls;
+
+    if (js_resize_array(fd->ctx, (void *)&fd->label_slots,
+                        sizeof(fd->label_slots[0]),
+                        &fd->label_size, fd->label_count + 1))
+        return -1;
+    label = fd->label_count++;
+    ls = &fd->label_slots[label];
+    ls->ref_count = 0;
+    ls->pos = -1;
+    ls->pos2 = -1;
+    ls->addr = -1;
+    ls->first_reloc = NULL;
+    return label;
+}
+
+/// Line number here: 20782
+typedef struct JSParseState {
+    JSContext *ctx;
+    const char *filename;
+    JSToken token;
+    BOOL got_lf; /* true if got line feed before the current token */
+    const uint8_t *last_ptr;
+    const uint8_t *buf_start;
+    const uint8_t *buf_ptr;
+    const uint8_t *buf_end;
+
+    /* current function code */
+    JSFunctionDef *cur_func;
+    BOOL is_module; /* parsing a module */
+    BOOL allow_html_comments;
+    BOOL ext_json; /* true if accepting JSON superset */
+    GetLineColCache get_line_col_cache;
+} JSParseState
+
+/* return the constant pool index. 'val' is not duplicated. */
+/// Line number here: 22593
+static int cpool_add(JSParseState *s, JSValue val)
+{
+    JSFunctionDef *fd = s->cur_func;
+
+    if (js_resize_array(s->ctx, (void *)&fd->cpool, sizeof(fd->cpool[0]),
+                        &fd->cpool_size, fd->cpool_count + 1))
+        return -1;
+    fd->cpool[fd->cpool_count++] = val;
+    return fd->cpool_count - 1;
+}
+
+/* XXX: could use a different structure in bytecode functions to save
+   memory */
+/// Line number here: 597
+typedef struct JSVarDef {
+    JSAtom var_name;
+    /* index into fd->scopes of this variable lexical scope */
+    int scope_level;
+    /* during compilation:
+        - if scope_level = 0: scope in which the variable is defined
+        - if scope_level != 0: index into fd->vars of the next
+          variable in the same or enclosing lexical scope
+       in a bytecode function:
+       index into fd->vars of the next
+       variable in the same or enclosing lexical scope
+    */
+    int scope_next;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t is_captured : 1;
+    uint8_t is_static_private : 1; /* only used during private class field parsing */
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* only used during compilation: function pool index for lexical
+       variables with var_kind =
+       JS_VAR_FUNCTION_DECL/JS_VAR_NEW_FUNCTION_DECL or scope level of
+       the definition of the 'var' variables (they have scope_level =
+       0) */
+    int func_pool_idx : 24; /* only used during compilation : index in
+                               the constant pool for hoisted function
+                               definition */
+} JSVarDef
+
+/* return the variable index or -1 if error */
+/// Line number here: 22804
+static int add_var(JSContext *ctx, JSFunctionDef *fd, JSAtom name)
+{
+    JSVarDef *vd;
+
+    /* the local variable indexes are currently stored on 16 bits */
+    if (fd->var_count >= JS_MAX_LOCAL_VARS) {
+        JS_ThrowInternalError(ctx, "too many local variables");
+        return -1;
+    }
+    if (js_resize_array(ctx, (void **)&fd->vars, sizeof(fd->vars[0]),
+                        &fd->var_size, fd->var_count + 1))
+        return -1;
+    vd = &fd->vars[fd->var_count++];
+    memset(vd, 0, sizeof(*vd));
+    vd->var_name = JS_DupAtom(ctx, name);
+    vd->func_pool_idx = -1;
+    return fd->var_count - 1;
+}
+
+/// Line number here: 22884
+static int add_arg(JSContext *ctx, JSFunctionDef *fd, JSAtom name)
+{
+    JSVarDef *vd;
+
+    /* the local variable indexes are currently stored on 16 bits */
+    if (fd->arg_count >= JS_MAX_LOCAL_VARS) {
+        JS_ThrowInternalError(ctx, "too many arguments");
+        return -1;
+    }
+    if (js_resize_array(ctx, (void **)&fd->args, sizeof(fd->args[0]),
+                        &fd->arg_size, fd->arg_count + 1))
+        return -1;
+    vd = &fd->args[fd->arg_count++];
+    memset(vd, 0, sizeof(*vd));
+    vd->var_name = JS_DupAtom(ctx, name);
+    vd->func_pool_idx = -1;
+    return fd->arg_count - 1;
+}
+
+/// Line number here: 20574
+typedef struct JSGlobalVar {
+    int cpool_idx; /* if >= 0, index in the constant pool for hoisted
+                      function defintion*/
+    uint8_t force_init : 1; /* force initialization to undefined */
+    uint8_t is_lexical : 1; /* global let/const definition */
+    uint8_t is_const   : 1; /* const definition */
+    int scope_level;    /* scope of definition */
+    JSAtom var_name;  /* variable name */
+} JSGlobalVar
+
+/* add a global variable definition */
+/// Line number here: 22904
+static JSGlobalVar *add_global_var(JSContext *ctx, JSFunctionDef *s,
+                                     JSAtom name)
+{
+    JSGlobalVar *hf;
+
+    if (js_resize_array(ctx, (void **)&s->global_vars,
+                        sizeof(s->global_vars[0]),
+                        &s->global_var_size, s->global_var_count + 1))
+        return NULL;
+    hf = &s->global_vars[s->global_var_count++];
+    hf->cpool_idx = -1;
+    hf->force_init = FALSE;
+    hf->is_lexical = FALSE;
+    hf->is_const = FALSE;
+    hf->scope_level = s->scope_level;
+    hf->var_name = JS_DupAtom(ctx, name);
+    return hf;
+}
+
+/// Line number here: 766
+typedef struct JSReqModuleEntry {
+    JSAtom module_name;
+    JSModuleDef *module; /* used using resolution */
+    JSValue attributes; /* JS_UNDEFINED or an object contains the attributes as key/value */
+} JSReqModuleEntry
+
+/// Line number here: 28351
+static int add_req_module_entry(JSContext *ctx, JSModuleDef *m,
+                                JSAtom module_name)
+{
+    JSReqModuleEntry *rme;
+
+    if (js_resize_array(ctx, (void **)&m->req_module_entries,
+                        sizeof(JSReqModuleEntry),
+                        &m->req_module_entries_size,
+                        m->req_module_entries_count + 1))
+        return -1;
+    rme = &m->req_module_entries[m->req_module_entries_count++];
+    rme->module_name = JS_DupAtom(ctx, module_name);
+    rme->module = NULL;
+    rme->attributes = JS_UNDEFINED;
+    return m->req_module_entries_count - 1;
+}
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 771
+typedef enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+} JSExportTypeEnum
+
+/// Line number here: 28381
+static JSExportEntry *add_export_entry2(JSContext *ctx,
+                                        JSParseState *s, JSModuleDef *m,
+                                       JSAtom local_name, JSAtom export_name,
+                                       JSExportTypeEnum export_type)
+{
+    JSExportEntry *me;
+
+    if (find_export_entry(ctx, m, export_name)) {
+        char buf1[ATOM_GET_STR_BUF_SIZE];
+        if (s) {
+            js_parse_error(s, "duplicate exported name '%s'",
+                           JS_AtomGetStr(ctx, buf1, sizeof(buf1), export_name));
+        } else {
+            JS_ThrowSyntaxErrorAtom(ctx, "duplicate exported name '%s'", export_name);
+        }
+        return NULL;
+    }
+
+    if (js_resize_array(ctx, (void **)&m->export_entries,
+                        sizeof(JSExportEntry),
+                        &m->export_entries_size,
+                        m->export_entries_count + 1))
+        return NULL;
+    me = &m->export_entries[m->export_entries_count++];
+    memset(me, 0, sizeof(*me));
+    me->local_name = JS_DupAtom(ctx, local_name);
+    me->export_name = JS_DupAtom(ctx, export_name);
+    me->export_type = export_type;
+    return me;
+}
+
+/// Line number here: 789
+typedef struct JSStarExportEntry {
+    int req_module_idx; /* in req_module_entries */
+} JSStarExportEntry
+
+/// Line number here: 28420
+static int add_star_export_entry(JSContext *ctx, JSModuleDef *m,
+                                 int req_module_idx)
+{
+    JSStarExportEntry *se;
+
+    if (js_resize_array(ctx, (void **)&m->star_export_entries,
+                        sizeof(JSStarExportEntry),
+                        &m->star_export_entries_size,
+                        m->star_export_entries_count + 1))
+        return -1;
+    se = &m->star_export_entries[m->star_export_entries_count++];
+    se->req_module_idx = req_module_idx;
+    return 0;
+}
+
+/// Line number here: 28679
+typedef struct JSResolveState {
+    JSResolveEntry *array;
+    int size;
+    int count;
+} JSResolveState
+
+/// Line number here: 28673
+typedef struct JSResolveEntry {
+    JSModuleDef *module;
+    JSAtom name;
+} JSResolveEntry
+
+/// Line number here: 28693
+static int add_resolve_entry(JSContext *ctx, JSResolveState *s,
+                             JSModuleDef *m, JSAtom name)
+{
+    JSResolveEntry *re;
+
+    if (js_resize_array(ctx, (void **)&s->array,
+                        sizeof(JSResolveEntry),
+                        &s->size, s->count + 1))
+        return -1;
+    re = &s->array[s->count++];
+    re->module = m;
+    re->name = JS_DupAtom(ctx, name);
+    return 0;
+}
+
+/// Line number here: 28868
+typedef struct GetExportNamesState {
+    JSModuleDef **modules;
+    int modules_size;
+    int modules_count;
+
+    ExportedNameEntry *exported_names;
+    int exported_names_size;
+    int exported_names_count;
+} GetExportNamesState
+
+/// Line number here: 28858
+typedef struct ExportedNameEntry {
+    JSAtom export_name;
+    ExportedNameEntryEnum export_type;
+    union {
+        JSExportEntry *me; /* using when the list is built */
+        JSVarRef *var_ref; /* EXPORTED_NAME_NORMAL */
+    } u;
+} ExportedNameEntry
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 28880
+static __exception int get_exported_names(JSContext *ctx,
+                                          GetExportNamesState *s,
+                                          JSModuleDef *m, BOOL from_star)
+{
+    ExportedNameEntry *en;
+    int i, j;
+
+    /* check circular reference */
+    for(i = 0; i < s->modules_count; i++) {
+        if (s->modules[i] == m)
+            return 0;
+    }
+    if (js_resize_array(ctx, (void **)&s->modules, sizeof(s->modules[0]),
+                        &s->modules_size, s->modules_count + 1))
+        return -1;
+    s->modules[s->modules_count++] = m;
+
+    for(i = 0; i < m->export_entries_count; i++) {
+        JSExportEntry *me = &m->export_entries[i];
+        if (from_star && me->export_name == JS_ATOM_default)
+            continue;
+        j = find_exported_name(s, me->export_name);
+        if (j < 0) {
+            if (js_resize_array(ctx, (void **)&s->exported_names, sizeof(s->exported_names[0]),
+                                &s->exported_names_size,
+                                s->exported_names_count + 1))
+                return -1;
+            en = &s->exported_names[s->exported_names_count++];
+            en->export_name = me->export_name;
+            /* avoid a second lookup for simple module exports */
+            if (from_star || me->export_type != JS_EXPORT_TYPE_LOCAL)
+                en->u.me = NULL;
+            else
+                en->u.me = me;
+        } else {
+            en = &s->exported_names[j];
+            en->u.me = NULL;
+        }
+    }
+    for(i = 0; i < m->star_export_entries_count; i++) {
+        JSStarExportEntry *se = &m->star_export_entries[i];
+        JSModuleDef *m1;
+        m1 = m->req_module_entries[se->req_module_idx].module;
+        if (get_exported_names(ctx, s, m1, TRUE))
+            return -1;
+    }
+    return 0;
+}
+
+/// Line number here: 29819
+typedef struct {
+    JSModuleDef **tab;
+    int count;
+    int size;
+} ExecModuleList
+
+/// Line number here: 798
+enum {
+    JS_MODULE_STATUS_UNLINKED,
+    JS_MODULE_STATUS_LINKING,
+    JS_MODULE_STATUS_LINKED,
+    JS_MODULE_STATUS_EVALUATING,
+    JS_MODULE_STATUS_EVALUATING_ASYNC,
+    JS_MODULE_STATUS_EVALUATED,
+}
+
+/// Line number here: 29832
+static int gather_available_ancestors(JSContext *ctx, JSModuleDef *module,
+                                      ExecModuleList *exec_list)
+{
+    int i;
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        return -1;
+    }
+    for(i = 0; i < module->async_parent_modules_count; i++) {
+        JSModuleDef *m = module->async_parent_modules[i];
+        if (!find_in_exec_module_list(exec_list, m) &&
+            !m->cycle_root->eval_has_exception) {
+            assert(m->status == JS_MODULE_STATUS_EVALUATING_ASYNC);
+            assert(!m->eval_has_exception);
+            assert(m->async_evaluation);
+            assert(m->pending_async_dependencies > 0);
+            m->pending_async_dependencies--;
+            if (m->pending_async_dependencies == 0) {
+                if (js_resize_array(ctx, (void **)&exec_list->tab, sizeof(exec_list->tab[0]), &exec_list->size, exec_list->count + 1)) {
+                    return -1;
+                }
+                exec_list->tab[exec_list->count++] = m;
+                if (!m->has_tla) {
+                    if (gather_available_ancestors(ctx, m, exec_list))
+                        return -1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* spec: InnerModuleEvaluation. Return (index, JS_UNDEFINED) or (-1,
+   exception) */
+/// Line number here: 30052
+static int js_inner_module_evaluation(JSContext *ctx, JSModuleDef *m,
+                                      int index, JSModuleDef **pstack_top,
+                                      JSValue *pvalue)
+{
+    JSModuleDef *m1;
+    int i;
+
+#ifdef DUMP_MODULE_EXEC
+    js_dump_module(ctx, __func__, m);
+#endif
+
+    if (js_check_stack_overflow(ctx->rt, 0)) {
+        JS_ThrowStackOverflow(ctx);
+        *pvalue = JS_GetException(ctx);
+        return -1;
+    }
+
+    if (m->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+        m->status == JS_MODULE_STATUS_EVALUATED) {
+        if (m->eval_has_exception) {
+            *pvalue = JS_DupValue(ctx, m->eval_exception);
+            return -1;
+        } else {
+            *pvalue = JS_UNDEFINED;
+            return index;
+        }
+    }
+    if (m->status == JS_MODULE_STATUS_EVALUATING) {
+        *pvalue = JS_UNDEFINED;
+        return index;
+    }
+    assert(m->status == JS_MODULE_STATUS_LINKED);
+
+    m->status = JS_MODULE_STATUS_EVALUATING;
+    m->dfs_index = index;
+    m->dfs_ancestor_index = index;
+    m->pending_async_dependencies = 0;
+    index++;
+    /* push 'm' on stack */
+    m->stack_prev = *pstack_top;
+    *pstack_top = m;
+
+    for(i = 0; i < m->req_module_entries_count; i++) {
+        JSReqModuleEntry *rme = &m->req_module_entries[i];
+        m1 = rme->module;
+        index = js_inner_module_evaluation(ctx, m1, index, pstack_top, pvalue);
+        if (index < 0)
+            return -1;
+        assert(m1->status == JS_MODULE_STATUS_EVALUATING ||
+               m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+               m1->status == JS_MODULE_STATUS_EVALUATED);
+        if (m1->status == JS_MODULE_STATUS_EVALUATING) {
+            m->dfs_ancestor_index = min_int(m->dfs_ancestor_index,
+                                            m1->dfs_ancestor_index);
+        } else {
+            m1 = m1->cycle_root;
+            assert(m1->status == JS_MODULE_STATUS_EVALUATING_ASYNC ||
+                   m1->status == JS_MODULE_STATUS_EVALUATED);
+            if (m1->eval_has_exception) {
+                *pvalue = JS_DupValue(ctx, m1->eval_exception);
+                return -1;
+            }
+        }
+        if (m1->async_evaluation) {
+            m->pending_async_dependencies++;
+            if (js_resize_array(ctx, (void **)&m1->async_parent_modules, sizeof(m1->async_parent_modules[0]), &m1->async_parent_modules_size, m1->async_parent_modules_count + 1)) {
+                *pvalue = JS_GetException(ctx);
+                return -1;
+            }
+            m1->async_parent_modules[m1->async_parent_modules_count++] = m;
+        }
+    }
+
+    if (m->pending_async_dependencies > 0) {
+        assert(!m->async_evaluation);
+        m->async_evaluation = TRUE;
+        m->async_evaluation_timestamp =
+            ctx->rt->module_async_evaluation_next_timestamp++;
+    } else if (m->has_tla) {
+        assert(!m->async_evaluation);
+        m->async_evaluation = TRUE;
+        m->async_evaluation_timestamp =
+            ctx->rt->module_async_evaluation_next_timestamp++;
+        js_execute_async_module(ctx, m);
+    } else {
+        if (js_execute_sync_module(ctx, m, pvalue) < 0)
+            return -1;
+    }
+
+    assert(m->dfs_ancestor_index <= m->dfs_index);
+    if (m->dfs_index == m->dfs_ancestor_index) {
+        for(;;) {
+            /* pop m1 from stack */
+            m1 = *pstack_top;
+            *pstack_top = m1->stack_prev;
+            if (!m1->async_evaluation) {
+                m1->status = JS_MODULE_STATUS_EVALUATED;
+            } else {
+                m1->status = JS_MODULE_STATUS_EVALUATING_ASYNC;
+            }
+            /* spec bug: cycle_root must be assigned before the test */
+            m1->cycle_root = m;
+            if (m1 == m)
+                break;
+        }
+    }
+    *pvalue = JS_UNDEFINED;
+    return index;
+}
+
+/// Line number here: 796
+typedef struct JSImportEntry {
+    int var_idx; /* closure variable index */
+    BOOL is_star; /* import_name = '*' is a valid import name, so need a flag */
+    JSAtom import_name;
+    int req_module_idx; /* in req_module_entries */
+} JSImportEntry
+
+/// Line number here: 30493
+static int add_import(JSParseState *s, JSModuleDef *m,
+                      JSAtom local_name, JSAtom import_name, BOOL is_star)
+{
+    JSContext *ctx = s->ctx;
+    int i, var_idx;
+    JSImportEntry *mi;
+
+    if (local_name == JS_ATOM_arguments || local_name == JS_ATOM_eval)
+        return js_parse_error(s, "invalid import binding");
+
+    if (local_name != JS_ATOM_default) {
+        for (i = 0; i < s->cur_func->closure_var_count; i++) {
+            if (s->cur_func->closure_var[i].var_name == local_name)
+                return js_parse_error(s, "duplicate import binding");
+        }
+    }
+
+    var_idx = add_closure_var(ctx, s->cur_func, is_star, FALSE,
+                              m->import_entries_count,
+                              local_name, TRUE, TRUE, FALSE);
+    if (var_idx < 0)
+        return -1;
+    if (js_resize_array(ctx, (void **)&m->import_entries,
+                        sizeof(JSImportEntry),
+                        &m->import_entries_size,
+                        m->import_entries_count + 1))
+        return -1;
+    mi = &m->import_entries[m->import_entries_count++];
+    mi->import_name = JS_DupAtom(ctx, import_name);
+    mi->var_idx = var_idx;
+    mi->is_star = is_star;
+    return 0;
+}
+
+/// Line number here: 567
+typedef enum {
+    /* XXX: add more variable kinds here instead of using bit fields */
+    JS_VAR_NORMAL,
+    JS_VAR_FUNCTION_DECL, /* lexical var with function declaration */
+    JS_VAR_NEW_FUNCTION_DECL, /* lexical var with async/generator
+                                 function declaration */
+    JS_VAR_CATCH,
+    JS_VAR_FUNCTION_NAME, /* function expression name */
+    JS_VAR_PRIVATE_FIELD,
+    JS_VAR_PRIVATE_METHOD,
+    JS_VAR_PRIVATE_GETTER,
+    JS_VAR_PRIVATE_SETTER, /* must come after JS_VAR_PRIVATE_GETTER */
+    JS_VAR_PRIVATE_GETTER_SETTER, /* must come after JS_VAR_PRIVATE_SETTER */
+} JSVarKindEnum
+
+/// Line number here: 544
+typedef struct JSClosureVar {
+    uint8_t is_local : 1;
+    uint8_t is_arg : 1;
+    uint8_t is_const : 1;
+    uint8_t is_lexical : 1;
+    uint8_t var_kind : 4; /* see JSVarKindEnum */
+    /* 8 bits available */
+    uint16_t var_idx; /* is_local = TRUE: index to a normal variable of the
+                    parent function. otherwise: index to a closure
+                    variable of the parent function */
+    JSAtom var_name;
+} JSClosureVar
+
+/// Line number here: 31287
+static int add_closure_var(JSContext *ctx, JSFunctionDef *s,
+                           BOOL is_local, BOOL is_arg,
+                           int var_idx, JSAtom var_name,
+                           BOOL is_const, BOOL is_lexical,
+                           JSVarKindEnum var_kind)
+{
+    JSClosureVar *cv;
+
+    /* the closure variable indexes are currently stored on 16 bits */
+    if (s->closure_var_count >= JS_MAX_LOCAL_VARS) {
+        JS_ThrowInternalError(ctx, "too many closure variables");
+        return -1;
+    }
+
+    if (js_resize_array(ctx, (void **)&s->closure_var,
+                        sizeof(s->closure_var[0]),
+                        &s->closure_var_size, s->closure_var_count + 1))
+        return -1;
+    cv = &s->closure_var[s->closure_var_count++];
+    cv->is_local = is_local;
+    cv->is_arg = is_arg;
+    cv->is_const = is_const;
+    cv->is_lexical = is_lexical;
+    cv->var_kind = var_kind;
+    cv->var_idx = var_idx;
+    cv->var_name = JS_DupAtom(ctx, var_name);
+    return s->closure_var_count - 1;
+}
+
+/* compute the maximum stack size needed by the function */
+/// Line number here: 34325
+typedef struct StackSizeState {
+    int bc_len;
+    int stack_len_max;
+    uint16_t *stack_level_tab;
+    int32_t *catch_pos_tab;
+    int *pc_stack;
+    int pc_stack_len;
+    int pc_stack_size;
+} StackSizeState
+
+/* 'op' is only used for error indication */
+/// Line number here: 34328
+static __exception int ss_check(JSContext *ctx, StackSizeState *s,
+                                int pos, int op, int stack_len, int catch_pos)
+{
+    if ((unsigned)pos >= s->bc_len) {
+        JS_ThrowInternalError(ctx, "bytecode buffer overflow (op=%d, pc=%d)", op, pos);
+        return -1;
+    }
+    if (stack_len > s->stack_len_max) {
+        s->stack_len_max = stack_len;
+        if (s->stack_len_max > JS_STACK_SIZE_MAX) {
+            JS_ThrowInternalError(ctx, "stack overflow (op=%d, pc=%d)", op, pos);
+            return -1;
+        }
+    }
+    if (s->stack_level_tab[pos] != 0xffff) {
+        /* already explored: check that the stack size is consistent */
+        if (s->stack_level_tab[pos] != stack_len) {
+            JS_ThrowInternalError(ctx, "inconsistent stack size: %d %d (pc=%d)",
+                                  s->stack_level_tab[pos], stack_len, pos);
+            return -1;
+        } else if (s->catch_pos_tab[pos] != catch_pos) {
+            JS_ThrowInternalError(ctx, "inconsistent catch position: %d %d (pc=%d)",
+                                  s->catch_pos_tab[pos], catch_pos, pos);
+            return -1;
+        } else {
+            return 0;
+        }
+    }
+
+    /* mark as explored and store the stack size */
+    s->stack_level_tab[pos] = stack_len;
+    s->catch_pos_tab[pos] = catch_pos;
+
+    /* queue the new PC to explore */
+    if (js_resize_array(ctx, (void **)&s->pc_stack, sizeof(s->pc_stack[0]),
+                        &s->pc_stack_size, s->pc_stack_len + 1))
+        return -1;
+    s->pc_stack[s->pc_stack_len++] = pos;
+    return 0;
+}
+
+/* XXX: reuse it to optimize weak references */
+/// Line number here: 35938
+typedef struct {
+    JSObjectListEntry *object_tab;
+    int object_count;
+    int object_size;
+    uint32_t *hash_table;
+    uint32_t hash_size;
+} JSObjectList
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/*******************************************************************/
+/* object list */
+/// Line number here: 35929
+typedef struct {
+    JSObject *obj;
+    uint32_t hash_next; /* -1 if no next entry */
+} JSObjectListEntry
+
+/* the reference count of 'obj' is not modified. Return 0 if OK, -1 if
+   memory error */
+/// Line number here: 35977
+static int js_object_list_add(JSContext *ctx, JSObjectList *s, JSObject *obj)
+{
+    JSObjectListEntry *e;
+    uint32_t h, new_hash_size;
+
+    if (js_resize_array(ctx, (void *)&s->object_tab,
+                        sizeof(s->object_tab[0]),
+                        &s->object_size, s->object_count + 1))
+        return -1;
+    if (unlikely((s->object_count + 1) >= s->hash_size)) {
+        new_hash_size = max_uint32(s->hash_size, 4);
+        while (new_hash_size <= s->object_count)
+            new_hash_size *= 2;
+        if (js_object_list_resize_hash(ctx, s, new_hash_size))
+            return -1;
+    }
+    e = &s->object_tab[s->object_count++];
+    h = js_object_list_get_hash(obj, s->hash_size);
+    e->obj = obj;
+    e->hash_next = s->hash_table[h];
+    s->hash_table[h] = s->object_count - 1;
+    return 0;
+}
+
+/// Line number here: 36071
+typedef struct BCWriterState {
+    JSContext *ctx;
+    DynBuf dbuf;
+    BOOL allow_bytecode : 8;
+    BOOL allow_sab : 8;
+    BOOL allow_reference : 8;
+    uint32_t first_atom;
+    uint32_t *atom_to_idx;
+    int atom_to_idx_size;
+    JSAtom *idx_to_atom;
+    int idx_to_atom_count;
+    int idx_to_atom_size;
+    uint8_t **sab_tab;
+    int sab_tab_len;
+    int sab_tab_size;
+    /* list of referenced objects (used if allow_reference = TRUE) */
+    JSObjectList object_list;
+} BCWriterState
+
+/// Line number here: 36149
+static int bc_atom_to_idx(BCWriterState *s, uint32_t *pres, JSAtom atom)
+{
+    uint32_t v;
+
+    if (atom < s->first_atom || __JS_AtomIsTaggedInt(atom)) {
+        *pres = atom;
+        return 0;
+    }
+    atom -= s->first_atom;
+    if (atom < s->atom_to_idx_size && s->atom_to_idx[atom] != 0) {
+        *pres = s->atom_to_idx[atom];
+        return 0;
+    }
+    if (atom >= s->atom_to_idx_size) {
+        int old_size, i;
+        old_size = s->atom_to_idx_size;
+        if (js_resize_array(s->ctx, (void **)&s->atom_to_idx,
+                            sizeof(s->atom_to_idx[0]), &s->atom_to_idx_size,
+                            atom + 1))
+            return -1;
+        /* XXX: could add a specific js_resize_array() function to do it */
+        for(i = old_size; i < s->atom_to_idx_size; i++)
+            s->atom_to_idx[i] = 0;
+    }
+    if (js_resize_array(s->ctx, (void **)&s->idx_to_atom,
+                        sizeof(s->idx_to_atom[0]),
+                        &s->idx_to_atom_size, s->idx_to_atom_count + 1))
+        goto fail;
+
+    v = s->idx_to_atom_count++;
+    s->idx_to_atom[v] = atom + s->first_atom;
+    v += s->first_atom;
+    s->atom_to_idx[atom] = v;
+    *pres = v;
+    return 0;
+ fail:
+    *pres = 0;
+    return -1;
+}
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/*******************************************************************/
+/* binary object writer & reader */
+/// Line number here: 36030
+enum BCTagEnum {
+    BC_TAG_NULL = 1,
+    BC_TAG_UNDEFINED,
+    BC_TAG_BOOL_FALSE,
+    BC_TAG_BOOL_TRUE,
+    BC_TAG_INT32,
+    BC_TAG_FLOAT64,
+    BC_TAG_STRING,
+    BC_TAG_OBJECT,
+    BC_TAG_ARRAY,
+    BC_TAG_BIG_INT,
+    BC_TAG_TEMPLATE_OBJECT,
+    BC_TAG_FUNCTION_BYTECODE,
+    BC_TAG_MODULE,
+    BC_TAG_TYPED_ARRAY,
+    BC_TAG_ARRAY_BUFFER,
+    BC_TAG_SHARED_ARRAY_BUFFER,
+    BC_TAG_DATE,
+    BC_TAG_OBJECT_VALUE,
+    BC_TAG_OBJECT_REFERENCE,
+}
+
+/// Line number here: 36625
+static int JS_WriteSharedArrayBuffer(BCWriterState *s, JSValueConst obj)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(obj);
+    JSArrayBuffer *abuf = p->u.array_buffer;
+    assert(!abuf->detached); /* SharedArrayBuffer are never detached */
+    bc_put_u8(s, BC_TAG_SHARED_ARRAY_BUFFER);
+    bc_put_leb128(s, abuf->byte_length);
+    bc_put_u64(s, (uintptr_t)abuf->data);
+    if (js_resize_array(s->ctx, (void **)&s->sab_tab, sizeof(s->sab_tab[0]),
+                        &s->sab_tab_size, s->sab_tab_len + 1))
+        return -1;
+    /* keep the SAB pointer so that the user can clone it or free it */
+    s->sab_tab[s->sab_tab_len++] = abuf->data;
+    return 0;
+}
+
+/// Line number here: 36886
+typedef struct BCReaderState {
+    JSContext *ctx;
+    const uint8_t *buf_start, *ptr, *buf_end;
+    uint32_t first_atom;
+    uint32_t idx_to_atom_count;
+    JSAtom *idx_to_atom;
+    int error_state;
+    BOOL allow_sab : 8;
+    BOOL allow_bytecode : 8;
+    BOOL is_rom_data : 8;
+    BOOL allow_reference : 8;
+    /* object references */
+    JSObject **objects;
+    int objects_count;
+    int objects_size;
+
+#ifdef DUMP_READ_OBJECT
+    const uint8_t *ptr_last;
+    int level;
+#endif
+} BCReaderState
+
+/// Line number here: 37233
+static int BC_add_object_ref1(BCReaderState *s, JSObject *p)
+{
+    if (s->allow_reference) {
+        if (js_resize_array(s->ctx, (void *)&s->objects,
+                            sizeof(s->objects[0]),
+                            &s->objects_size, s->objects_count + 1))
+            return -1;
+        s->objects[s->objects_count++] = p;
+    }
+    return 0;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 78
+typedef unsigned long int	uintptr_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_resize_array(JSContext *, void **, int, int *, int)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "__builtin_expect(long, long)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "js_realloc_array(JSContext *, void **, int, int *, int)";
+"js_realloc_array(JSContext *, void **, int, int *, int)";
+"js_realloc_array(JSContext *, void **, int, int *, int)" -> "max_int(int, int)";
+"js_realloc_array(JSContext *, void **, int, int *, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"new_label_fd(JSFunctionDef *)";
+"new_label_fd(JSFunctionDef *)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"cpool_add(JSParseState *, JSValue)";
+"cpool_add(JSParseState *, JSValue)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_var(JSContext *, JSFunctionDef *, JSAtom)";
+"add_var(JSContext *, JSFunctionDef *, JSAtom)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"add_var(JSContext *, JSFunctionDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_var(JSContext *, JSFunctionDef *, JSAtom)" -> "memset(void *, int, size_t)";
+"add_var(JSContext *, JSFunctionDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_arg(JSContext *, JSFunctionDef *, JSAtom)";
+"add_arg(JSContext *, JSFunctionDef *, JSAtom)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"add_arg(JSContext *, JSFunctionDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_arg(JSContext *, JSFunctionDef *, JSAtom)" -> "memset(void *, int, size_t)";
+"add_arg(JSContext *, JSFunctionDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_global_var(JSContext *, JSFunctionDef *, JSAtom)";
+"add_global_var(JSContext *, JSFunctionDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_global_var(JSContext *, JSFunctionDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_req_module_entry(JSContext *, JSModuleDef *, JSAtom)";
+"add_req_module_entry(JSContext *, JSModuleDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_req_module_entry(JSContext *, JSModuleDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "find_export_entry(JSContext *, JSModuleDef *, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_AtomGetStr(JSContext *, char *, int, JSAtom)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "__JS_ThrowSyntaxErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "memset(void *, int, size_t)";
+"add_export_entry2(JSContext *, JSParseState *, JSModuleDef *, JSAtom, JSAtom, JSExportTypeEnum)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_star_export_entry(JSContext *, JSModuleDef *, int)";
+"add_star_export_entry(JSContext *, JSModuleDef *, int)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)";
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "find_exported_name(GetExportNamesState *, JSAtom)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "JS_ThrowStackOverflow(JSContext *)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "find_in_exec_module_list(ExecModuleList *, JSModuleDef *)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)" -> "gather_available_ancestors(JSContext *, JSModuleDef *, ExecModuleList *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "js_check_stack_overflow(JSRuntime *, size_t)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "JS_ThrowStackOverflow(JSContext *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "JS_GetException(JSContext *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "min_int(int, int)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "js_execute_async_module(JSContext *, JSModuleDef *)";
+"js_inner_module_evaluation(JSContext *, JSModuleDef *, int, JSModuleDef **, JSValue *)" -> "js_execute_sync_module(JSContext *, JSModuleDef *, JSValue *)";
+"add_import(JSParseState *, JSModuleDef *, JSAtom, JSAtom, BOOL)";
+"add_import(JSParseState *, JSModuleDef *, JSAtom, JSAtom, BOOL)" -> "js_parse_error(JSParseState *, const char *, ...)";
+"add_import(JSParseState *, JSModuleDef *, JSAtom, JSAtom, BOOL)" -> "add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)";
+"add_import(JSParseState *, JSModuleDef *, JSAtom, JSAtom, BOOL)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_import(JSParseState *, JSModuleDef *, JSAtom, JSAtom, BOOL)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)";
+"add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"add_closure_var(JSContext *, JSFunctionDef *, BOOL, BOOL, int, JSAtom, BOOL, BOOL, JSVarKindEnum)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"ss_check(JSContext *, StackSizeState *, int, int, int, int)";
+"ss_check(JSContext *, StackSizeState *, int, int, int, int)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"ss_check(JSContext *, StackSizeState *, int, int, int, int)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)" -> "__builtin_expect(long, long)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)" -> "max_uint32(uint32_t, uint32_t)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)" -> "js_object_list_resize_hash(JSContext *, JSObjectList *, uint32_t)";
+"js_object_list_add(JSContext *, JSObjectList *, JSObject *)" -> "js_object_list_get_hash(JSObject *, uint32_t)";
+"bc_atom_to_idx(BCWriterState *, uint32_t *, JSAtom)";
+"bc_atom_to_idx(BCWriterState *, uint32_t *, JSAtom)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"bc_atom_to_idx(BCWriterState *, uint32_t *, JSAtom)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)" -> "bc_put_u8(BCWriterState *, uint8_t)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)" -> "bc_put_leb128(BCWriterState *, uint32_t)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)" -> "bc_put_u64(BCWriterState *, uint64_t)";
+"JS_WriteSharedArrayBuffer(BCWriterState *, JSValue)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"BC_add_object_ref1(BCReaderState *, JSObject *)";
+"BC_add_object_ref1(BCReaderState *, JSObject *)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+}

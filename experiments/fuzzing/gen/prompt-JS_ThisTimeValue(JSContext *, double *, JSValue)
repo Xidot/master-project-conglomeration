@@ -1,0 +1,349 @@
+Target function: "JS_ThisTimeValue(JSContext *, double *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 615
+static inline JS_BOOL JS_IsNumber(JSValueConst v)
+{
+    int tag = JS_VALUE_GET_TAG(v);
+    return tag == JS_TAG_INT || JS_TAG_IS_FLOAT64(tag);
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 50925
+static __exception int JS_ThisTimeValue(JSContext *ctx, double *valp, JSValueConst this_val)
+{
+    if (JS_VALUE_GET_TAG(this_val) == JS_TAG_OBJECT) {
+        JSObject *p = JS_VALUE_GET_OBJ(this_val);
+        if (p->class_id == JS_CLASS_DATE && JS_IsNumber(p->u.object_data))
+            return JS_ToFloat64(ctx, valp, p->u.object_data);
+    }
+    JS_ThrowTypeError(ctx, "not a Date object");
+    return -1;
+}
+
+/// Line number here: 12369
+int JS_ToFloat64(JSContext *ctx, double *pres, JSValueConst val)
+{
+    return JS_ToFloat64Free(ctx, pres, JS_DupValue(ctx, val));
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7054
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowTypeError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_TYPE_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 50985
+static __exception int get_date_fields(JSContext *ctx, JSValueConst obj,
+                                       double fields[minimum_length(9)], int is_local, int force)
+{
+    double dval;
+    int64_t d, days, wd, y, i, md, h, m, s, ms, tz = 0;
+
+    if (JS_ThisTimeValue(ctx, &dval, obj))
+        return -1;
+
+    if (isnan(dval)) {
+        if (!force)
+            return FALSE; /* NaN */
+        d = 0;        /* initialize all fields to 0 */
+    } else {
+        d = dval;     /* assuming -8.64e15 <= dval <= -8.64e15 */
+        if (is_local) {
+            tz = -getTimezoneOffset(d);
+            d += tz * 60000;
+        }
+    }
+
+    /* result is >= 0, we can use % */
+    h = math_mod(d, 86400000);
+    days = (d - h) / 86400000;
+    ms = h % 1000;
+    h = (h - ms) / 1000;
+    s = h % 60;
+    h = (h - s) / 60;
+    m = h % 60;
+    h = (h - m) / 60;
+    wd = math_mod(days + 4, 7); /* week day */
+    y = year_from_days(&days);
+
+    for(i = 0; i < 11; i++) {
+        md = month_days[i];
+        if (i == 1)
+            md += days_in_year(y) - 365;
+        if (days < md)
+            break;
+        days -= md;
+    }
+    fields[0] = y;
+    fields[1] = i;
+    fields[2] = days + 1;
+    fields[3] = h;
+    fields[4] = m;
+    fields[5] = s;
+    fields[6] = ms;
+    fields[7] = wd;
+    fields[8] = tz;
+    return TRUE;
+}
+
+/// Line number here: 51878
+static JSValue js_date_getTimezoneOffset(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv)
+{
+    // getTimezoneOffset()
+    double v;
+
+    if (JS_ThisTimeValue(ctx, &v, this_val))
+        return JS_EXCEPTION;
+    if (isnan(v))
+        return JS_NAN;
+    else
+        /* assuming -8.64e15 <= v <= -8.64e15 */
+        return JS_NewInt64(ctx, getTimezoneOffset((int64_t)trunc(v)));
+}
+
+/// Line number here: 51893
+static JSValue js_date_getTime(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    // getTime()
+    double v;
+
+    if (JS_ThisTimeValue(ctx, &v, this_val))
+        return JS_EXCEPTION;
+    return JS_NewFloat64(ctx, v);
+}
+
+/// Line number here: 51904
+static JSValue js_date_setTime(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    // setTime(v)
+    double v;
+
+    if (JS_ThisTimeValue(ctx, &v, this_val) || JS_ToFloat64(ctx, &v, argv[0]))
+        return JS_EXCEPTION;
+    return JS_SetThisTimeValue(ctx, this_val, time_clip(v));
+}
+
+/// Line number here: 51915
+static JSValue js_date_setYear(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    // setYear(y)
+    double y;
+    JSValueConst args[1];
+
+    if (JS_ThisTimeValue(ctx, &y, this_val) || JS_ToFloat64(ctx, &y, argv[0]))
+        return JS_EXCEPTION;
+    y = +y;
+    if (isfinite(y)) {
+        y = trunc(y);
+        if (y >= 0 && y < 100)
+            y += 1900;
+    }
+    args[0] = JS_NewFloat64(ctx, y);
+    return set_date_field(ctx, this_val, 1, args, 0x011);
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"JS_ThisTimeValue(JSContext *, double *, JSValue)" -> "JS_IsNumber(JSValue)";
+"JS_ThisTimeValue(JSContext *, double *, JSValue)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"JS_ThisTimeValue(JSContext *, double *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ToFloat64(JSContext *, double *, JSValue)";
+"JS_ToFloat64(JSContext *, double *, JSValue)" -> "JS_ToFloat64Free(JSContext *, double *, JSValue)";
+"JS_ToFloat64(JSContext *, double *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowTypeError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "__builtin_isnan()";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "getTimezoneOffset(int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "math_mod(int64_t, int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "year_from_days(int64_t *)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "days_in_year(int64_t)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "__builtin_isnan()";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "__builtin_nanf(const char *)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "getTimezoneOffset(int64_t)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "trunc(double)";
+"js_date_getTime(JSContext *, JSValue, int, JSValue *)";
+"js_date_getTime(JSContext *, JSValue, int, JSValue *)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"js_date_getTime(JSContext *, JSValue, int, JSValue *)" -> "JS_NewFloat64(JSContext *, double)";
+"js_date_setTime(JSContext *, JSValue, int, JSValue *)";
+"js_date_setTime(JSContext *, JSValue, int, JSValue *)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"js_date_setTime(JSContext *, JSValue, int, JSValue *)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"js_date_setTime(JSContext *, JSValue, int, JSValue *)" -> "JS_SetThisTimeValue(JSContext *, JSValue, double)";
+"js_date_setTime(JSContext *, JSValue, int, JSValue *)" -> "time_clip(double)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "__builtin_isfinite()";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "trunc(double)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "JS_NewFloat64(JSContext *, double)";
+"js_date_setYear(JSContext *, JSValue, int, JSValue *)" -> "set_date_field(JSContext *, JSValue, int, JSValue *, int)";
+}

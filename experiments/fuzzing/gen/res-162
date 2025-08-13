@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_array_buffer_constructor1(JSContext *, JSValue, uint64_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_array_buffer_constructor1:52614
+:js_array_buffer_constructor2:52605
+:js_array_buffer_constructor:52641
+
+--- Page Break ---
+
+Reasons:
+1. The main logical issue appears in the chain of array buffer constructors where length validation is missing before passing to lower level functions. The length parameter (uint64_t) could potentially be too large when shifted left (as seen in callers like js_typed_array_constructor_obj), but this validation is deferred to js_array_buffer_constructor3.
+
+Here's the diff with instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52613,6 +52613,8 @@
+                                             JSValueConst new_target,
+                                             uint64_t len)
+ {
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor2(ctx, new_target, len,
+                                         JS_CLASS_ARRAY_BUFFER);
+ }
+@@ -52604,6 +52606,8 @@
+                                             uint64_t len, JSClassID class_id)
+ {
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor3(ctx, new_target, len, class_id,
+                                         NULL, js_array_buffer_free, NULL,
+                                         TRUE);
+@@ -52640,6 +52644,8 @@
+     uint64_t len;
+     if (JS_ToIndex(ctx, &len, argv[0]))
+         return JS_EXCEPTION;
++    if (len > (UINT64_MAX >> 3))  // Approximate max safe size
++        funlogline();
+     return js_array_buffer_constructor1(ctx, new_target, len);
+ }
+```

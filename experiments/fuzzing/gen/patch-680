@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36310,6 +36310,8 @@
+ static void JS_WriteString(BCWriterState *s, JSString *p)
+ {
+     int i;
++    if (!p)
++        funlogline();
+     bc_put_leb128(s, ((uint32_t)p->len << 1) | p->is_wide_char);
+     if (p->is_wide_char) {
+         for(i = 0; i < p->len; i++)
+@@ -36313,6 +36315,8 @@
+     bc_put_leb128(s, ((uint32_t)p->len << 1) | p->is_wide_char);
+     if (p->is_wide_char) {
+         for(i = 0; i < p->len; i++)
++            if (i >= p->len)
++                funlogline();
+             bc_put_u16(s, p->u.str16[i]);
+     } else {
+         dbuf_put(&s->dbuf, p->u.str8, p->len);

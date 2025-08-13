@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19443,6 +19443,8 @@
+     JSValue proto, obj;
+     JSContext *realm;
+ 
++    if (class_id < 0 || class_id >= JS_CLASS_INIT_COUNT)
++        funlogline();
+     if (JS_IsUndefined(ctor)) {
+         proto = JS_DupValue(ctx, ctx->class_proto[class_id]);
+     } else {
+@@ -19450,6 +19452,8 @@
+         if (JS_IsException(proto))
+             return proto;
+         if (!JS_IsObject(proto)) {
++            if (JS_IsUndefined(proto) || JS_IsNull(proto))
++                funlogline();
+             JS_FreeValue(ctx, proto);
+             realm = JS_GetFunctionRealm(ctx, ctor);
+             if (!realm)
+@@ -19457,6 +19461,8 @@
+             proto = JS_DupValue(ctx, realm->class_proto[class_id]);
+         }
+     }
++    if (JS_IsException(proto))
++        funlogline();
+     obj = JS_NewObjectProtoClass(ctx, proto, class_id);
+     JS_FreeValue(ctx, proto);
+     return obj;

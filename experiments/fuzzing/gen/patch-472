@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35947,6 +35947,9 @@
+ {
+     JSObjectListEntry *e;
+     uint32_t i, h, *new_hash_table;
++    
++    if ((new_hash_size & (new_hash_size - 1)) != 0) // Not power of 2
++        funlogline();
+ 
+     new_hash_table = js_malloc(ctx, sizeof(new_hash_table[0]) * new_hash_size);
+     if (!new_hash_table)
+@@ -35965,6 +35968,9 @@
+         e->hash_next = s->hash_table[h];
+         s->hash_table[h] = i;
+     }
++    if (new_hash_size < s->object_count) // New size too small
++        funlogline();
++
+     return 0;
+ }

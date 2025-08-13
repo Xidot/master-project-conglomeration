@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -13090,6 +13090,7 @@
+ 
+ static void js_dump_char(JSPrintValueState *s, int c, int sep)
+ {
++    if (c < 0) funlogline(); // Negative character value
+     if (c == sep || c == '\\') {
+         js_putc(s, '\\');
+         js_putc(s, c);
+@@ -13097,9 +13098,11 @@
+         js_putc(s, c);
+     } else if (c == '\n') {
+         js_putc(s, '\\');
+         js_putc(s, 'n');
++    } else if (c >= 0 && c < ' ') {
++        funlogline(); // Unhandled control character
++        js_printf(s, "\\u%04x", c);
+     } else {
++        funlogline(); // Extended ASCII or other unhandled case
+         js_printf(s, "\\u%04x", c);
+     }
+ }

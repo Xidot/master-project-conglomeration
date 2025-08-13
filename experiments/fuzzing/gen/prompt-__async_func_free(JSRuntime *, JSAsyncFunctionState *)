@@ -1,0 +1,188 @@
+Target function: "__async_func_free(JSRuntime *, JSAsyncFunctionState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 19649
+static void __async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+    /* cannot close the closure variables here because it would
+       potentially modify the object graph */
+    if (!s->is_completed) {
+        async_func_free_frame(rt, s);
+    }
+
+    JS_FreeValueRT(rt, s->resolving_funcs[0]);
+    JS_FreeValueRT(rt, s->resolving_funcs[1]);
+
+    remove_gc_object(&s->header);
+    if (rt->gc_phase == JS_GC_PHASE_REMOVE_CYCLES && s->header.ref_count != 0) {
+        list_add_tail(&s->header.link, &rt->gc_zero_ref_count_list);
+    } else {
+        js_free_rt(rt, s);
+    }
+}
+
+/// Line number here: 334
+typedef struct JSStackFrame {
+    struct JSStackFrame *prev_frame; /* NULL if first stack frame */
+    JSValue cur_func; /* current function, JS_UNDEFINED if the frame is detached */
+    JSValue *arg_buf; /* arguments */
+    JSValue *var_buf; /* variables */
+    struct list_head var_ref_list; /* list of JSVarRef.var_ref_link */
+    const uint8_t *cur_pc; /* only used in bytecode functions : PC of the
+                        instruction after the call */
+    int arg_count;
+    int js_mode; /* not supported for C functions */
+    /* only used in generators. Current stack pointer value. NULL if
+       the function is running. */
+    JSValue *cur_sp;
+} JSStackFrame
+
+/// Line number here: 19600
+static void async_func_free_frame(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+    JSStackFrame *sf = &s->frame;
+    JSValue *sp;
+
+    if (sf->arg_buf) {
+        /* cannot free the function if it is running */
+        assert(sf->cur_sp != NULL);
+        for(sp = sf->arg_buf; sp < sf->cur_sp; sp++) {
+            JS_FreeValueRT(rt, *sp);
+        }
+        js_free_rt(rt, sf->arg_buf);
+        sf->arg_buf = NULL;
+    }
+    JS_FreeValueRT(rt, sf->cur_func);
+    JS_FreeValueRT(rt, s->this_val);
+}
+
+/// Line number here: 5943
+static void remove_gc_object(JSGCObjectHeader *h)
+{
+    list_del(&h->link);
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/* add 'el' at the end of the list 'head' (= before element head) */
+/// Line number here: 63
+static inline void list_add_tail(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head->prev, head);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"__async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "js_free_rt(JSRuntime *, void *)";
+"async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)";
+"async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)" -> "js_free_rt(JSRuntime *, void *)";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"remove_gc_object(JSGCObjectHeader *)";
+"remove_gc_object(JSGCObjectHeader *)" -> "list_del(struct list_head *)";
+"list_add_tail(struct list_head *, struct list_head *)";
+"list_add_tail(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+}

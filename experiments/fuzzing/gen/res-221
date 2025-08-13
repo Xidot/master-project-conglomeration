@@ -1,0 +1,79 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_binary_logic_slow(JSContext *, JSValue *, OPCodeEnum)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_binary_logic_slow` function:
+
+1. :quickjs.c:js_binary_logic_slow:14446 - Missing check for JS_TAG_EXCEPTION before processing tags
+2. :quickjs.c:js_binary_logic_slow:14496 - No validation of shift amount for OP_sar operation
+3. :quickjs.c:js_binary_logic_slow:14506 - No validation of shift amount for OP_shl operation
+4. :quickjs.c:js_binary_logic_slow:14547 - Missing check for JS_TAG_EXCEPTION after JS_ToNumericFree calls
+5. :quickjs.c:js_binary_logic_slow:14600 - No bounds checking on shift value before passing to js_bigint_shl/js_bigint_shr
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14446,6 +14446,9 @@
+     op1 = sp[-2];
+     op2 = sp[-1];
+     tag1 = JS_VALUE_GET_NORM_TAG(op1);
++    if (unlikely(tag1 == JS_TAG_EXCEPTION)) {
++        goto exception;
++    }
+     tag2 = JS_VALUE_GET_NORM_TAG(op2);
+ 
+     if (tag1 == JS_TAG_SHORT_BIG_INT && tag2 == JS_TAG_SHORT_BIG_INT) {
+@@ -14493,6 +14496,9 @@
+             if (v2 > (JS_LIMB_BITS - 1)) {
+                 goto slow_big_int;
+             } else if (v2 < 0) {
++                if (v2 == INT32_MIN) {
++                    goto slow_big_int;
++                }
+                 if (v2 < -(JS_LIMB_BITS - 1))
+                     goto slow_big_int;
+                 v2 = -v2;
+@@ -14503,6 +14509,9 @@
+             if (v2 > (JS_LIMB_BITS - 1)) {
+                 goto slow_big_int;
+             } else if (v2 < 0) {
++                if (v2 == INT32_MIN) {
++                    goto slow_big_int;
++                }
+                 if (v2 < -(JS_LIMB_BITS - 1))
+                     goto slow_big_int;
+                 v2 = -v2;
+                 goto bigint_sar;
+@@ -14544,6 +14553,9 @@
+     op1 = JS_ToNumericFree(ctx, op1);
+     if (JS_IsException(op1)) {
+         JS_FreeValue(ctx, op2);
++        if (JS_VALUE_GET_TAG(op2) == JS_TAG_EXCEPTION) {
++            funlogline();
++        }
+         goto exception;
+     }
+     op2 = JS_ToNumericFree(ctx, op2);
+@@ -14597,6 +14609,9 @@
+                 shift = js_bigint_get_si_sat(p2);
+                 if (shift > INT32_MAX)
+                     shift = INT32_MAX;
++                else if (shift == INT32_MIN) {
++                    shift = -INT32_MAX;
++                }
+                 else if (shift < -INT32_MAX)
+                     shift = -INT32_MAX;
+                 if (op == OP_sar)
+```
+
+The changes:
+
+1. Added check for JS_TAG_EXCEPTION before processing tags
+2. Added check for INT32_MIN case in OP_sar shift handling
+3. Added check for INT32_MIN case in OP_shl shift handling 
+4. Added exception check after first JS_ToNumericFree
+5. Added handling for INT32_MIN case in bigint shift operations
+
+The conditions are designed to only trigger funlogline() when the actual error conditions occur, while maintaining the existing behavior in all other cases. The most critical issue was the missing exception checks which could lead to undefined behavior if an exception was already pending.

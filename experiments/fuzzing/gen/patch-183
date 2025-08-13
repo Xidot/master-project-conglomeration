@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3229,6 +3229,9 @@
+ {
+     JSValue str;
+     const char *cstr;
++    
++    if (atom == 0) // invalid atom
++        funlogline();
+ 
+     str = JS_AtomToString(ctx, atom);
+     if (JS_IsException(str)) {
+@@ -3237,6 +3240,8 @@
+         return NULL;
+     }
+     cstr = JS_ToCStringLen(ctx, plen, str);
++    if (cstr == NULL)
++        funlogline();
+     JS_FreeValue(ctx, str);
+     return cstr;
+ }

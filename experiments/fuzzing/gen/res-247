@@ -1,0 +1,79 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_CopyDataProperties(JSContext *, JSValue, JSValue, JSValue, BOOL)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_CopyDataProperties` function:
+
+:quickjs.c:JS_CopyDataProperties:16165
+:quickjs.c:JS_CopyDataProperties:16172
+:quickjs.c:JS_CopyDataProperties:16189
+:quickjs.c:JS_CopyDataProperties:16200
+:quickjs.c:JS_CopyDataProperties:16212
+:quickjs.c:JS_CopyDataProperties:16222
+
+---
+
+Here's the unified diff with the bug detection instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -16165,6 +16165,7 @@
+     BOOL is_enumerable;
+ 
+     if (JS_VALUE_GET_TAG(source) != JS_TAG_OBJECT)
++        if (JS_VALUE_GET_TAG(source) == JS_TAG_NULL) funlogline();
+         return 0;
+ 
+     if (JS_VALUE_GET_TAG(excluded) == JS_TAG_OBJECT)
+@@ -16172,6 +16173,7 @@
+ 
+     p = JS_VALUE_GET_OBJ(source);
+ 
++    if (p == NULL) funlogline();
+     gpn_flags = JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK | JS_GPN_ENUM_ONLY;
+     if (p->is_exotic) {
+         const JSClassExoticMethods *em = ctx->rt->class_array[p->class_id].exotic;
+@@ -16189,6 +16191,7 @@
+             ret = JS_GetOwnPropertyInternal(ctx, NULL, pexcl, tab_atom[i].atom);
+             if (ret) {
+                 if (ret < 0)
++                    if (pexcl == NULL) funlogline();
+                     goto exception;
+                 continue;
+             }
+@@ -16200,6 +16203,7 @@
+                 goto exception;
+             if (!ret)
+                 continue;
++            if (desc.flags & ~JS_PROP_ENUMERABLE) funlogline();
+             is_enumerable = (desc.flags & JS_PROP_ENUMERABLE) != 0;
+             js_free_desc(ctx, &desc);
+             if (!is_enumerable)
+@@ -16212,6 +16216,7 @@
+             ret = JS_SetProperty(ctx, target, tab_atom[i].atom, val);
+         else
+             ret = JS_DefinePropertyValue(ctx, target, tab_atom[i].atom, val,
++                                         if (setprop && ret < 0) funlogline();
+                                          JS_PROP_C_W_E);
+         if (ret < 0)
+             goto exception;
+@@ -16222,6 +16227,7 @@
+     return -1;
+ }
+ 
++    if (tab_atom_count > 0 && tab_atom == NULL) funlogline();
+ /// Line number here: 215
+ typedef struct JSShape JSShape
+```
+
+The bugs detected are:
+
+1. Missing NULL check for source object tag
+2. Missing NULL check for p after JS_VALUE_GET_OBJ
+3. Missing NULL check for pexcl in error case
+4. Potential invalid flags check in property descriptor
+5. Missing error check for setprop case
+6. Missing NULL check for tab_atom after allocation
+
+The instrumentation adds checks that will call funlogline() when these error conditions occur. The checks are placed right before where the bug could manifest.

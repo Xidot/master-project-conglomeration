@@ -1,0 +1,88 @@
+Target function: "js_realloc_array(JSContext *, void **, int, int *, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 1440
+static no_inline int js_realloc_array(JSContext *ctx, void **parray,
+                                      int elem_size, int *psize, int req_size)
+{
+    int new_size;
+    size_t slack;
+    void *new_array;
+    /* XXX: potential arithmetic overflow */
+    new_size = max_int(req_size, *psize * 3 / 2);
+    new_array = js_realloc2(ctx, *parray, new_size * elem_size, &slack);
+    if (!new_array)
+        return -1;
+    new_size += slack / elem_size;
+    *psize = new_size;
+    *parray = new_array;
+    return 0;
+}
+
+/* store extra allocated size in *pslack if successful */
+/// Line number here: 1403
+void *js_realloc2(JSContext *ctx, void *ptr, size_t size, size_t *pslack)
+{
+    void *ret;
+    ret = js_realloc_rt(ctx->rt, ptr, size);
+    if (unlikely(!ret && size != 0)) {
+        JS_ThrowOutOfMemory(ctx);
+        return NULL;
+    }
+    if (pslack) {
+        size_t new_size = js_malloc_usable_size_rt(ctx->rt, ret);
+        *pslack = (new_size > size) ? new_size - size : 0;
+    }
+    return ret;
+}
+
+/* resize the array and update its size if req_size > *psize */
+/// Line number here: 1458
+static inline int js_resize_array(JSContext *ctx, void **parray, int elem_size,
+                                  int *psize, int req_size)
+{
+    if (unlikely(req_size > *psize))
+        return js_realloc_array(ctx, parray, elem_size, psize, req_size);
+    else
+        return 0;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 79
+static inline int max_int(int a, int b)
+{
+    if (a > b)
+        return a;
+    else
+        return b;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_realloc_array(JSContext *, void **, int, int *, int)";
+"js_realloc_array(JSContext *, void **, int, int *, int)" -> "max_int(int, int)";
+"js_realloc_array(JSContext *, void **, int, int *, int)" -> "js_realloc2(JSContext *, void *, size_t, size_t *)";
+"js_realloc2(JSContext *, void *, size_t, size_t *)";
+"js_realloc2(JSContext *, void *, size_t, size_t *)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"js_realloc2(JSContext *, void *, size_t, size_t *)" -> "__builtin_expect(long, long)";
+"js_realloc2(JSContext *, void *, size_t, size_t *)" -> "JS_ThrowOutOfMemory(JSContext *)";
+"js_realloc2(JSContext *, void *, size_t, size_t *)" -> "js_malloc_usable_size_rt(JSRuntime *, const void *)";
+"js_resize_array(JSContext *, void **, int, int *, int)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "__builtin_expect(long, long)";
+"js_resize_array(JSContext *, void **, int, int *, int)" -> "js_realloc_array(JSContext *, void **, int, int *, int)";
+}

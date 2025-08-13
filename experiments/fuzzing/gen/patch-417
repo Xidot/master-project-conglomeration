@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2910,6 +2910,9 @@
+ /* Warning: 'p' is freed */
+ static JSAtom JS_NewAtomStr(JSContext *ctx, JSString *p)
+ {
++    if (!p) {
++        funlogline();
++    }
+     JSRuntime *rt = ctx->rt;
+     uint32_t n;
+     if (is_num_string(&n, p)) {
+@@ -2916,6 +2919,9 @@
+         if (n <= JS_ATOM_MAX_INT) {
+             js_free_string(rt, p);
+             return __JS_AtomFromUInt32(n);
++        } else {
++            /* number exceeds JS_ATOM_MAX_INT */
++            funlogline();
+         }
+     }
+     /* XXX: should generate an exception */

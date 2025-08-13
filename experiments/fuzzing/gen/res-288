@@ -1,0 +1,55 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_EvalInternal(JSContext *, JSValue, const char *, size_t, const char *, int, int)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs in the target function `JS_EvalInternal`:
+
+1. :quickjs.c:JS_EvalInternal:35850
+2. :quickjs.c:JS_EvalInternal:35858
+3. :quickjs.c:JS_EvalInternal:35863
+
+---
+
+Here's the unified diff with the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35850,6 +35850,9 @@
+ {
+     BOOL backtrace_barrier = ((flags & JS_EVAL_FLAG_BACKTRACE_BARRIER) != 0);
+     int saved_js_mode = 0;
++    if (unlikely(!ctx)) {
++        funlogline();
++    }
+     JSValue ret;
+     
+     if (unlikely(!ctx->eval_internal)) {
+@@ -35855,6 +35858,9 @@
+     if (unlikely(!ctx->eval_internal)) {
+         return JS_ThrowTypeError(ctx, "eval is not supported");
+     }
+     if (backtrace_barrier && ctx->rt->current_stack_frame) {
++        if (unlikely(!ctx->rt)) {
++            funlogline();
++        }
+         saved_js_mode = ctx->rt->current_stack_frame->js_mode;
+         ctx->rt->current_stack_frame->js_mode |= JS_MODE_BACKTRACE_BARRIER;
+     }
+@@ -35862,6 +35868,9 @@
+                              flags, scope_idx);
+     if (backtrace_barrier && ctx->rt->current_stack_frame)
+         ctx->rt->current_stack_frame->js_mode = saved_js_mode;
++    if (unlikely(!ctx->rt && backtrace_barrier)) {
++        funlogline();
++    }
+     return ret;
+ }
+```
+
+The modifications address three potential logical issues:
+1. Null context pointer check
+2. Missing runtime (rt) check when accessing current_stack_frame
+3. Missing runtime check when restoring saved_js_mode
+
+Each condition is wrapped in `unlikely()` to match the existing style and only triggers `funlogline()` when the problematic condition occurs.

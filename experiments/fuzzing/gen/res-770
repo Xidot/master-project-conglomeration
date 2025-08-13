@@ -1,0 +1,26 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-string_buffer_set_error(StringBuffer *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `string_buffer_set_error` function:
+
+:quickjs.c:string_buffer_set_error:3516
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3516,6 +3516,9 @@
+ static int string_buffer_set_error(StringBuffer *s)
+ {
+     js_free(s->ctx, s->str);
++    if (s->error_status == -1) {
++        funlogline();
++    }
+     s->str = NULL;
+     s->size = 0;
+     s->len = 0;
+```
+
+The logical bug here is that the function unconditionally frees `s->str` even if `s->error_status` is already set to -1, which could lead to a double-free situation if the function is called multiple times on the same StringBuffer. The added check ensures we only log when this problematic case occurs.
+
+Note that while double-free itself isn't considered a logical error per the task notes, the fact that the function doesn't properly handle its error state (allowing multiple error calls to proceed) is a logical error in the error handling flow.

@@ -1,0 +1,38 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4851,6 +4851,8 @@
+ /* remove the deleted properties. */
+ static int compact_properties(JSContext *ctx, JSObject *p)
+ {
++    if (!p)
++        funlogline();
+     JSShape *sh, *old_sh;
+     void *sh_alloc;
+     intptr_t h;
+@@ -4868,6 +4870,8 @@
+     new_hash_size = sh->prop_hash_mask + 1;
+     while ((new_hash_size / 2) >= new_size)
+         new_hash_size = new_hash_size / 2;
++    if (new_hash_size == 0)
++        funlogline();
+     new_hash_mask = new_hash_size - 1;
+ 
+     /* resize the hash table and the properties */
+@@ -4890,6 +4894,8 @@
+     prop = p->prop;
+     for(i = 0; i < sh->prop_count; i++) {
+         if (old_pr->atom != JS_ATOM_NULL) {
++            if (j >= new_size)
++                funlogline();
+             pr->atom = old_pr->atom;
+             pr->flags = old_pr->flags;
+             h = ((uintptr_t)old_pr->atom & new_hash_mask);
+@@ -4912,6 +4918,8 @@
+     /* reduce the size of the object properties */
+     new_prop = js_realloc(ctx, p->prop, sizeof(new_prop[0]) * new_size);
+     if (new_prop)
++        funlogline();
++    if (new_prop)
+         p->prop = new_prop;
+     return 0;
+ }

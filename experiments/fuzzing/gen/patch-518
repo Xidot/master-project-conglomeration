@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37118,6 +37118,9 @@
+     uint8_t *bc_buf;
+     int pos, len, op;
+     JSAtom atom;
+     uint32_t idx;
++    
++    if (unlikely(!b || !s))
++        return bc_read_error_end(s);
+ 
+     if (s->is_rom_data) {
+         /* directly use the input buffer */
+@@ -37142,6 +37145,8 @@
+         op = bc_buf[pos];
+         len = short_opcode_info(op).size;
+         switch(short_opcode_info(op).fmt) {
++        if (unlikely(pos + len > bc_len))
++            return bc_read_error_end(s);
+         case OP_FMT_atom:
+         case OP_FMT_atom_u8:
+         case OP_FMT_atom_u16:
+@@ -37157,6 +37162,8 @@
+                     /* Note: the atoms will be freed up to this position */
+                     b->byte_code_len = pos;
+                     return -1;
++                if (unlikely(atom == JS_ATOM_NULL))
++                    funlogline();
+                 }
+                 put_u32(bc_buf + pos + 1, atom);
+ #ifdef DUMP_READ_OBJECT

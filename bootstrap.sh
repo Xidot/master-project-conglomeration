@@ -1,15 +1,10 @@
 #!/bin/env bash
 
-THIS=$(dirname $(realpath ${BASH_SOURCE%/*}))
+# Setup the environment for the scripts and tools to be in path
 
-# TODO openai env key to set here - doc in readme
-# TODO Install requirements with venv creation
+set -e
 
-if [ ! -d "./venv" ]; then
-    python -m venv venv
-fi
-
-echo "Relative to $THIS"
+THIS=$(dirname $(realpath ${BASH_SOURCE[0]}))
 
 export PATH="$PATH:$THIS/scripts"
 source $THIS/venv/bin/activate

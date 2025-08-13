@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_DeleteGlobalVar(JSContext *, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_DeleteGlobalVar` function:
+
+:quickjs.c:JS_DeleteGlobalVar:10184
+:quickjs.c:JS_DeleteGlobalVar:10190
+:quickjs.c:JS_DeleteGlobalVar:10194
+
+---
+
+The main logical issues are:
+
+1. At line 10184, the function checks for lexical variables but doesn't properly handle the case where `find_own_property` returns NULL but there might still be a property in the global object.
+
+2. At line 10190, the function calls `JS_HasProperty` but doesn't properly handle the case where the property exists but is not configurable (should return FALSE in this case).
+
+3. At line 10194, the function calls `JS_DeleteProperty` without checking if the property is configurable first.
+
+Here's the diff to add the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10183,6 +10183,9 @@
+     /* 9.1.1.4.7 DeleteBinding ( N ) */
+     p = JS_VALUE_GET_OBJ(ctx->global_var_obj);
+     prs = find_own_property(&pr, p, prop);
++    if (!prs && JS_HasProperty(ctx, ctx->global_obj, prop) == 1) {
++        funlogline();
++    }
+     if (prs)
+         return FALSE; /* lexical variables cannot be deleted */
+     ret = JS_HasProperty(ctx, ctx->global_obj, prop);
+@@ -10189,6 +10192,9 @@
+     if (ret < 0)
+         return -1;
+     if (ret) {
++        if (JS_GetOwnPropertyInternal(ctx, NULL, JS_VALUE_GET_OBJ(ctx->global_obj), prop) == 1) {
++            funlogline();
++        }
+         return JS_DeleteProperty(ctx, ctx->global_obj, prop, 0);
+     } else {
+         return TRUE;
+```
+
+The instrumentation checks for:
+1. Cases where a property exists in the global object but not in the lexical scope
+2. Cases where the property exists but may not be configurable
+
+These checks help identify situations where the deletion behavior may not match the expected JavaScript semantics.

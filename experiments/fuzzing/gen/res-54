@@ -1,0 +1,38 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-copy_str16(uint16_t *, const JSString *, int, int)
+-------------------------
+Here are the potential logical bugs in the target function "copy_str16":
+
+:copy_str16:4082
+:copy_str16:4089
+
+---
+
+1. Line 4082: The function doesn't check if the offset is within bounds of the string length, which could lead to reading out of bounds memory when p->is_wide_char is true.
+
+2. Line 4089: Similarly, when p->is_wide_char is false, there's no bounds checking on the offset parameter before accessing p->u.str8 + offset.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4079,6 +4079,8 @@
+ static void copy_str16(uint16_t *dst, const JSString *p, int offset, int len)
+ {
+     if (p->is_wide_char) {
++        if (offset < 0 || offset > p->len)
++            funlogline();
+         memcpy(dst, p->u.str16 + offset, len * 2);
+     } else {
+         const uint8_t *src1 = p->u.str8 + offset;
+@@ -4086,6 +4088,8 @@
+ 
+         for(i = 0; i < len; i++)
+             dst[i] = src1[i];
++        if (offset < 0 || offset > p->len)
++            funlogline();
+     }
+ }
+```

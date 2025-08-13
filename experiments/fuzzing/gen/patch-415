@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2936,6 +2936,9 @@
+ {
+     JSValue val;
+ 
++    if (!str) {
++        funlogline();
++    }
+     if (len == 0 ||
+         (!is_digit(*str) &&
+          count_ascii((const uint8_t *)str, len) == len)) {
+@@ -2943,6 +2946,9 @@
+         if (atom)
+             return atom;
+     }
+     val = JS_NewStringLen(ctx, str, len);
++    if (!val) {
++        funlogline();
++    }
+     if (JS_IsException(val))
+         return JS_ATOM_NULL;
+     return JS_NewAtomStr(ctx, JS_VALUE_GET_STRING(val));

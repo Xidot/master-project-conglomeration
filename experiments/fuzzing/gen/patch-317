@@ -1,0 +1,15 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1334,6 +1334,12 @@
+ 
+ void js_free_rt(JSRuntime *rt, void *ptr)
+ {
++    if (!ptr) {
++        return;
++    }
++    if (!rt || !rt->mf.js_free || !rt->malloc_state.opaque) {
++        funlogline();
++        return;
++    }
+     rt->mf.js_free(&rt->malloc_state, ptr);
+ }

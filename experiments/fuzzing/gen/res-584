@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_strdup(JSContext *, const char *)
+-------------------------
+Based on the provided code and call graph, here are the potential logical bugs:
+
+:js_strdup:1435
+
+---
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1434,6 +1434,9 @@
+ /// Line number here: 1435
+ char *js_strdup(JSContext *ctx, const char *str)
+ {
++    if (str == NULL) {
++        funlogline();
++    }
+     return js_strndup(ctx, str, strlen(str));
+ }
+```
+
+Reasoning:
+1. The main logical bug is that `js_strdup()` doesn't check for NULL input string before passing it to `strlen()` in `js_strndup()`. This would lead to undefined behavior if NULL is passed as input. The fix adds a NULL check before proceeding.
+
+Note that while this could be considered a defensive programming issue rather than a pure logic error, it's still worth flagging since the function makes no guarantees about NULL input handling in its contract.

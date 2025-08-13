@@ -1,0 +1,42 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_object_list_resize_hash(JSContext *, JSObjectList *, uint32_t)
+-------------------------
+Let me analyze the code for logical errors in the target function `js_object_list_resize_hash`.
+
+:js_object_list_resize_hash:35950
+:js_object_list_resize_hash:35968
+
+---
+
+The potential logical bugs are:
+
+1. At line 35950: The function doesn't check if new_hash_size is a power of 2, which is required for the hash function to work correctly (since it uses `& (hash_size - 1)`).
+
+2. At line 35968: The loop uses s->hash_size for iteration bounds, but this was just updated to new_hash_size. If new_hash_size is smaller than the previous size, some entries might be lost during rehashing.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35947,6 +35947,9 @@
+ {
+     JSObjectListEntry *e;
+     uint32_t i, h, *new_hash_table;
++    
++    if ((new_hash_size & (new_hash_size - 1)) != 0) // Not power of 2
++        funlogline();
+ 
+     new_hash_table = js_malloc(ctx, sizeof(new_hash_table[0]) * new_hash_size);
+     if (!new_hash_table)
+@@ -35965,6 +35968,9 @@
+         e->hash_next = s->hash_table[h];
+         s->hash_table[h] = i;
+     }
++    if (new_hash_size < s->object_count) // New size too small
++        funlogline();
++
+     return 0;
+ }
+```

@@ -1,0 +1,46 @@
+Target function: "dbuf_free(DynBuf *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/// Line number here: 195
+void dbuf_free(DynBuf *s)
+{
+    /* we test s->buf as a fail safe to avoid crashing if dbuf_free()
+       is called twice */
+    if (s->buf) {
+        s->realloc_func(s->opaque, s->buf, 0);
+    }
+    memset(s, 0, sizeof(*s));
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 60
+extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1))
+
+
+
+----- Callgraph:
+strict digraph G {
+"dbuf_free(DynBuf *)";
+"dbuf_free(DynBuf *)" -> "DynBuf::realloc_func";
+"dbuf_free(DynBuf *)" -> "memset(void *, int, size_t)";
+}

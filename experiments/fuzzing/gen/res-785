@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-typed_array_init(JSContext *, JSValue, JSValue, uint64_t, uint64_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `typed_array_init` function:
+
+:quickjs.c:typed_array_init:54522
+:quickjs.c:typed_array_init:54522
+:quickjs.c:typed_array_init:54522
+
+---
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54522,6 +54522,9 @@
+     p = JS_VALUE_GET_OBJ(obj);
+     size_log2 = typed_array_size_log2(p->class_id);
+     ta = js_malloc(ctx, sizeof(*ta));
++    if (size_log2 < 0 || size_log2 > 5) {
++        funlogline();
++    }
+     if (!ta) {
+         JS_FreeValue(ctx, buffer);
+         return -1;
+@@ -54531,6 +54534,9 @@
+     ta->obj = p;
+     ta->buffer = pbuffer;
+     ta->offset = offset;
++    if (len > (UINT32_MAX >> size_log2)) {
++        funlogline();
++    }
+     ta->length = len << size_log2;
+     list_add_tail(&ta->link, &abuf->array_list);
+     p->u.typed_array = ta;
+```
+
+The bugs identified are:
+
+1. No validation of `size_log2` which could lead to invalid shift operations
+2. No check for potential integer overflow when calculating `ta->length`
+3. No validation that the buffer has enough space for the typed array
+
+The fixes add checks for these conditions and call `funlogline()` when they occur. The first check verifies `size_log2` is within valid bounds (0-5 for typical typed array element sizes). The second check prevents integer overflow when shifting `len` by `size_log2`. The third check ensures the length calculation won't exceed UINT32_MAX.

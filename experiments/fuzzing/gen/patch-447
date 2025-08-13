@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49651,6 +49651,8 @@
+     JSValue executor, result_promise;
+     JSCFunctionDataRecord *s;
+     int i;
++    if (!resolving_funcs)
++        return JS_EXCEPTION;
+ 
+     executor = js_promise_executor_new(ctx);
+     if (JS_IsException(executor))
+@@ -49666,6 +49668,8 @@
+     if (JS_IsException(result_promise))
+         goto fail;
+     s = JS_GetOpaque(executor, JS_CLASS_C_FUNCTION_DATA);
++    if (!s)
++        goto fail;
+     for(i = 0; i < 2; i++) {
+         if (check_function(ctx, s->data[i]))
+             goto fail;

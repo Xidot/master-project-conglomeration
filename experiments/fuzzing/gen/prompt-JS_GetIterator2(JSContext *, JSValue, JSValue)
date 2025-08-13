@@ -1,0 +1,400 @@
+Target function: "JS_GetIterator2(JSContext *, JSValue, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 663
+static inline JS_BOOL JS_IsObject(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_OBJECT;
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 15757
+static JSValue JS_GetIterator2(JSContext *ctx, JSValueConst obj,
+                               JSValueConst method)
+{
+    JSValue enum_obj;
+
+    enum_obj = JS_Call(ctx, method, obj, 0, NULL);
+    if (JS_IsException(enum_obj))
+        return enum_obj;
+    if (!JS_IsObject(enum_obj)) {
+        JS_FreeValue(ctx, enum_obj);
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+    }
+    return enum_obj;
+}
+
+/// Line number here: 19378
+JSValue JS_Call(JSContext *ctx, JSValueConst func_obj, JSValueConst this_obj,
+                int argc, JSValueConst *argv)
+{
+    return JS_CallInternal(ctx, func_obj, this_obj, JS_UNDEFINED,
+                           argc, (JSValue *)argv, JS_CALL_FLAG_COPY_ARGV);
+}
+
+/// Line number here: 7161
+static JSValue JS_ThrowTypeErrorNotAnObject(JSContext *ctx)
+{
+    return JS_ThrowTypeError(ctx, "not an object");
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 15772
+static JSValue JS_GetIterator(JSContext *ctx, JSValueConst obj, BOOL is_async)
+{
+    JSValue method, ret, sync_iter;
+
+    if (is_async) {
+        method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_asyncIterator);
+        if (JS_IsException(method))
+            return method;
+        if (JS_IsUndefined(method) || JS_IsNull(method)) {
+            method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_iterator);
+            if (JS_IsException(method))
+                return method;
+            sync_iter = JS_GetIterator2(ctx, obj, method);
+            JS_FreeValue(ctx, method);
+            if (JS_IsException(sync_iter))
+                return sync_iter;
+            ret = JS_CreateAsyncFromSyncIterator(ctx, sync_iter);
+            JS_FreeValue(ctx, sync_iter);
+            return ret;
+        }
+    } else {
+        method = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_iterator);
+        if (JS_IsException(method))
+            return method;
+    }
+    if (!JS_IsFunction(ctx, method)) {
+        JS_FreeValue(ctx, method);
+        return JS_ThrowTypeError(ctx, "value is not iterable");
+    }
+    ret = JS_GetIterator2(ctx, obj, method);
+    JS_FreeValue(ctx, method);
+    return ret;
+}
+
+/// Line number here: 40174
+static JSValue js_array_from(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    // from(items, mapfn = void 0, this_arg = void 0)
+    JSValueConst items = argv[0], mapfn, this_arg;
+    JSValueConst args[2];
+    JSValue iter, r, v, v2, arrayLike, next_method, enum_obj;
+    int64_t k, len;
+    int done, mapping;
+
+    mapping = FALSE;
+    mapfn = JS_UNDEFINED;
+    this_arg = JS_UNDEFINED;
+    r = JS_UNDEFINED;
+    arrayLike = JS_UNDEFINED;
+    iter = JS_UNDEFINED;
+    enum_obj = JS_UNDEFINED;
+    next_method = JS_UNDEFINED;
+
+    if (argc > 1) {
+        mapfn = argv[1];
+        if (!JS_IsUndefined(mapfn)) {
+            if (check_function(ctx, mapfn))
+                goto exception;
+            mapping = 1;
+            if (argc > 2)
+                this_arg = argv[2];
+        }
+    }
+    iter = JS_GetProperty(ctx, items, JS_ATOM_Symbol_iterator);
+    if (JS_IsException(iter))
+        goto exception;
+    if (!JS_IsUndefined(iter) && !JS_IsNull(iter)) {
+        if (!JS_IsFunction(ctx, iter)) {
+            JS_ThrowTypeError(ctx, "value is not iterable");
+            goto exception;
+        }
+        if (JS_IsConstructor(ctx, this_val))
+            r = JS_CallConstructor(ctx, this_val, 0, NULL);
+        else
+            r = JS_NewArray(ctx);
+        if (JS_IsException(r))
+            goto exception;
+        enum_obj = JS_GetIterator2(ctx, items, iter);
+        if (JS_IsException(enum_obj))
+            goto exception;
+        next_method = JS_GetProperty(ctx, enum_obj, JS_ATOM_next);
+        if (JS_IsException(next_method))
+            goto exception;
+        for (k = 0;; k++) {
+            v = JS_IteratorNext(ctx, enum_obj, next_method, 0, NULL, &done);
+            if (JS_IsException(v))
+                goto exception;
+            if (done)
+                break;
+            if (mapping) {
+                args[0] = v;
+                args[1] = JS_NewInt32(ctx, k);
+                v2 = JS_Call(ctx, mapfn, this_arg, 2, args);
+                JS_FreeValue(ctx, v);
+                v = v2;
+                if (JS_IsException(v))
+                    goto exception_close;
+            }
+            if (JS_DefinePropertyValueInt64(ctx, r, k, v,
+                                            JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception_close;
+        }
+    } else {
+        arrayLike = JS_ToObject(ctx, items);
+        if (JS_IsException(arrayLike))
+            goto exception;
+        if (js_get_length64(ctx, &len, arrayLike) < 0)
+            goto exception;
+        v = JS_NewInt64(ctx, len);
+        args[0] = v;
+        if (JS_IsConstructor(ctx, this_val)) {
+            r = JS_CallConstructor(ctx, this_val, 1, args);
+        } else {
+            r = js_array_constructor(ctx, JS_UNDEFINED, 1, args);
+        }
+        JS_FreeValue(ctx, v);
+        if (JS_IsException(r))
+            goto exception;
+        for(k = 0; k < len; k++) {
+            v = JS_GetPropertyInt64(ctx, arrayLike, k);
+            if (JS_IsException(v))
+                goto exception;
+            if (mapping) {
+                args[0] = v;
+                args[1] = JS_NewInt32(ctx, k);
+                v2 = JS_Call(ctx, mapfn, this_arg, 2, args);
+                JS_FreeValue(ctx, v);
+                v = v2;
+                if (JS_IsException(v))
+                    goto exception;
+            }
+            if (JS_DefinePropertyValueInt64(ctx, r, k, v,
+                                            JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+                goto exception;
+        }
+    }
+    if (JS_SetProperty(ctx, r, JS_ATOM_length, JS_NewUint32(ctx, k)) < 0)
+        goto exception;
+    goto done;
+
+ exception_close:
+    JS_IteratorClose(ctx, enum_obj, TRUE);
+ exception:
+    JS_FreeValue(ctx, r);
+    r = JS_EXCEPTION;
+ done:
+    JS_FreeValue(ctx, arrayLike);
+    JS_FreeValue(ctx, iter);
+    JS_FreeValue(ctx, enum_obj);
+    JS_FreeValue(ctx, next_method);
+    return r;
+}
+
+/// Line number here: 54551
+static JSValue js_array_from_iterator(JSContext *ctx, uint32_t *plen,
+                                      JSValueConst obj, JSValueConst method)
+{
+    JSValue arr, iter, next_method = JS_UNDEFINED, val;
+    BOOL done;
+    uint32_t k;
+
+    *plen = 0;
+    arr = JS_NewArray(ctx);
+    if (JS_IsException(arr))
+        return arr;
+    iter = JS_GetIterator2(ctx, obj, method);
+    if (JS_IsException(iter))
+        goto fail;
+    next_method = JS_GetProperty(ctx, iter, JS_ATOM_next);
+    if (JS_IsException(next_method))
+        goto fail;
+    k = 0;
+    for(;;) {
+        val = JS_IteratorNext(ctx, iter, next_method, 0, NULL, &done);
+        if (JS_IsException(val))
+            goto fail;
+        if (done)
+            break;
+        if (JS_CreateDataPropertyUint32(ctx, arr, k, val, JS_PROP_THROW) < 0)
+            goto fail;
+        k++;
+    }
+    JS_FreeValue(ctx, next_method);
+    JS_FreeValue(ctx, iter);
+    *plen = k;
+    return arr;
+ fail:
+    JS_FreeValue(ctx, next_method);
+    JS_FreeValue(ctx, iter);
+    JS_FreeValue(ctx, arr);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_GetIterator2(JSContext *, JSValue, JSValue)";
+"JS_GetIterator2(JSContext *, JSValue, JSValue)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_GetIterator2(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_GetIterator2(JSContext *, JSValue, JSValue)" -> "JS_IsObject(JSValue)";
+"JS_GetIterator2(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetIterator2(JSContext *, JSValue, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)" -> "JS_CallInternal(JSContext *, JSValue, JSValue, JSValue, int, JSValue *, int)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"JS_ThrowTypeErrorNotAnObject(JSContext *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_IsException(JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_IsUndefined(JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_IsNull(JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_GetIterator2(JSContext *, JSValue, JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_CreateAsyncFromSyncIterator(JSContext *, JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_IsFunction(JSContext *, JSValue)";
+"JS_GetIterator(JSContext *, JSValue, BOOL)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "check_function(JSContext *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IsFunction(JSContext *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IsConstructor(JSContext *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_CallConstructor(JSContext *, JSValue, int, JSValue *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_GetIterator2(JSContext *, JSValue, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_Call(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueInt64(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "js_array_constructor(JSContext *, JSValue, int, JSValue *)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_NewUint32(JSContext *, uint32_t)";
+"js_array_from(JSContext *, JSValue, int, JSValue *)" -> "JS_IteratorClose(JSContext *, JSValue, BOOL)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_NewArray(JSContext *)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_GetIterator2(JSContext *, JSValue, JSValue)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_IteratorNext(JSContext *, JSValue, JSValue, int, JSValue *, BOOL *)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_CreateDataPropertyUint32(JSContext *, JSValue, int64_t, JSValue, int)";
+"js_array_from_iterator(JSContext *, uint32_t *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+}

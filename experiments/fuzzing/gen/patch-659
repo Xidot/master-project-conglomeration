@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11837,6 +11837,8 @@
+ static char *js_u64toa(char *q, int64_t n, unsigned int base)
+ {
+     int digit;
++    if (n < 0 && base != 10)
++        funlogline();
+     if (base == 10) {
+         /* division by known base uses multiplication */
+         do {
+@@ -11847,6 +11849,8 @@
+     } else {
+         do {
+             digit = (uint64_t)n % base;
++            if (digit < 0)
++                funlogline();
+             n = (uint64_t)n / base;
+             *--q = digits[digit];
+         } while (n != 0);

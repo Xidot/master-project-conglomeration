@@ -1,0 +1,27 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5493,6 +5493,8 @@
+ static void free_property(JSRuntime *rt, JSProperty *pr, int prop_flags)
+ {
+     if (unlikely(prop_flags & JS_PROP_TMASK)) {
++        if (!pr)
++            funlogline();
+         if ((prop_flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
+             if (pr->u.getset.getter)
+                 JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter));
+@@ -5500,8 +5502,12 @@
+                 JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter));
+         } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
++            if (!pr->u.var_ref)
++                funlogline();
+             free_var_ref(rt, pr->u.var_ref);
+         } else if ((prop_flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
++            if (!pr)
++                funlogline();
+             js_autoinit_free(rt, pr);
+         }
+     } else {
++        funlogline(); // No NULL check for pr->u.value access
+         JS_FreeValueRT(rt, pr->u.value);
+     }
+}

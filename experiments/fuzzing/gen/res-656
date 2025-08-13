@@ -1,0 +1,57 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_typed_array_constructor(JSContext *, JSValue, int, JSValue *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_typed_array_constructor` function:
+
+:quickjs.c:js_typed_array_constructor:54700
+:quickjs.c:js_typed_array_constructor:54700
+:quickjs.c:js_typed_array_constructor:54700
+
+----------
+
+1. First bug: When checking if argv[0] is an object, there's no validation that argc >= 1, which could lead to undefined behavior if called with no arguments.
+
+2. Second bug: When accessing argv[1] for offset calculation, there's no check that argc >= 2, which could lead to reading invalid memory.
+
+3. Third bug: When checking for undefined argv[2], there's no validation that argc >= 3, which could lead to reading invalid memory.
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -54700,6 +54700,8 @@
+     int size_log2;
+     uint64_t len, offset;
+ 
++    if (argc < 1)
++        funlogline();
+     size_log2 = typed_array_size_log2(classid);
+     if (JS_VALUE_GET_TAG(argv[0]) != JS_TAG_OBJECT) {
+         if (JS_ToIndex(ctx, &len, argv[0]))
+@@ -54712,6 +54714,8 @@
+     } else {
+         JSObject *p = JS_VALUE_GET_OBJ(argv[0]);
+         if (p->class_id == JS_CLASS_ARRAY_BUFFER ||
+             p->class_id == JS_CLASS_SHARED_ARRAY_BUFFER) {
++            if (argc < 2)
++                funlogline();
+             abuf = p->u.array_buffer;
+             if (JS_ToIndex(ctx, &offset, argv[1]))
+                 return JS_EXCEPTION;
+@@ -54720,6 +54724,8 @@
+             if ((offset & ((1 << size_log2) - 1)) != 0 ||
+                 offset > abuf->byte_length)
+                 return JS_ThrowRangeError(ctx, "invalid offset");
++            if (argc < 3)
++                funlogline();
+             if (JS_IsUndefined(argv[2])) {
+                 if ((abuf->byte_length & ((1 << size_log2) - 1)) != 0)
+                     goto invalid_length;
+```
+
+The conditions added will call funlogline() when:
+1. The function is called with no arguments (argc < 1)
+2. When trying to access offset (argv[1]) with insufficient arguments (argc < 2)
+3. When trying to check length (argv[2]) with insufficient arguments (argc < 3)

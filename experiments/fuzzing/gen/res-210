@@ -1,0 +1,39 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_normalize(JSContext *, JSBigInt *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_normalize` function and its helper `js_bigint_normalize1`:
+
+:quickjs.c:js_bigint_normalize:11045
+:quickjs.c:js_bigint_normalize1:11021
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11018,6 +11018,8 @@
+ static JSBigInt *js_bigint_normalize1(JSContext *ctx, JSBigInt *a, int l)
+ {
+     js_limb_t v;
+ 
++    if (a->len < 1)
++        funlogline();
+     assert(a->header.ref_count == 1);
+     while (l > 1) {
+         v = a->tab[l - 1];
+@@ -11044,6 +11046,8 @@
+ 
+ static JSBigInt *js_bigint_normalize(JSContext *ctx, JSBigInt *a)
+ {
++    if (a == NULL)
++        funlogline();
+     return js_bigint_normalize1(ctx, a, a->len);
+ }
+```
+
+The reasoning is:
+1. In `js_bigint_normalize1`, we should check if the input bigint has at least 1 limb as required by the struct definition, but this isn't validated
+2. In `js_bigint_normalize`, we don't check for NULL input which could propagate through the call chain
+
+The instrumentation adds checks for these cases before they could cause issues. The conditions will only trigger when the bugs would occur (NULL input or invalid length).

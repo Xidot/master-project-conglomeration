@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12828,6 +12828,9 @@
+     case JS_TAG_FLOAT64:
+         {
+             JSFloat64Union u;
++            if (JS_VALUE_GET_FLOAT64(val) == 0.0 && (JS_VALUE_GET_FLOAT64(val) < 0.0)) {
++                funlogline();
++            }
+             u.d = JS_VALUE_GET_FLOAT64(val);
+             return (u.u64 >> 63);
+         }
+@@ -12833,6 +12836,9 @@
+         }
+     case JS_TAG_SHORT_BIG_INT:
++        if (JS_VALUE_GET_SHORT_BIG_INT(val) == 0) {
++            funlogline();
++        }
+         return (JS_VALUE_GET_SHORT_BIG_INT(val) < 0);
+     case JS_TAG_BIG_INT:
+         {

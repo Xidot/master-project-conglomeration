@@ -1,0 +1,626 @@
+Target function: "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 12523
+int JS_ToInt64Sat(JSContext *ctx, int64_t *pres, JSValueConst val)
+{
+    return JS_ToInt64SatFree(ctx, pres, JS_DupValue(ctx, val));
+}
+
+/// Line number here: 12482
+static int JS_ToInt64SatFree(JSContext *ctx, int64_t *pres, JSValue val)
+{
+    uint32_t tag;
+
+ redo:
+    tag = JS_VALUE_GET_NORM_TAG(val);
+    switch(tag) {
+    case JS_TAG_INT:
+    case JS_TAG_BOOL:
+    case JS_TAG_NULL:
+    case JS_TAG_UNDEFINED:
+        *pres = JS_VALUE_GET_INT(val);
+        return 0;
+    case JS_TAG_EXCEPTION:
+        *pres = 0;
+        return -1;
+    case JS_TAG_FLOAT64:
+        {
+            double d = JS_VALUE_GET_FLOAT64(val);
+            if (isnan(d)) {
+                *pres = 0;
+            } else {
+                if (d < INT64_MIN)
+                    *pres = INT64_MIN;
+                else if (d >= 0x1p63) /* must use INT64_MAX + 1 because INT64_MAX cannot be exactly represented as a double */
+                    *pres = INT64_MAX;
+                else
+                    *pres = (int64_t)d;
+            }
+        }
+        return 0;
+    default:
+        val = JS_ToNumberFree(ctx, val);
+        if (JS_IsException(val)) {
+            *pres = 0;
+            return -1;
+        }
+        goto redo;
+    }
+}
+
+/// Line number here: 12784
+int JS_ToIndex(JSContext *ctx, uint64_t *plen, JSValueConst val)
+{
+    int64_t v;
+    if (JS_ToInt64Sat(ctx, &v, val))
+        return -1;
+    if (v < 0 || v > MAX_SAFE_INTEGER) {
+        JS_ThrowRangeError(ctx, "invalid array index");
+        *plen = 0;
+        return -1;
+    }
+    *plen = v;
+    return 0;
+}
+
+/// Line number here: 40405
+static JSValue js_array_at(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    JSValue obj, ret;
+    int64_t len, idx;
+    JSValue *arrp;
+    uint32_t count;
+
+    obj = JS_ToObject(ctx, this_val);
+    if (js_get_length64(ctx, &len, obj))
+        goto exception;
+
+    if (JS_ToInt64Sat(ctx, &idx, argv[0]))
+        goto exception;
+
+    if (idx < 0)
+        idx = len + idx;
+    if (idx < 0 || idx >= len) {
+        ret = JS_UNDEFINED;
+    } else if (js_get_fast_array(ctx, obj, &arrp, &count) && idx < count) {
+        ret = JS_DupValue(ctx, arrp[idx]);
+    } else {
+        int present = JS_TryGetPropertyInt64(ctx, obj, idx, &ret);
+        if (present < 0)
+            goto exception;
+        if (!present)
+            ret = JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, obj);
+    return ret;
+ exception:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 40440
+static JSValue js_array_with(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    JSValue arr, obj, ret, *arrp, *pval;
+    JSObject *p;
+    int64_t i, len, idx;
+    uint32_t count32;
+
+    ret = JS_EXCEPTION;
+    arr = JS_UNDEFINED;
+    obj = JS_ToObject(ctx, this_val);
+    if (js_get_length64(ctx, &len, obj))
+        goto exception;
+
+    if (JS_ToInt64Sat(ctx, &idx, argv[0]))
+        goto exception;
+
+    if (idx < 0)
+        idx = len + idx;
+
+    if (idx < 0 || idx >= len) {
+        JS_ThrowRangeError(ctx, "invalid array index: %" PRId64, idx);
+        goto exception;
+    }
+
+    arr = js_allocate_fast_array(ctx, len);
+    if (JS_IsException(arr))
+        goto exception;
+
+    p = JS_VALUE_GET_OBJ(arr);
+    i = 0;
+    pval = p->u.array.u.values;
+    if (js_get_fast_array(ctx, obj, &arrp, &count32) && count32 == len) {
+        for (; i < idx; i++, pval++)
+            *pval = JS_DupValue(ctx, arrp[i]);
+        *pval = JS_DupValue(ctx, argv[1]);
+        for (i++, pval++; i < len; i++, pval++)
+            *pval = JS_DupValue(ctx, arrp[i]);
+    } else {
+        for (; i < idx; i++, pval++)
+            if (-1 == JS_TryGetPropertyInt64(ctx, obj, i, pval))
+                goto fill_and_fail;
+        *pval = JS_DupValue(ctx, argv[1]);
+        for (i++, pval++; i < len; i++, pval++) {
+            if (-1 == JS_TryGetPropertyInt64(ctx, obj, i, pval)) {
+            fill_and_fail:
+                for (; i < len; i++, pval++)
+                    *pval = JS_UNDEFINED;
+                goto exception;
+            }
+        }
+    }
+
+    if (JS_SetProperty(ctx, arr, JS_ATOM_length, JS_NewInt64(ctx, len)) < 0)
+        goto exception;
+
+    ret = arr;
+    arr = JS_UNDEFINED;
+
+exception:
+    JS_FreeValue(ctx, arr);
+    JS_FreeValue(ctx, obj);
+    return ret;
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 43679
+static JSValue js_string_repeat(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    JSValue str;
+    StringBuffer b_s, *b = &b_s;
+    JSString *p;
+    int64_t val;
+    int n, len;
+
+    str = JS_ToStringCheckObject(ctx, this_val);
+    if (JS_IsException(str))
+        goto fail;
+    if (JS_ToInt64Sat(ctx, &val, argv[0]))
+        goto fail;
+    if (val < 0 || val > 2147483647) {
+        JS_ThrowRangeError(ctx, "invalid repeat count");
+        goto fail;
+    }
+    n = val;
+    p = JS_VALUE_GET_STRING(str);
+    len = p->len;
+    if (len == 0 || n == 1)
+        return str;
+    // XXX: potential arithmetic overflow
+    if (val * len > JS_STRING_LEN_MAX) {
+        JS_ThrowRangeError(ctx, "invalid string length");
+        goto fail;
+    }
+    if (string_buffer_init2(ctx, b, n * len, p->is_wide_char))
+        goto fail;
+    if (len == 1) {
+        string_buffer_fill(b, string_get(p, 0), n);
+    } else {
+        while (n-- > 0) {
+            string_buffer_concat(b, p, 0, len);
+        }
+    }
+    JS_FreeValue(ctx, str);
+    return string_buffer_end(b);
+
+fail:
+    JS_FreeValue(ctx, str);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 702
+typedef struct JSTypedArray {
+    struct list_head link; /* link to arraybuffer */
+    JSObject *obj; /* back pointer to the TypedArray/DataView object */
+    JSObject *buffer; /* based array buffer */
+    uint32_t offset; /* offset in the array buffer */
+    uint32_t length; /* length in the array buffer */
+} JSTypedArray
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/// Line number here: 53045
+static JSValue js_typed_array_set_internal(JSContext *ctx,
+                                           JSValueConst dst,
+                                           JSValueConst src,
+                                           JSValueConst off)
+{
+    JSObject *p;
+    JSObject *src_p;
+    uint32_t i;
+    int64_t src_len, offset;
+    JSValue val, src_obj = JS_UNDEFINED;
+
+    p = get_typed_array(ctx, dst, 0);
+    if (!p)
+        goto fail;
+    if (JS_ToInt64Sat(ctx, &offset, off))
+        goto fail;
+    if (offset < 0)
+        goto range_error;
+    if (typed_array_is_detached(ctx, p)) {
+    detached:
+        JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        goto fail;
+    }
+    src_obj = JS_ToObject(ctx, src);
+    if (JS_IsException(src_obj))
+        goto fail;
+    src_p = JS_VALUE_GET_OBJ(src_obj);
+    if (src_p->class_id >= JS_CLASS_UINT8C_ARRAY &&
+        src_p->class_id <= JS_CLASS_FLOAT64_ARRAY) {
+        JSTypedArray *dest_ta = p->u.typed_array;
+        JSArrayBuffer *dest_abuf = dest_ta->buffer->u.array_buffer;
+        JSTypedArray *src_ta = src_p->u.typed_array;
+        JSArrayBuffer *src_abuf = src_ta->buffer->u.array_buffer;
+        int shift = typed_array_size_log2(p->class_id);
+
+        if (src_abuf->detached)
+            goto detached;
+
+        src_len = src_p->u.array.count;
+        if (offset > (int64_t)(p->u.array.count - src_len))
+            goto range_error;
+
+        /* copying between typed objects */
+        if (src_p->class_id == p->class_id) {
+            /* same type, use memmove */
+            memmove(dest_abuf->data + dest_ta->offset + (offset << shift),
+                    src_abuf->data + src_ta->offset, src_len << shift);
+            goto done;
+        }
+        if (dest_abuf->data == src_abuf->data) {
+            /* copying between the same buffer using different types of mappings
+               would require a temporary buffer */
+        }
+        /* otherwise, default behavior is slow but correct */
+    } else {
+        if (js_get_length64(ctx, &src_len, src_obj))
+            goto fail;
+        if (offset > (int64_t)(p->u.array.count - src_len)) {
+        range_error:
+            JS_ThrowRangeError(ctx, "invalid array length");
+            goto fail;
+        }
+    }
+    for(i = 0; i < src_len; i++) {
+        val = JS_GetPropertyUint32(ctx, src_obj, i);
+        if (JS_IsException(val))
+            goto fail;
+        if (JS_SetPropertyUint32(ctx, dst, offset + i, val) < 0)
+            goto fail;
+    }
+done:
+    JS_FreeValue(ctx, src_obj);
+    return JS_UNDEFINED;
+fail:
+    JS_FreeValue(ctx, src_obj);
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 53123
+static JSValue js_typed_array_at(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    JSObject *p;
+    int64_t idx, len;
+
+    p = get_typed_array(ctx, this_val, 0);
+    if (!p)
+        return JS_EXCEPTION;
+
+    if (typed_array_is_detached(ctx, p)) {
+        JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        return JS_EXCEPTION;
+    }
+
+    if (JS_ToInt64Sat(ctx, &idx, argv[0]))
+        return JS_EXCEPTION;
+
+    len = p->u.array.count;
+    if (idx < 0)
+        idx = len + idx;
+    if (idx < 0 || idx >= len)
+        return JS_UNDEFINED;
+    return JS_GetPropertyInt64(ctx, this_val, idx);
+}
+
+/// Line number here: 53149
+static JSValue js_typed_array_with(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv)
+{
+    JSValue arr, val;
+    JSObject *p;
+    int64_t idx, len;
+
+    p = get_typed_array(ctx, this_val, /*is_dataview*/0);
+    if (!p)
+        return JS_EXCEPTION;
+    if (typed_array_is_detached(ctx, p))
+        return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+
+    if (JS_ToInt64Sat(ctx, &idx, argv[0]))
+        return JS_EXCEPTION;
+
+    len = p->u.array.count;
+    if (idx < 0)
+        idx = len + idx;
+
+    val = JS_ToPrimitive(ctx, argv[1], HINT_NUMBER);
+    if (JS_IsException(val))
+        return JS_EXCEPTION;
+
+    if (typed_array_is_detached(ctx, p) || idx < 0 || idx >= len)
+        return JS_ThrowRangeError(ctx, "invalid array index");
+
+    arr = js_typed_array_constructor_ta(ctx, JS_UNDEFINED, this_val,
+                                        p->class_id);
+    if (JS_IsException(arr)) {
+        JS_FreeValue(ctx, val);
+        return JS_EXCEPTION;
+    }
+    if (JS_SetPropertyInt64(ctx, arr, idx, val) < 0) {
+        JS_FreeValue(ctx, arr);
+        return JS_EXCEPTION;
+    }
+    return arr;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"JS_ToInt64Sat(JSContext *, int64_t *, JSValue)" -> "JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)";
+"JS_ToInt64Sat(JSContext *, int64_t *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)";
+"JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)" -> "__builtin_isnan()";
+"JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)" -> "JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToInt64SatFree(JSContext *, int64_t *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"JS_ToIndex(JSContext *, uint64_t *, JSValue)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"JS_ToIndex(JSContext *, uint64_t *, JSValue)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "js_get_fast_array(JSContext *, JSValue, JSValue **, uint32_t *)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_TryGetPropertyInt64(JSContext *, JSValue, int64_t, JSValue *)";
+"js_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "js_allocate_fast_array(JSContext *, int64_t)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "js_get_fast_array(JSContext *, JSValue, JSValue **, uint32_t *)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_TryGetPropertyInt64(JSContext *, JSValue, int64_t, JSValue *)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringCheckObject(JSContext *, JSValue)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_fill(StringBuffer *, int, int)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "string_get(const JSString *, int)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_string_repeat(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "get_typed_array(JSContext *, JSValue, int)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "typed_array_is_detached(JSContext *, JSObject *)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "memmove(void *, const void *, size_t)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_GetPropertyUint32(JSContext *, JSValue, uint32_t)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_SetPropertyUint32(JSContext *, JSValue, uint32_t, JSValue)";
+"js_typed_array_set_internal(JSContext *, JSValue, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)" -> "get_typed_array(JSContext *, JSValue, int)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)" -> "typed_array_is_detached(JSContext *, JSObject *)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_typed_array_at(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "get_typed_array(JSContext *, JSValue, int)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "typed_array_is_detached(JSContext *, JSObject *)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt64Sat(JSContext *, int64_t *, JSValue)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ToPrimitive(JSContext *, JSValue, int)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "js_typed_array_constructor_ta(JSContext *, JSValue, JSValue, int)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_typed_array_with(JSContext *, JSValue, int, JSValue *)" -> "JS_SetPropertyInt64(JSContext *, JSValue, int64_t, JSValue)";
+}

@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50963,6 +50963,8 @@
+     /* the initial approximation is very good, so only a few
+        iterations are necessary */
+     for(;;) {
++        if (y < -10000 || y > 10000)  // Prevent extreme year values
++            funlogline();
+         d1 = d - days_from_year(y);
+         if (d1 < 0) {
+             y--;
+@@ -50970,6 +50972,8 @@
+         } else {
+             nd = days_in_year(y);
+             if (d1 < nd)
++                if (d1 < 0 || d1 >= nd)  // Check for invalid day range
++                    funlogline();
+                 break;
+             d1 -= nd;
+             y++;

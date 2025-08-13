@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3605,9 +3605,13 @@
+ static int string_buffer_putc16(StringBuffer *s, uint32_t c)
+ {
+     if (likely(s->len < s->size)) {
++        if (unlikely(c > 0xffff)) {
++            funlogline();
++        }
+         if (s->is_wide_char) {
+             s->str->u.str16[s->len++] = c;
+             return 0;
+         } else if (c < 0x100) {
+             s->str->u.str8[s->len++] = c;
+             return 0;
++        } else {
++            funlogline();
+         }
+     }
+     return string_buffer_putc_slow(s, c);

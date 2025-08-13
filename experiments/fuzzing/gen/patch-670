@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36322,6 +36322,9 @@
+     js_limb_t v, b;
+     int shift;
+     
++    if (JS_VALUE_GET_TAG(obj) != JS_TAG_SHORT_BIG_INT && JS_VALUE_GET_TAG(obj) != JS_TAG_BIG_INT)
++        funlogline();
++
+     bc_put_u8(s, BC_TAG_BIG_INT);
+ 
+     if (JS_VALUE_GET_TAG(obj) == JS_TAG_SHORT_BIG_INT)
+@@ -36367,6 +36370,8 @@
+     }
+     bc_put_leb128(s, len);
+     if (len > 0) {
++        if (len % (JS_LIMB_BITS / 8) == 0 && len / (JS_LIMB_BITS / 8) > p->len)
++            funlogline();
+         for(i = 0; i < (len / (JS_LIMB_BITS / 8)); i++) {
+ #if JS_LIMB_BITS == 32
+             bc_put_u32(s, p->tab[i]);
+@@ -36374,6 +36379,8 @@
+             bc_put_u64(s, p->tab[i]);
+ #endif
+         }
++        if (len % (JS_LIMB_BITS / 8) == 0)
++            funlogline();
+         for(i = 0; i < len % (JS_LIMB_BITS / 8); i++) {
+             bc_put_u8(s, (p->tab[p->len - 1] >> (i * 8)) & 0xff);
+         }

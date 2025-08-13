@@ -1,0 +1,10 @@
+--- a/cutils.h
++++ b/cutils.h
+@@ -372,6 +372,8 @@
+     if (unlikely(v1 >= 0x7c00))
+         v1 += 0x1f8000; /* NaN or infinity */
+     d = uint64_as_float64(((uint64_t)(v >> 15) << 63) | ((uint64_t)v1 << (52 - 10)));
++    if (isinf(d) || d == 0.0)
++        funlogline();
+     return d * 0x1p1008;
+ }

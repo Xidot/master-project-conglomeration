@@ -1,0 +1,24 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15450,6 +15450,10 @@
+                                          JSValueConst *argv,
+                                          JSStackFrame *sf, int arg_count)
+ {
++    if (unlikely(arg_count > argc || !sf)) {
++        funlogline();
++        return JS_EXCEPTION;
++    }
+     JSValue val;
+     JSProperty *pr;
+     JSObject *p;
+@@ -15470,6 +15474,10 @@
+     pr->u.value = JS_NewInt32(ctx, argc);
+ 
+     for(i = 0; i < arg_count; i++) {
++        if (unlikely(i >= sf->arg_count)) {
++            funlogline();
++            goto fail;
++        }
+         JSVarRef *var_ref;
+         var_ref = get_var_ref(ctx, sf, i, TRUE);
+         if (!var_ref)

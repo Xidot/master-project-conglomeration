@@ -1,0 +1,20 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -687,6 +687,9 @@
+ /// Line number here: 690
+ size_t i64toa_radix(char *buf, int64_t n, unsigned int radix)
+ {
++    if (buf == NULL) {
++        funlogline();
++    }
+     if (n >= 0) {
+         return u64toa_radix(buf, n, radix);
+     } else {
+@@ -693,6 +696,9 @@
+         buf[0] = '-';
++        if (n == INT64_MIN) {
++            funlogline();
++        }
+         return u64toa_radix(buf + 1, -(uint64_t)n, radix) + 1;
+     }
+ }

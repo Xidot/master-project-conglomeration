@@ -1,0 +1,145 @@
+Target function: "mp_add_ui(limb_t *, limb_t, size_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/dtoa.c
+
+/// Line number here: 56
+typedef uint32_t limb_t
+
+/// Line number here: 74
+static limb_t mp_add_ui(limb_t *tab, limb_t b, size_t n)
+{
+    size_t i;
+    limb_t k, a;
+
+    k=b;
+    for(i=0;i<n;i++) {
+        if (k == 0)
+            break;
+        a = tab[i] + k;
+        k = (a < k);
+        tab[i] = a;
+    }
+    return k;
+}
+
+/* the represented number is sum(i, tab[i]*2^(LIMB_BITS * i)) */
+/// Line number here: 72
+typedef struct {
+    int len; /* >= 1 */
+    limb_t tab[];
+} mpb_t
+
+/// Line number here: 293
+enum {
+    JS_RNDN, /* round to nearest, ties to even */
+    JS_RNDNA, /* round to nearest, ties away from zero */
+    JS_RNDZ,
+}
+
+/* compute round(r / 2^shift). 'shift' can be negative */
+/// Line number here: 312
+static void mpb_shr_round(mpb_t *r, int shift, int rnd_mode)
+{
+    int l, i;
+
+    if (shift == 0)
+        return;
+    if (shift < 0) {
+        shift = -shift;
+        l = (unsigned)shift / LIMB_BITS;
+        shift = shift & (LIMB_BITS - 1);
+        if (shift != 0) {
+            r->tab[r->len] = mp_shl(r->tab, r->tab, r->len, shift, 0);
+            r->len++;
+            mpb_renorm(r);
+        }
+        if (l > 0) {
+            for(i = r->len - 1; i >= 0; i--)
+                r->tab[i + l] = r->tab[i];
+            for(i = 0; i < l; i++)
+                r->tab[i] = 0;
+            r->len += l;
+        }
+    } else {
+        limb_t bit1, bit2;
+        int k, add_one;
+        
+        switch(rnd_mode) {
+        default:
+        case JS_RNDZ:
+            add_one = 0;
+            break;
+        case JS_RNDN:
+        case JS_RNDNA:
+            bit1 = mpb_get_bit(r, shift - 1);
+            if (bit1) {
+                if (rnd_mode == JS_RNDNA) {
+                    bit2 = 1;
+                } else {
+                    /* bit2 = oring of all the bits after bit1 */
+                    bit2 = 0;
+                    if (shift >= 2) {
+                        k = shift - 1;
+                        l = (unsigned)k / LIMB_BITS;
+                        k = k & (LIMB_BITS - 1);
+                        for(i = 0; i < min_int(l, r->len); i++)
+                            bit2 |= r->tab[i];
+                        if (l < r->len)
+                            bit2 |= r->tab[l] & (((limb_t)1 << k) - 1);
+                    }
+                }
+                if (bit2) {
+                    add_one = 1;
+                } else {
+                    /* round to even */
+                    add_one = mpb_get_bit(r, shift);
+                }
+            } else {
+                add_one = 0;
+            }
+            break;
+        }
+
+        l = (unsigned)shift / LIMB_BITS;
+        shift = shift & (LIMB_BITS - 1);
+        if (l >= r->len) {
+            r->len = 1;
+            r->tab[0] = add_one;
+        } else {
+            if (l > 0) {
+                r->len -= l;
+                for(i = 0; i < r->len; i++)
+                    r->tab[i] = r->tab[i + l];
+            }
+            if (shift != 0) {
+                mp_shr(r->tab, r->tab, r->len, shift, 0);
+                mpb_renorm(r);
+            }
+            if (add_one) {
+                limb_t a;
+                a = mp_add_ui(r->tab, 1, r->len);
+                if (a)
+                    r->tab[r->len++] = a;
+            }
+        }
+    }
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"mpb_shr_round(mpb_t *, int, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_shl(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mpb_renorm(mpb_t *)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mpb_get_bit(const mpb_t *, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "min_int(int, int)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_shr(limb_t *, const limb_t *, mp_size_t, int, limb_t)";
+"mpb_shr_round(mpb_t *, int, int)" -> "mp_add_ui(limb_t *, limb_t, size_t)";
+}

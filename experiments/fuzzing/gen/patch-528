@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37643,6 +37643,8 @@
+     uint32_t offset, len, idx;
+ 
+     if (bc_get_u8(s, &array_tag))
++        return JS_EXCEPTION;
++    if (array_tag >= (JS_CLASS_FLOAT64_ARRAY - JS_CLASS_UINT8C_ARRAY + 1))
+         return JS_EXCEPTION;
+     if (array_tag >= JS_TYPED_ARRAY_COUNT)
+         return JS_ThrowTypeError(ctx, "invalid typed array");
+@@ -37660,6 +37662,8 @@
+         JS_FreeValue(ctx, array_buffer);
+         return JS_EXCEPTION;
+     }
++    if (offset + (len << typed_array_size_log2(JS_CLASS_UINT8C_ARRAY + array_tag)) > js_get_array_buffer(ctx, array_buffer)->byte_length)
++        return JS_ThrowRangeError(ctx, "invalid typed array dimensions");
+     args[0] = array_buffer;
+     args[1] = JS_NewInt64(ctx, offset);
+     args[2] = JS_NewInt64(ctx, len);
+@@ -37668,6 +37672,8 @@
+                                      3, args,
+                                      JS_CLASS_UINT8C_ARRAY + array_tag);
+     if (JS_IsException(obj))
+         goto fail;
++    if (s->allow_reference && JS_IsException(obj))
++        funlogline();
+     if (s->allow_reference) {
+         s->objects[idx] = JS_VALUE_GET_OBJ(obj);
+     }

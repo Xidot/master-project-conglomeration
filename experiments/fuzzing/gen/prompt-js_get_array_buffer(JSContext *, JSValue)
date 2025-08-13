@@ -1,0 +1,294 @@
+Target function: "js_get_array_buffer(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* get an ArrayBuffer or SharedArrayBuffer */
+/// Line number here: 52763
+static JSArrayBuffer *js_get_array_buffer(JSContext *ctx, JSValueConst obj)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        goto fail;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id != JS_CLASS_ARRAY_BUFFER &&
+        p->class_id != JS_CLASS_SHARED_ARRAY_BUFFER) {
+    fail:
+        JS_ThrowTypeErrorInvalidClass(ctx, JS_CLASS_ARRAY_BUFFER);
+        return NULL;
+    }
+    return p->u.array_buffer;
+}
+
+/// Line number here: 7201
+static JSValue JS_ThrowTypeErrorInvalidClass(JSContext *ctx, int class_id)
+{
+    JSRuntime *rt = ctx->rt;
+    JSAtom name;
+    name = rt->class_array[class_id].class_name;
+    return JS_ThrowTypeErrorAtom(ctx, "%s object expected", name);
+}
+
+/* return NULL if exception. WARNING: any JS call can detach the
+   buffer and render the returned pointer invalid */
+/// Line number here: 52780
+uint8_t *JS_GetArrayBuffer(JSContext *ctx, size_t *psize, JSValueConst obj)
+{
+    JSArrayBuffer *abuf = js_get_array_buffer(ctx, obj);
+    if (!abuf)
+        goto fail;
+    if (abuf->detached) {
+        JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        goto fail;
+    }
+    *psize = abuf->byte_length;
+    return abuf->data;
+ fail:
+    *psize = 0;
+    return NULL;
+}
+
+/// Line number here: 702
+typedef struct JSTypedArray {
+    struct list_head link; /* link to arraybuffer */
+    JSObject *obj; /* back pointer to the TypedArray/DataView object */
+    JSObject *buffer; /* based array buffer */
+    uint32_t offset; /* offset in the array buffer */
+    uint32_t length; /* length in the array buffer */
+} JSTypedArray
+
+/// Line number here: 54793
+static JSValue js_dataview_constructor(JSContext *ctx,
+                                       JSValueConst new_target,
+                                       int argc, JSValueConst *argv)
+{
+    JSArrayBuffer *abuf;
+    uint64_t offset;
+    uint32_t len;
+    JSValueConst buffer;
+    JSValue obj;
+    JSTypedArray *ta;
+    JSObject *p;
+
+    buffer = argv[0];
+    abuf = js_get_array_buffer(ctx, buffer);
+    if (!abuf)
+        return JS_EXCEPTION;
+    offset = 0;
+    if (argc > 1) {
+        if (JS_ToIndex(ctx, &offset, argv[1]))
+            return JS_EXCEPTION;
+    }
+    if (abuf->detached)
+        return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+    if (offset > abuf->byte_length)
+        return JS_ThrowRangeError(ctx, "invalid byteOffset");
+    len = abuf->byte_length - offset;
+    if (argc > 2 && !JS_IsUndefined(argv[2])) {
+        uint64_t l;
+        if (JS_ToIndex(ctx, &l, argv[2]))
+            return JS_EXCEPTION;
+        if (l > len)
+            return JS_ThrowRangeError(ctx, "invalid byteLength");
+        len = l;
+    }
+
+    obj = js_create_from_ctor(ctx, new_target, JS_CLASS_DATAVIEW);
+    if (JS_IsException(obj))
+        return JS_EXCEPTION;
+    if (abuf->detached) {
+        /* could have been detached in js_create_from_ctor() */
+        JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        goto fail;
+    }
+    ta = js_malloc(ctx, sizeof(*ta));
+    if (!ta) {
+    fail:
+        JS_FreeValue(ctx, obj);
+        return JS_EXCEPTION;
+    }
+    p = JS_VALUE_GET_OBJ(obj);
+    ta->obj = p;
+    ta->buffer = JS_VALUE_GET_OBJ(JS_DupValue(ctx, buffer));
+    ta->offset = offset;
+    ta->length = len;
+    list_add_tail(&ta->link, &abuf->array_list);
+    p->u.typed_array = ta;
+    return obj;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_get_array_buffer(JSContext *, JSValue)";
+"js_get_array_buffer(JSContext *, JSValue)" -> "JS_ThrowTypeErrorInvalidClass(JSContext *, int)";
+"JS_ThrowTypeErrorInvalidClass(JSContext *, int)";
+"JS_ThrowTypeErrorInvalidClass(JSContext *, int)" -> "__JS_ThrowTypeErrorAtom(JSContext *, JSAtom, const char *, ...)";
+"JS_GetArrayBuffer(JSContext *, size_t *, JSValue)";
+"JS_GetArrayBuffer(JSContext *, size_t *, JSValue)" -> "js_get_array_buffer(JSContext *, JSValue)";
+"JS_GetArrayBuffer(JSContext *, size_t *, JSValue)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "js_get_array_buffer(JSContext *, JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "js_create_from_ctor(JSContext *, JSValue, int)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_dataview_constructor(JSContext *, JSValue, int, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+}

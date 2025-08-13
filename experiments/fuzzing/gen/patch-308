@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2245,6 +2245,9 @@
+ 
+ void JS_FreeContext(JSContext *ctx)
+ {
++    if (!ctx) {
++        funlogline();
++    }
+     JSRuntime *rt = ctx->rt;
+     int i;
+ 
+@@ -2250,6 +2253,9 @@
+     if (--ctx->header.ref_count > 0)
+         return;
+     assert(ctx->header.ref_count == 0);
++    if (ctx->header.ref_count < 0) {
++        funlogline();
++    }
+ 
+ #ifdef DUMP_ATOMS
+     JS_DumpAtoms(ctx->rt);

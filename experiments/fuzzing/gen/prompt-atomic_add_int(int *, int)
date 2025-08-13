@@ -1,0 +1,124 @@
+Target function: "atomic_add_int(int *, int)"
+
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 3448
+static int atomic_add_int(int *ptr, int v)
+{
+    return atomic_fetch_add((_Atomic(uint32_t) *)ptr, v) + v;
+}
+
+/// Line number here: 3443
+typedef struct {
+    int ref_count;
+    uint64_t buf[0];
+} JSSABHeader
+
+/// Line number here: 3464
+static void js_sab_free(void *opaque, void *ptr)
+{
+    JSSABHeader *sab;
+    int ref_count;
+    sab = (JSSABHeader *)((uint8_t *)ptr - sizeof(JSSABHeader));
+    ref_count = atomic_add_int(&sab->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        free(sab);
+    }
+}
+
+/// Line number here: 3476
+static void js_sab_dup(void *opaque, void *ptr)
+{
+    JSSABHeader *sab;
+    sab = (JSSABHeader *)((uint8_t *)ptr - sizeof(JSSABHeader));
+    atomic_add_int(&sab->ref_count, 1);
+}
+
+/// Line number here: 130
+typedef struct {
+    int ref_count;
+#ifdef USE_WORKER
+    pthread_mutex_t mutex;
+#endif
+    struct list_head msg_queue; /* list of JSWorkerMessage.link */
+    JSWaker waker;
+} JSWorkerMessagePipe
+
+/// Line number here: 3500
+static JSWorkerMessagePipe *js_dup_message_pipe(JSWorkerMessagePipe *ps)
+{
+    atomic_add_int(&ps->ref_count, 1);
+    return ps;
+}
+
+/// Line number here: 112
+typedef struct {
+    struct list_head link;
+    uint8_t *data;
+    size_t data_len;
+    /* list of SharedArrayBuffers, necessary to free the message */
+    uint8_t **sab_tab;
+    size_t sab_tab_len;
+} JSWorkerMessage
+
+/// Line number here: 3518
+static void js_free_message_pipe(JSWorkerMessagePipe *ps)
+{
+    struct list_head *el, *el1;
+    JSWorkerMessage *msg;
+    int ref_count;
+
+    if (!ps)
+        return;
+
+    ref_count = atomic_add_int(&ps->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        list_for_each_safe(el, el1, &ps->msg_queue) {
+            msg = list_entry(el, JSWorkerMessage, link);
+            js_free_message(msg);
+        }
+        pthread_mutex_destroy(&ps->mutex);
+        js_waker_close(&ps->waker);
+        free(ps);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_sab_free(void *, void *)";
+"js_sab_free(void *, void *)" -> "atomic_add_int(int *, int)";
+"js_sab_free(void *, void *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_sab_free(void *, void *)" -> "free(void *)";
+"js_sab_dup(void *, void *)";
+"js_sab_dup(void *, void *)" -> "atomic_add_int(int *, int)";
+"js_dup_message_pipe(JSWorkerMessagePipe *)";
+"js_dup_message_pipe(JSWorkerMessagePipe *)" -> "atomic_add_int(int *, int)";
+"js_free_message_pipe(JSWorkerMessagePipe *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "atomic_add_int(int *, int)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_free_message(JSWorkerMessage *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "pthread_mutex_destroy(pthread_mutex_t *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "js_waker_close(JSWaker *)";
+"js_free_message_pipe(JSWorkerMessagePipe *)" -> "free(void *)";
+}

@@ -1,0 +1,300 @@
+Target function: "async_func_free(JSRuntime *, JSAsyncFunctionState *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 713
+typedef struct JSAsyncFunctionState {
+    JSGCObjectHeader header;
+    JSValue this_val; /* 'this' argument */
+    int argc; /* number of function arguments */
+    BOOL throw_flag; /* used to throw an exception in JS_CallInternal() */
+    BOOL is_completed; /* TRUE if the function has returned. The stack
+                          frame is no longer valid */
+    JSValue resolving_funcs[2]; /* only used in JS async functions */
+    JSStackFrame frame;
+} JSAsyncFunctionState
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 19668
+static void async_func_free(JSRuntime *rt, JSAsyncFunctionState *s)
+{
+    if (--s->header.ref_count == 0) {
+        if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
+            list_del(&s->header.link);
+            list_add(&s->header.link, &rt->gc_zero_ref_count_list);
+            if (rt->gc_phase == JS_GC_PHASE_NONE) {
+                free_zero_refcount(rt);
+            }
+        }
+    }
+}
+
+/// Line number here: 5809
+static void free_zero_refcount(JSRuntime *rt)
+{
+    struct list_head *el;
+    JSGCObjectHeader *p;
+
+    rt->gc_phase = JS_GC_PHASE_DECREF;
+    for(;;) {
+        el = rt->gc_zero_ref_count_list.next;
+        if (el == &rt->gc_zero_ref_count_list)
+            break;
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->ref_count == 0);
+        free_gc_object(rt, p);
+    }
+    rt->gc_phase = JS_GC_PHASE_NONE;
+}
+
+/// Line number here: 19694
+typedef struct JSGeneratorData {
+    JSGeneratorStateEnum state;
+    JSAsyncFunctionState *func_state;
+} JSGeneratorData
+
+/* Generators */
+/// Line number here: 19683
+enum JSGeneratorStateEnum {
+    JS_GENERATOR_STATE_SUSPENDED_START,
+    JS_GENERATOR_STATE_SUSPENDED_YIELD,
+    JS_GENERATOR_STATE_SUSPENDED_YIELD_STAR,
+    JS_GENERATOR_STATE_EXECUTING,
+    JS_GENERATOR_STATE_COMPLETED,
+}
+
+/// Line number here: 19696
+static void free_generator_stack_rt(JSRuntime *rt, JSGeneratorData *s)
+{
+    if (s->state == JS_GENERATOR_STATE_COMPLETED)
+        return;
+    if (s->func_state) {
+        async_func_free(rt, s->func_state);
+        s->func_state = NULL;
+    }
+    s->state = JS_GENERATOR_STATE_COMPLETED;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/* AsyncFunction */
+/// Line number here: 19857
+static void js_async_function_resolve_finalizer(JSRuntime *rt, JSValue val)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(val);
+    JSAsyncFunctionState *s = p->u.async_function_data;
+    if (s) {
+        async_func_free(rt, s);
+    }
+}
+
+/// Line number here: 19980
+static JSValue js_async_function_call(JSContext *ctx, JSValueConst func_obj,
+                                      JSValueConst this_obj,
+                                      int argc, JSValueConst *argv, int flags)
+{
+    JSValue promise;
+    JSAsyncFunctionState *s;
+
+    s = async_func_init(ctx, func_obj, this_obj, argc, argv);
+    if (!s)
+        return JS_EXCEPTION;
+
+    promise = JS_NewPromiseCapability(ctx, s->resolving_funcs);
+    if (JS_IsException(promise)) {
+        async_func_free(ctx->rt, s);
+        return JS_EXCEPTION;
+    }
+
+    js_async_function_resume(ctx, s);
+
+    async_func_free(ctx->rt, s);
+
+    return promise;
+}
+
+/// Line number here: 20031
+typedef struct JSAsyncGeneratorData {
+    JSObject *generator; /* back pointer to the object (const) */
+    JSAsyncGeneratorStateEnum state;
+    /* func_state is NULL is state AWAITING_RETURN and COMPLETED */
+    JSAsyncFunctionState *func_state;
+    struct list_head queue; /* list of JSAsyncGeneratorRequest.link */
+} JSAsyncGeneratorData
+
+/// Line number here: 20023
+typedef struct JSAsyncGeneratorRequest {
+    struct list_head link;
+    /* completion */
+    int completion_type; /* GEN_MAGIC_x */
+    JSValue result;
+    /* promise capability */
+    JSValue promise;
+    JSValue resolving_funcs[2];
+} JSAsyncGeneratorRequest
+
+/// Line number here: 20033
+static void js_async_generator_free(JSRuntime *rt,
+                                    JSAsyncGeneratorData *s)
+{
+    struct list_head *el, *el1;
+    JSAsyncGeneratorRequest *req;
+
+    list_for_each_safe(el, el1, &s->queue) {
+        req = list_entry(el, JSAsyncGeneratorRequest, link);
+        JS_FreeValueRT(rt, req->result);
+        JS_FreeValueRT(rt, req->promise);
+        JS_FreeValueRT(rt, req->resolving_funcs[0]);
+        JS_FreeValueRT(rt, req->resolving_funcs[1]);
+        js_free_rt(rt, req);
+    }
+    if (s->func_state)
+        async_func_free(rt, s->func_state);
+    js_free_rt(rt, s);
+}
+
+/* AsyncGenerator */
+/// Line number here: 20006
+enum JSAsyncGeneratorStateEnum {
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_START,
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD,
+    JS_ASYNC_GENERATOR_STATE_SUSPENDED_YIELD_STAR,
+    JS_ASYNC_GENERATOR_STATE_EXECUTING,
+    JS_ASYNC_GENERATOR_STATE_AWAITING_RETURN,
+    JS_ASYNC_GENERATOR_STATE_COMPLETED,
+}
+
+/// Line number here: 20181
+static void js_async_generator_complete(JSContext *ctx,
+                                        JSAsyncGeneratorData *s)
+{
+    if (s->state != JS_ASYNC_GENERATOR_STATE_COMPLETED) {
+        s->state = JS_ASYNC_GENERATOR_STATE_COMPLETED;
+        async_func_free(ctx->rt, s->func_state);
+        s->func_state = NULL;
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 68
+static inline void list_del(struct list_head *el)
+{
+    struct list_head *prev, *next;
+    prev = el->prev;
+    next = el->next;
+    prev->next = next;
+    next->prev = prev;
+    el->prev = NULL; /* fail safe */
+    el->next = NULL; /* fail safe */
+}
+
+/* add 'el' at the head of the list 'head' (= after element head) */
+/// Line number here: 57
+static inline void list_add(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head, head->next);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_del(struct list_head *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "list_add(struct list_head *, struct list_head *)";
+"async_func_free(JSRuntime *, JSAsyncFunctionState *)" -> "free_zero_refcount(JSRuntime *)";
+"list_add(struct list_head *, struct list_head *)";
+"list_add(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+"free_zero_refcount(JSRuntime *)";
+"free_zero_refcount(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"free_zero_refcount(JSRuntime *)" -> "free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"free_generator_stack_rt(JSRuntime *, JSGeneratorData *)";
+"free_generator_stack_rt(JSRuntime *, JSGeneratorData *)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"js_async_function_resolve_finalizer(JSRuntime *, JSValue)";
+"js_async_function_resolve_finalizer(JSRuntime *, JSValue)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_init(JSContext *, JSValue, JSValue, int, JSValue *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_NewPromiseCapability(JSContext *, JSValue *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "JS_IsException(JSValue)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"js_async_function_call(JSContext *, JSValue, JSValue, int, JSValue *, int)" -> "js_async_function_resume(JSContext *, JSAsyncFunctionState *)";
+"js_async_generator_free(JSRuntime *, JSAsyncGeneratorData *)";
+"js_async_generator_free(JSRuntime *, JSAsyncGeneratorData *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_async_generator_free(JSRuntime *, JSAsyncGeneratorData *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_async_generator_free(JSRuntime *, JSAsyncGeneratorData *)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+"js_async_generator_complete(JSContext *, JSAsyncGeneratorData *)";
+"js_async_generator_complete(JSContext *, JSAsyncGeneratorData *)" -> "async_func_free(JSRuntime *, JSAsyncFunctionState *)";
+}

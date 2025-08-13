@@ -1,0 +1,173 @@
+Target function: "js_new_shape(JSContext *, JSObject *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 4714
+static JSShape *js_new_shape(JSContext *ctx, JSObject *proto)
+{
+    return js_new_shape2(ctx, proto, JS_PROP_INITIAL_HASH_SIZE,
+                         JS_PROP_INITIAL_SIZE);
+}
+
+/// Line number here: 336
+enum {
+    JS_GC_OBJ_TYPE_JS_OBJECT,
+    JS_GC_OBJ_TYPE_FUNCTION_BYTECODE,
+    JS_GC_OBJ_TYPE_SHAPE,
+    JS_GC_OBJ_TYPE_VAR_REF,
+    JS_GC_OBJ_TYPE_ASYNC_FUNCTION,
+    JS_GC_OBJ_TYPE_JS_CONTEXT,
+    JS_GC_OBJ_TYPE_MODULE,
+}
+
+/* create a new empty shape with prototype 'proto' */
+/// Line number here: 4678
+static no_inline JSShape *js_new_shape2(JSContext *ctx, JSObject *proto,
+                                        int hash_size, int prop_size)
+{
+    JSRuntime *rt = ctx->rt;
+    void *sh_alloc;
+    JSShape *sh;
+
+    /* resize the shape hash table if necessary */
+    if (2 * (rt->shape_hash_count + 1) > rt->shape_hash_size) {
+        resize_shape_hash(rt, rt->shape_hash_bits + 1);
+    }
+
+    sh_alloc = js_malloc(ctx, get_shape_size(hash_size, prop_size));
+    if (!sh_alloc)
+        return NULL;
+    sh = get_shape_from_alloc(sh_alloc, hash_size);
+    sh->header.ref_count = 1;
+    add_gc_object(rt, &sh->header, JS_GC_OBJ_TYPE_SHAPE);
+    if (proto)
+        JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, proto));
+    sh->proto = proto;
+    memset(prop_hash_end(sh) - hash_size, 0, sizeof(prop_hash_end(sh)[0]) *
+           hash_size);
+    sh->prop_hash_mask = hash_size - 1;
+    sh->prop_size = prop_size;
+    sh->prop_count = 0;
+    sh->deleted_prop_count = 0;
+
+    /* insert in the hash table */
+    sh->hash = shape_initial_hash(proto);
+    sh->is_hashed = TRUE;
+    sh->has_small_array_index = FALSE;
+    js_shape_hash_link(ctx->rt, sh);
+    return sh;
+}
+
+/* WARNING: proto must be an object or JS_NULL */
+/// Line number here: 5169
+JSValue JS_NewObjectProtoClass(JSContext *ctx, JSValueConst proto_val,
+                               JSClassID class_id)
+{
+    JSShape *sh;
+    JSObject *proto;
+
+    proto = get_proto_obj(proto_val);
+    sh = find_hashed_shape_proto(ctx->rt, proto);
+    if (likely(sh)) {
+        sh = js_dup_shape(sh);
+    } else {
+        sh = js_new_shape(ctx, proto);
+        if (!sh)
+            return JS_EXCEPTION;
+    }
+    return JS_NewObjectFromShape(ctx, sh, class_id);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_new_shape(JSContext *, JSObject *)";
+"js_new_shape(JSContext *, JSObject *)" -> "js_new_shape2(JSContext *, JSObject *, int, int)";
+"js_new_shape2(JSContext *, JSObject *, int, int)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "resize_shape_hash(JSRuntime *, int)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "js_malloc(JSContext *, size_t)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "get_shape_size(size_t, size_t)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "get_shape_from_alloc(void *, size_t)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "add_gc_object(JSRuntime *, JSGCObjectHeader *, JSGCObjectTypeEnum)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "memset(void *, int, size_t)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "prop_hash_end(JSShape *)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "shape_initial_hash(JSObject *)";
+"js_new_shape2(JSContext *, JSObject *, int, int)" -> "js_shape_hash_link(JSRuntime *, JSShape *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "get_proto_obj(JSValue)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "find_hashed_shape_proto(JSRuntime *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "__builtin_expect(long, long)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_dup_shape(JSShape *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "js_new_shape(JSContext *, JSObject *)";
+"JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)" -> "JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)";
+}

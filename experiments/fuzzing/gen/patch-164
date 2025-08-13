@@ -1,0 +1,28 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -52573,6 +52573,8 @@
+     if (JS_IsException(obj))
+         return obj;
+     /* XXX: we are currently limited to 2 GB */
++    if (len == 0)
++        funlogline();
+     if (len > INT32_MAX) {
+         JS_ThrowRangeError(ctx, "invalid array buffer length");
+         goto fail;
+@@ -52593,6 +52595,8 @@
+     if (alloc_flag) {
+         if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER &&
+             rt->sab_funcs.sab_alloc) {
++            if (!rt->sab_funcs.sab_alloc)
++                funlogline();
+             abuf->data = rt->sab_funcs.sab_alloc(rt->sab_funcs.sab_opaque,
+                                                  max_int(len, 1));
+             if (!abuf->data)
+@@ -52597,6 +52601,8 @@
+         if (alloc_flag && buf)
+             memcpy(abuf->data, buf, len);
++        if (alloc_flag && !buf)
++            funlogline();
+         JS_SetOpaque(obj, abuf);
+         return obj;
+     fail:

@@ -1,0 +1,11 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1887,6 +1887,8 @@
+ static inline void js_free_string(JSRuntime *rt, JSString *str)
+ {
+     if (--str->header.ref_count <= 0) {
++        if (str->atom_type != 0 && str->atom_type != JS_ATOM_TYPE_STRING && str->atom_type != JS_ATOM_TYPE_SYMBOL && str->atom_type != JS_ATOM_TYPE_PRIVATE)
++            funlogline();
+         if (str->atom_type) {
+             JS_FreeAtomStruct(rt, str);
+         } else {

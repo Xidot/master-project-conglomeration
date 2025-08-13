@@ -1,0 +1,34 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_alloc_string_rt(JSRuntime *, int, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs:
+
+:js_alloc_string_rt:1857
+
+---
+
+Now the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1857,6 +1857,9 @@
+ static JSString *js_alloc_string_rt(JSRuntime *rt, int max_len, int is_wide_char)
+ {
+     JSString *str;
++    if (max_len < 0 || is_wide_char < 0 || is_wide_char > 1) {
++        funlogline();
++    }
+     str = js_malloc_rt(rt, sizeof(JSString) + (max_len << is_wide_char) + 1 - is_wide_char);
+     if (unlikely(!str))
+         return NULL;
+```
+
+The logical bug is in the calculation of the memory allocation size where negative values for max_len or invalid is_wide_char values (not 0 or 1) could lead to incorrect memory allocation. The inserted check validates these parameters before they're used in the allocation calculation.
+
+The bug could trigger when:
+1. max_len is negative (invalid string length)
+2. is_wide_char is not 0 or 1 (invalid character width flag)
+
+These invalid values would cause incorrect memory allocation size calculation which could lead to buffer overflows or underflows when the string is later used.

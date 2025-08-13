@@ -1,0 +1,33 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19467,6 +19467,9 @@
+     if (js_poll_interrupts(ctx))
+         return JS_EXCEPTION;
+     flags |= JS_CALL_FLAG_CONSTRUCTOR;
++    if (unlikely(JS_IsException(new_target))) {
++        return JS_EXCEPTION;
++    }
+     if (unlikely(JS_VALUE_GET_TAG(func_obj) != JS_TAG_OBJECT))
+         goto not_a_function;
+     p = JS_VALUE_GET_OBJ(func_obj);
+@@ -19493,6 +19496,9 @@
+     }
+ 
+     b = p->u.func.function_bytecode;
++    if (unlikely(!b)) {
++        return JS_ThrowTypeError(ctx, "invalid function bytecode");
++    }
+     if (b->is_derived_class_constructor) {
+         return JS_CallInternal(ctx, func_obj, JS_UNDEFINED, new_target, argc, argv, flags);
+     } else {
+@@ -19500,6 +19506,9 @@
+         /* legacy constructor behavior */
+         obj = js_create_from_ctor(ctx, new_target, JS_CLASS_OBJECT);
+         if (JS_IsException(obj))
+             return JS_EXCEPTION;
++        if (unlikely(b->is_derived_class_constructor != 0 && b->is_derived_class_constructor != 1)) {
++            return JS_ThrowTypeError(ctx, "invalid derived class constructor flag");
++        }
+         ret = JS_CallInternal(ctx, func_obj, obj, new_target, argc, argv, flags);
+         if (JS_VALUE_GET_TAG(ret) == JS_TAG_OBJECT ||
+             JS_IsException(ret)) {

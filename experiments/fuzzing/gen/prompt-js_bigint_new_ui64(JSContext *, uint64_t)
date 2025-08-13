@@ -1,0 +1,162 @@
+Target function: "js_bigint_new_ui64(JSContext *, uint64_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 10979
+static JSBigInt *js_bigint_new_ui64(JSContext *ctx, uint64_t a)
+{
+    if (a <= INT64_MAX) {
+        return js_bigint_new_si64(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, (65 + JS_LIMB_BITS - 1) / JS_LIMB_BITS);
+        if (!r)
+            return NULL;
+#if JS_LIMB_BITS == 64
+        r->tab[0] = a;
+        r->tab[1] = 0;
+#else
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        r->tab[2] = 0;
+#endif
+        return r;
+    }
+}
+
+/// Line number here: 10960
+static JSBigInt *js_bigint_new_si64(JSContext *ctx, int64_t a)
+{
+#if JS_LIMB_BITS == 64
+    return js_bigint_new_si(ctx, a);
+#else
+    if (a >= INT32_MIN && a <= INT32_MAX) {
+        return js_bigint_new_si(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, 2);
+        if (!r)
+            return NULL;
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        return r;
+    }
+#endif
+}
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 10880
+static JSBigInt *js_bigint_new(JSContext *ctx, int len)
+{
+    JSBigInt *r;
+    if (len > JS_BIGINT_MAX_SIZE) {
+        JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+        return NULL;
+    }
+    r = js_malloc(ctx, sizeof(JSBigInt) + len * sizeof(js_limb_t));
+    if (!r)
+        return NULL;
+    r->header.ref_count = 1;
+    r->len = len;
+    return r;
+}
+
+/// Line number here: 13827
+JSValue JS_NewBigUint64(JSContext *ctx, uint64_t v)
+{
+    if (v <= JS_SHORT_BIG_INT_MAX) {
+        return __JS_NewShortBigInt(ctx, v);
+    } else {
+        JSBigInt *p;
+        p = js_bigint_new_ui64(ctx, v);
+        if (!p)
+            return JS_EXCEPTION;
+        return JS_MKPTR(JS_TAG_BIG_INT, p);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_new_ui64(JSContext *, uint64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_ui64(JSContext *, uint64_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_si64(JSContext *, int64_t)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_new(JSContext *, int)";
+"js_bigint_new(JSContext *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_new(JSContext *, int)" -> "js_malloc(JSContext *, size_t)";
+"JS_NewBigUint64(JSContext *, uint64_t)";
+"JS_NewBigUint64(JSContext *, uint64_t)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"JS_NewBigUint64(JSContext *, uint64_t)" -> "js_bigint_new_ui64(JSContext *, uint64_t)";
+}

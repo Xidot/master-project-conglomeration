@@ -1,0 +1,63 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_OrdinaryIsInstanceOf(JSContext *, JSValue, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_OrdinaryIsInstanceOf`:
+
+:quickjs.c:JS_OrdinaryIsInstanceOf:7420
+:quickjs.c:JS_OrdinaryIsInstanceOf:7429
+:quickjs.c:JS_OrdinaryIsInstanceOf:7443
+:quickjs.c:JS_OrdinaryIsInstanceOf:7458
+
+\pagebreak
+
+Reasons:
+1. Line 7420: Missing check for JS_IsException after JS_GetProperty call
+2. Line 7429: No validation of proto before comparison
+3. Line 7443: Potential infinite loop if exotic object's prototype chain is circular
+4. Line 7458: Missing check for JS_IsException after JS_GetPrototypeFree
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7417,6 +7417,8 @@
+     if (!JS_IsFunction(ctx, obj))
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(obj);
++    if (JS_IsException(JS_MKPTR(JS_TAG_OBJECT, p)))
++        funlogline();
+     if (p->class_id == JS_CLASS_BOUND_FUNCTION) {
+         JSBoundFunction *s = p->u.bound_function;
+         return JS_IsInstanceOf(ctx, val, s->func_obj);
+@@ -7426,6 +7428,8 @@
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+         return FALSE;
+     obj_proto = JS_GetProperty(ctx, obj, JS_ATOM_prototype);
++    if (JS_IsException(obj_proto) && !JS_IsException(obj_proto))
++        funlogline();
+     if (JS_VALUE_GET_TAG(obj_proto) != JS_TAG_OBJECT) {
+         if (!JS_IsException(obj_proto))
+             JS_ThrowTypeError(ctx, "operand 'prototype' property is not an object");
+@@ -7440,6 +7444,8 @@
+         if (!proto1) {
+             /* slow case if exotic object in the prototype chain */
+             if (unlikely(p->is_exotic && !p->fast_array)) {
+                 JSValue obj1;
++                if (JS_IsException(JS_MKPTR(JS_TAG_OBJECT, p)))
++                    funlogline();
+                 obj1 = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, (JSObject *)p));
+                 for(;;) {
+                     obj1 = JS_GetPrototypeFree(ctx, obj1);
+@@ -7455,6 +7461,8 @@
+                         ret = TRUE;
+                         break;
+                     }
++                    if (JS_IsException(obj1))
++                        funlogline();
+                     /* must check for timeout to avoid infinite loop */
+                     if (js_poll_interrupts(ctx)) {
+                         JS_FreeValue(ctx, obj1);
+                         ret = -1;
+```

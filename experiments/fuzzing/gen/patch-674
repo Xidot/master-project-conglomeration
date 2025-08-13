@@ -1,0 +1,32 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -36813,6 +36813,9 @@
+     BCWriterState ss, *s = &ss;
+ 
+     memset(s, 0, sizeof(*s));
++    if (ctx == NULL) {
++        funlogline();
++    }
+     s->ctx = ctx;
+     s->allow_bytecode = ((flags & JS_WRITE_OBJ_BYTECODE) != 0);
+     s->allow_sab = ((flags & JS_WRITE_OBJ_SAB) != 0);
+@@ -36825,6 +36828,9 @@
+         s->first_atom = 1;
+     js_dbuf_init(ctx, &s->dbuf);
+     js_object_list_init(&s->object_list);
++    if (s->dbuf.error) {
++        funlogline();
++    }
+ 
+     if (JS_WriteObjectRec(s, obj))
+         goto fail;
+@@ -36835,6 +36841,9 @@
+     js_free(ctx, s->idx_to_atom);
+     *psize = s->dbuf.size;
+     if (psab_tab)
++        if (s->sab_tab == NULL && s->sab_tab_len != 0) {
++            funlogline();
++        }
+         *psab_tab = s->sab_tab;
+     if (psab_tab_len)
+         *psab_tab_len = s->sab_tab_len;

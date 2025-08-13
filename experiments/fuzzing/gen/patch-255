@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49421,6 +49421,8 @@
+     JSPromiseFunctionDataResolved *sr;
+     int i, ret;
+ 
++    if (JS_VALUE_GET_TAG(promise) == JS_TAG_NULL)
++        funlogline();
+     sr = js_malloc(ctx, sizeof(*sr));
+     if (!sr)
+         return -1;
+@@ -49453,6 +49455,8 @@
+         resolving_funcs[i] = obj;
+     }
+     js_promise_resolve_function_free_resolved(ctx->rt, sr);
++    if (sr->ref_count != 1)
++        funlogline();
+     return ret;
+ }
+ 
+@@ -49462,6 +49466,8 @@
+     if (--sr->ref_count == 0) {
+         js_free_rt(rt, sr);
+     }
++    if (sr->ref_count < 0)
++        funlogline();
+ }
+ 
+ /* Promise */

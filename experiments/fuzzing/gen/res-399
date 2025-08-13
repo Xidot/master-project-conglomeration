@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_malloc_rt(JSRuntime *, size_t)
+-------------------------
+Based on the code and call graph provided, I'll analyze the `js_malloc_rt` function for potential logical bugs.
+
+:quickjs.c:js_malloc_rt:1332
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -1331,6 +1331,9 @@
+ 
+ void *js_malloc_rt(JSRuntime *rt, size_t size)
+ {
++    if (unlikely(!rt || !rt->mf.js_malloc)) {
++        funlogline();
++    }
+     return rt->mf.js_malloc(&rt->malloc_state, size);
+ }
+```
+
+Reasoning:
+1. The function doesn't check if `rt` or `rt->mf.js_malloc` are NULL before dereferencing them
+2. This could lead to a crash if called with invalid runtime pointer or if malloc functions aren't properly initialized
+3. The check is added with `unlikely()` since this should be a rare error case
+4. The function logs via `funlogline()` if the error condition is met
+
+Note that this is a defensive check rather than a pure logical bug fix, but it's important since the function is a core memory allocation primitive used throughout the codebase. The other functions shown (like `js_mallocz_rt` and `js_malloc`) properly handle NULL returns from `js_malloc_rt`.

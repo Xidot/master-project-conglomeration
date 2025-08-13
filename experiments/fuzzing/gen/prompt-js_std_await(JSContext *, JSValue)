@@ -1,0 +1,448 @@
+Target function: "js_std_await(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 903
+enum JSPromiseStateEnum {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/* Wait for a promise and execute pending jobs while waiting for
+   it. Return the promise result or JS_EXCEPTION in case of promise
+   rejection. */
+/// Line number here: 4255
+JSValue js_std_await(JSContext *ctx, JSValue obj)
+{
+    JSValue ret;
+    int state;
+
+    for(;;) {
+        state = JS_PromiseState(ctx, obj);
+        if (state == JS_PROMISE_FULFILLED) {
+            ret = JS_PromiseResult(ctx, obj);
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_REJECTED) {
+            ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+            JS_FreeValue(ctx, obj);
+            break;
+        } else if (state == JS_PROMISE_PENDING) {
+            int err;
+            err = JS_ExecutePendingJob(JS_GetRuntime(ctx), NULL);
+            if (err < 0) {
+                js_std_dump_error(ctx);
+            }
+            if (err == 0) {
+                js_std_promise_rejection_check(ctx);
+
+                if (os_poll_func)
+                    os_poll_func(ctx);
+            }
+        } else {
+            /* not a promise */
+            ret = obj;
+            break;
+        }
+    }
+    return ret;
+}
+
+/// Line number here: 4156
+void js_std_dump_error(JSContext *ctx)
+{
+    JSValue exception_val;
+
+    exception_val = JS_GetException(ctx);
+    js_std_dump_error1(ctx, exception_val);
+    JS_FreeValue(ctx, exception_val);
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 142
+typedef struct {
+    struct list_head link;
+    JSValue promise;
+    JSValue reason;
+} JSRejectedPromiseEntry
+
+/* check if there are pending promise rejections. It must be done
+   asynchrously in case a rejected promise is handled later. Currently
+   we do it once the application is about to sleep. It could be done
+   more often if needed. */
+/// Line number here: 4213
+static void js_std_promise_rejection_check(JSContext *ctx)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    struct list_head *el;
+
+    if (unlikely(!list_empty(&ts->rejected_promise_list))) {
+        list_for_each(el, &ts->rejected_promise_list) {
+            JSRejectedPromiseEntry *rp = list_entry(el, JSRejectedPromiseEntry, link);
+            fprintf(stderr, "Possibly unhandled promise rejection: ");
+            js_std_dump_error1(ctx, rp->reason);
+        }
+        exit(1);
+    }
+}
+
+/// Line number here: 4291
+void js_std_eval_binary(JSContext *ctx, const uint8_t *buf, size_t buf_len,
+                        int load_only)
+{
+    JSValue obj, val;
+    obj = JS_ReadObject(ctx, buf, buf_len, JS_READ_OBJ_BYTECODE);
+    if (JS_IsException(obj))
+        goto exception;
+    if (load_only) {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+        }
+    } else {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            if (JS_ResolveModule(ctx, obj) < 0) {
+                JS_FreeValue(ctx, obj);
+                goto exception;
+            }
+            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            val = JS_EvalFunction(ctx, obj);
+            val = js_std_await(ctx, val);
+        } else {
+            val = JS_EvalFunction(ctx, obj);
+        }
+        if (JS_IsException(val)) {
+        exception:
+            js_std_dump_error(ctx);
+            exit(1);
+        }
+        JS_FreeValue(ctx, val);
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Promise */
+/// Line number here: 49246
+typedef struct JSPromiseData {
+    JSPromiseStateEnum promise_state;
+    /* 0=fulfill, 1=reject, list of JSPromiseReactionData.link */
+    struct list_head promise_reactions[2];
+    BOOL is_handled; /* Note: only useful to debug */
+    JSValue promise_result;
+} JSPromiseData
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 49264
+JSPromiseStateEnum JS_PromiseState(JSContext *ctx, JSValue promise)
+{
+    JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    if (!s)
+        return -1;
+    return s->promise_state;
+}
+
+/// Line number here: 49272
+JSValue JS_PromiseResult(JSContext *ctx, JSValue promise)
+{
+    JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
+    if (!s)
+        return JS_UNDEFINED;
+    return JS_DupValue(ctx, s->promise_result);
+}
+
+/* WARNING: obj is freed */
+/// Line number here: 6732
+JSValue JS_Throw(JSContext *ctx, JSValue obj)
+{
+    JSRuntime *rt = ctx->rt;
+    JS_FreeValue(ctx, rt->current_exception);
+    rt->current_exception = obj;
+    rt->current_exception_is_uncatchable = FALSE;
+    return JS_EXCEPTION;
+}
+
+/// Line number here: 864
+typedef struct JSJobEntry {
+    struct list_head link;
+    JSContext *realm;
+    JSJobFunc *job_func;
+    int argc;
+    JSValue argv[0];
+} JSJobEntry
+
+/* return < 0 if exception, 0 if no job pending, 1 if a job was
+   executed successfully. The context of the job is stored in '*pctx'
+   if pctx != NULL. It may be NULL if the context was already
+   destroyed or if no job was pending. The 'pctx' parameter is now
+   absolete. */
+/// Line number here: 1805
+int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
+{
+    JSContext *ctx;
+    JSJobEntry *e;
+    JSValue res;
+    int i, ret;
+
+    if (list_empty(&rt->job_list)) {
+        if (pctx)
+            *pctx = NULL;
+        return 0;
+    }
+
+    /* get the first pending job and execute it */
+    e = list_entry(rt->job_list.next, JSJobEntry, link);
+    list_del(&e->link);
+    ctx = e->realm;
+    res = e->job_func(ctx, e->argc, (JSValueConst *)e->argv);
+    for(i = 0; i < e->argc; i++)
+        JS_FreeValue(ctx, e->argv[i]);
+    if (JS_IsException(res))
+        ret = -1;
+    else
+        ret = 1;
+    JS_FreeValue(ctx, res);
+    js_free(ctx, e);
+    if (pctx) {
+        if (ctx->header.ref_count > 1)
+            *pctx = ctx;
+        else
+            *pctx = NULL;
+    }
+    JS_FreeContext(ctx);
+    return ret;
+}
+
+/// Line number here: 2315
+JSRuntime *JS_GetRuntime(JSContext *ctx)
+{
+    return ctx->rt;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_std_await(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseState(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_PromiseResult(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_Throw(JSContext *, JSValue)";
+"js_std_await(JSContext *, JSValue)" -> "JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"js_std_await(JSContext *, JSValue)" -> "JS_GetRuntime(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_dump_error(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "js_std_promise_rejection_check(JSContext *)";
+"js_std_await(JSContext *, JSValue)" -> "os_poll_func";
+"JS_PromiseState(JSContext *, JSValue)";
+"JS_PromiseState(JSContext *, JSValue)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"JS_PromiseResult(JSContext *, JSValue)";
+"JS_PromiseResult(JSContext *, JSValue)" -> "JS_GetOpaque(JSValue, JSClassID)";
+"JS_PromiseResult(JSContext *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"JS_Throw(JSContext *, JSValue)";
+"JS_Throw(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "list_empty(struct list_head *)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "list_del(struct list_head *)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "JSJobEntry::job_func";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "JS_IsException(JSValue)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "js_free(JSContext *, void *)";
+"JS_ExecutePendingJob(JSRuntime *, JSContext **)" -> "JS_FreeContext(JSContext *)";
+"js_std_dump_error(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "JS_GetException(JSContext *)";
+"js_std_dump_error(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_dump_error(JSContext *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_promise_rejection_check(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntime(JSContext *)";
+"js_std_promise_rejection_check(JSContext *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_std_promise_rejection_check(JSContext *)" -> "__builtin_expect(long, long)";
+"js_std_promise_rejection_check(JSContext *)" -> "list_empty(struct list_head *)";
+"js_std_promise_rejection_check(JSContext *)" -> "fprintf(FILE *restrict, const char *restrict, ...)";
+"js_std_promise_rejection_check(JSContext *)" -> "js_std_dump_error1(JSContext *, JSValue)";
+"js_std_promise_rejection_check(JSContext *)" -> "exit(int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_ReadObject(JSContext *, const uint8_t *, size_t, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_IsException(JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_module_set_import_meta(JSContext *, JSValue, int, int)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_ResolveModule(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "JS_EvalFunction(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_std_await(JSContext *, JSValue)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "js_std_dump_error(JSContext *)";
+"js_std_eval_binary(JSContext *, const uint8_t *, size_t, int)" -> "exit(int)";
+}

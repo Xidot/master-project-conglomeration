@@ -1,0 +1,67 @@
+Target function: "JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 351
+typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic)
+
+/* C function definition */
+/// Line number here: 1020
+typedef enum JSCFunctionEnum {  /* XXX: should rename for namespace isolation */
+    JS_CFUNC_generic,
+    JS_CFUNC_generic_magic,
+    JS_CFUNC_constructor,
+    JS_CFUNC_constructor_magic,
+    JS_CFUNC_constructor_or_func,
+    JS_CFUNC_constructor_or_func_magic,
+    JS_CFUNC_f_f,
+    JS_CFUNC_f_f_f,
+    JS_CFUNC_getter,
+    JS_CFUNC_setter,
+    JS_CFUNC_getter_magic,
+    JS_CFUNC_setter_magic,
+    JS_CFUNC_iterator_next,
+} JSCFunctionEnum
+
+/// Line number here: 350
+typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+
+/// Line number here: 1051
+static inline JSValue JS_NewCFunctionMagic(JSContext *ctx, JSCFunctionMagic *func,
+                                           const char *name,
+                                           int length, JSCFunctionEnum cproto, int magic)
+{
+    return JS_NewCFunction2(ctx, (JSCFunction *)func, name, length, cproto, magic);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Note: at least 'length' arguments will be readable in 'argv' */
+/// Line number here: 5382
+JSValue JS_NewCFunction2(JSContext *ctx, JSCFunction *func,
+                         const char *name,
+                         int length, JSCFunctionEnum cproto, int magic)
+{
+    return JS_NewCFunction3(ctx, func, name, length, cproto, magic,
+                            ctx->function_proto);
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunctionMagic(JSContext *, JSCFunctionMagic *, const char *, int, JSCFunctionEnum, int)" -> "JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)";
+"JS_NewCFunction2(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int)" -> "JS_NewCFunction3(JSContext *, JSCFunction *, const char *, int, JSCFunctionEnum, int, JSValue)";
+}

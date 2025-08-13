@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14092,6 +14092,9 @@
+     /* XXX: allow custom operators */
+     op1 = sp[-1];
+     op1 = JS_ToNumericFree(ctx, op1);
++    if (!JS_IsNumber(op1) && !JS_IsBigInt(op1)) {
++        funlogline();
++    }
+     if (JS_IsException(op1)) {
+         sp[-1] = JS_UNDEFINED;
+         return -1;
+@@ -14098,6 +14101,9 @@
+     }
+     sp[-1] = op1;
+     sp[0] = JS_DupValue(ctx, op1);
++    if (op < OP_post_dec || op > OP_post_inc) {
++        funlogline();
++    }
+     return js_unary_arith_slow(ctx, sp + 1, op - OP_post_dec + OP_dec);
+ }

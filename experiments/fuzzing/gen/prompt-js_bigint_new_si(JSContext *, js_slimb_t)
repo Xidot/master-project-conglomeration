@@ -1,0 +1,449 @@
+Target function: "js_bigint_new_si(JSContext *, js_slimb_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 10950
+static JSBigInt *js_bigint_new_si(JSContext *ctx, js_slimb_t a)
+{
+    JSBigInt *r;
+    r = js_bigint_new(ctx, 1);
+    if (!r)
+        return NULL;
+    r->tab[0] = a;
+    return r;
+}
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 10880
+static JSBigInt *js_bigint_new(JSContext *ctx, int len)
+{
+    JSBigInt *r;
+    if (len > JS_BIGINT_MAX_SIZE) {
+        JS_ThrowRangeError(ctx, "BigInt is too large to allocate");
+        return NULL;
+    }
+    r = js_malloc(ctx, sizeof(JSBigInt) + len * sizeof(js_limb_t));
+    if (!r)
+        return NULL;
+    r->header.ref_count = 1;
+    r->len = len;
+    return r;
+}
+
+/// Line number here: 10960
+static JSBigInt *js_bigint_new_si64(JSContext *ctx, int64_t a)
+{
+#if JS_LIMB_BITS == 64
+    return js_bigint_new_si(ctx, a);
+#else
+    if (a >= INT32_MIN && a <= INT32_MAX) {
+        return js_bigint_new_si(ctx, a);
+    } else {
+        JSBigInt *r;
+        r = js_bigint_new(ctx, 2);
+        if (!r)
+            return NULL;
+        r->tab[0] = a;
+        r->tab[1] = a >> 32;
+        return r;
+    }
+#endif
+}
+
+/* return the division or the remainder. 'b' must be != 0. return NULL
+   in case of exception (division by zero or memory error) */
+/// Line number here: 11171
+static JSBigInt *js_bigint_divrem(JSContext *ctx, const JSBigInt *a,
+                                  const JSBigInt *b, BOOL is_rem)
+{
+    JSBigInt *r, *q;
+    js_limb_t *tabb, h;
+    int na, nb, a_sign, b_sign, shift;
+    
+    if (b->len == 1 && b->tab[0] == 0) {
+        JS_ThrowRangeError(ctx, "BigInt division by zero");
+        return NULL;
+    }
+    
+    a_sign = js_bigint_sign(a);
+    b_sign = js_bigint_sign(b);
+    na = a->len;
+    nb = b->len;
+
+    r = js_bigint_new(ctx, na + 2); 
+    if (!r)
+        return NULL;
+    if (a_sign) {
+        mp_neg(r->tab, a->tab, na);
+    } else {
+        memcpy(r->tab, a->tab, na * sizeof(a->tab[0]));
+    }
+    /* normalize */
+    while (na > 1 && r->tab[na - 1] == 0)
+        na--;
+
+    tabb = js_malloc(ctx, nb * sizeof(tabb[0]));
+    if (!tabb) {
+        js_free(ctx, r);
+        return NULL;
+    }
+    if (b_sign) {
+        mp_neg(tabb, b->tab, nb);
+    } else {
+        memcpy(tabb, b->tab, nb * sizeof(tabb[0]));
+    }
+    /* normalize */
+    while (nb > 1 && tabb[nb - 1] == 0)
+        nb--;
+
+    /* trivial case if 'a' is small */
+    if (na < nb) {
+        js_free(ctx, r);
+        js_free(ctx, tabb);
+        if (is_rem) {
+            /* r = a */
+            r = js_bigint_new(ctx, a->len);
+            if (!r)
+                return NULL;
+            memcpy(r->tab, a->tab, a->len * sizeof(a->tab[0])); 
+            return r;
+        } else {
+            /* q = 0 */
+            return js_bigint_new_si(ctx, 0);
+        }
+    }
+
+    /* normalize 'b' */
+    shift = js_limb_clz(tabb[nb - 1]);
+    if (shift != 0) {
+        mp_shl(tabb, tabb, nb, shift);
+        h = mp_shl(r->tab, r->tab, na, shift);
+        if (h != 0)
+            r->tab[na++] = h;
+    }
+
+    q = js_bigint_new(ctx, na - nb + 2); /* one more limb for the sign */
+    if (!q) {
+        js_free(ctx, r);
+        js_free(ctx, tabb);
+        return NULL;
+    }
+
+    //    js_bigint_dump1(ctx, "a", r->tab, na);
+    //    js_bigint_dump1(ctx, "b", tabb, nb);
+    mp_divnorm(q->tab, r->tab, na, tabb, nb);
+    js_free(ctx, tabb);
+
+    if (is_rem) {
+        js_free(ctx, q);
+        if (shift != 0)
+            mp_shr(r->tab, r->tab, nb, shift, 0);
+        r->tab[nb++] = 0;
+        if (a_sign)
+            mp_neg(r->tab, r->tab, nb);
+        r = js_bigint_normalize1(ctx, r, nb);
+        return r;
+    } else {
+        js_free(ctx, r);
+        q->tab[na - nb + 1] = 0;
+        if (a_sign ^ b_sign) {
+            mp_neg(q->tab, q->tab, q->len);
+        }
+        q = js_bigint_normalize(ctx, q);
+        return q;
+    }
+}
+
+/// Line number here: 11340
+static JSBigInt *js_bigint_shl(JSContext *ctx, const JSBigInt *a,
+                               unsigned int shift1)
+{
+    int d, i, shift;
+    JSBigInt *r;
+    js_limb_t l;
+
+    if (a->len == 1 && a->tab[0] == 0)
+        return js_bigint_new_si(ctx, 0); /* zero case */
+    d = shift1 / JS_LIMB_BITS;
+    shift = shift1 % JS_LIMB_BITS;
+    r = js_bigint_new(ctx, a->len + d);
+    if (!r)
+        return NULL;
+    for(i = 0; i < d; i++)
+        r->tab[i] = 0;
+    if (shift == 0) {
+        for(i = 0; i < a->len; i++) {
+            r->tab[i + d] = a->tab[i];
+        }
+    } else {
+        l = mp_shl(r->tab + d, a->tab, a->len, shift);
+        if (js_bigint_sign(a))
+            l |= (js_limb_t)(-1) << shift;
+        r = js_bigint_extend(ctx, r, l);
+    }
+    return r;
+}
+
+/// Line number here: 11369
+static JSBigInt *js_bigint_shr(JSContext *ctx, const JSBigInt *a,
+                               unsigned int shift1)
+{
+    int d, i, shift, a_sign, n1;
+    JSBigInt *r;
+
+    d = shift1 / JS_LIMB_BITS;
+    shift = shift1 % JS_LIMB_BITS;
+    a_sign = js_bigint_sign(a);
+    if (d >= a->len)
+        return js_bigint_new_si(ctx, -a_sign);
+    n1 = a->len - d;
+    r = js_bigint_new(ctx, n1);
+    if (!r)
+        return NULL;
+    if (shift == 0) {
+        for(i = 0; i < n1; i++) {
+            r->tab[i] = a->tab[i + d];
+        }
+        /* no normalization is needed */
+    } else {
+        mp_shr(r->tab, a->tab + d, n1, shift, -a_sign);
+        r = js_bigint_normalize(ctx, r);
+    }
+    return r;
+}
+
+/// Line number here: 11396
+static JSBigInt *js_bigint_pow(JSContext *ctx, const JSBigInt *a, JSBigInt *b)
+{
+    uint32_t e;
+    int n_bits, i;
+    JSBigInt *r, *r1;
+    
+    /* b must be >= 0 */
+    if (js_bigint_sign(b)) {
+        JS_ThrowRangeError(ctx, "BigInt negative exponent");
+        return NULL;
+    }
+    if (b->len == 1 && b->tab[0] == 0) {
+        /* a^0 = 1 */
+        return js_bigint_new_si(ctx, 1);
+    } else if (a->len == 1) {
+        js_limb_t v;
+        BOOL is_neg;
+
+        v = a->tab[0];
+        if (v <= 1)
+            return js_bigint_new_si(ctx, v);
+        else if (v == -1)
+            return js_bigint_new_si(ctx, 1 - 2 * (b->tab[0] & 1));
+        is_neg = (js_slimb_t)v < 0;
+        if (is_neg)
+            v = -v;
+        if ((v & (v - 1)) == 0) {
+            uint64_t e1;
+            int n;
+            /* v = 2^n */
+            n = JS_LIMB_BITS - 1 - js_limb_clz(v);
+            if (b->len > 1)
+                goto overflow;
+            if (b->tab[0] > INT32_MAX)
+                goto overflow;
+            e = b->tab[0];
+            e1 = (uint64_t)e * n;
+            if (e1 > JS_BIGINT_MAX_SIZE * JS_LIMB_BITS)
+                goto overflow;
+            e = e1;
+            if (is_neg)
+                is_neg = b->tab[0] & 1;
+            r = js_bigint_new(ctx,
+                              (e + JS_LIMB_BITS + 1 - is_neg) / JS_LIMB_BITS);
+            if (!r)
+                return NULL;
+            memset(r->tab, 0, sizeof(r->tab[0]) * r->len);
+            r->tab[e / JS_LIMB_BITS] =
+                (js_limb_t)(1 - 2 * is_neg) << (e % JS_LIMB_BITS);
+            return r;
+        }
+    }
+    if (b->len > 1)
+        goto overflow;
+    if (b->tab[0] > INT32_MAX)
+        goto overflow;
+    e = b->tab[0];
+    n_bits = 32 - clz32(e);
+
+    r = js_bigint_new(ctx, a->len);
+    if (!r)
+        return NULL;
+    memcpy(r->tab, a->tab, a->len * sizeof(a->tab[0]));
+    for(i = n_bits - 2; i >= 0; i--) {
+        r1 = js_bigint_mul(ctx, r, r);
+        if (!r1)
+            return NULL;
+        js_free(ctx, r);
+        r = r1;
+        if ((e >> i) & 1) {
+            r1 = js_bigint_mul(ctx, r, a);
+            if (!r1)
+                return NULL;
+            js_free(ctx, r);
+            r = r1;
+        }
+    }
+    return r;
+ overflow:
+    JS_ThrowRangeError(ctx, "BigInt is too large");
+    return NULL;
+}
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/* return (1, NULL) if not an integer, (2, NULL) if NaN or Infinity,
+   (0, n) if an integer, (0, NULL) in case of memory error */
+/// Line number here: 11582
+static JSBigInt *js_bigint_from_float64(JSContext *ctx, int *pres, double a1)
+{
+    uint64_t a = float64_as_uint64(a1);
+    int sgn, e, shift;
+    uint64_t mant;
+    JSBigIntBuf buf;
+    JSBigInt *r;
+    
+    sgn = a >> 63;
+    e = (a >> 52) & ((1 << 11) - 1);
+    mant = a & (((uint64_t)1 << 52) - 1);
+    if (e == 2047) {
+        /* NaN, Infinity */
+        *pres = 2;
+        return NULL;
+    }
+    if (e == 0 && mant == 0) {
+        /* zero */
+        *pres = 0;
+        return js_bigint_new_si(ctx, 0);
+    }
+    e -= 1023;
+    /* 0 < a < 1 : not an integer */
+    if (e < 0)
+        goto not_an_integer;
+    mant |= (uint64_t)1 << 52;
+    if (e < 52) {
+        shift = 52 - e;
+        /* check that there is no fractional part */
+        if (mant & (((uint64_t)1 << shift) - 1)) {
+        not_an_integer:
+            *pres = 1;
+            return NULL;
+        }
+        mant >>= shift;
+        e = 0;
+    } else {
+        e -= 52;
+    }
+    if (sgn)
+        mant = -mant;
+    /* the integer is mant*2^e */
+    r = js_bigint_set_si64(&buf, (int64_t)mant);
+    *pres = 0;
+    return js_bigint_shl(ctx, r, e);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_new_si(JSContext *, js_slimb_t)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_new(JSContext *, int)";
+"js_bigint_new(JSContext *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_new(JSContext *, int)" -> "js_malloc(JSContext *, size_t)";
+"js_bigint_new_si64(JSContext *, int64_t)";
+"js_bigint_new_si64(JSContext *, int64_t)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_neg(js_limb_t *, const js_limb_t *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_malloc(JSContext *, size_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_free(JSContext *, void *)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_limb_clz(js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_shl(js_limb_t *, const js_limb_t *, int, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_divnorm(js_limb_t *, js_limb_t *, js_limb_t, const js_limb_t *, js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "mp_shr(js_limb_t *, const js_limb_t *, int, int, js_limb_t)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_normalize1(JSContext *, JSBigInt *, int)";
+"js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "mp_shl(js_limb_t *, const js_limb_t *, int, int)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_extend(JSContext *, JSBigInt *, js_limb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "mp_shr(js_limb_t *, const js_limb_t *, int, int, js_limb_t)";
+"js_bigint_shr(JSContext *, const JSBigInt *, unsigned int)" -> "js_bigint_normalize(JSContext *, JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_limb_clz(js_limb_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_new(JSContext *, int)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "memset(void *, int, size_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "clz32(unsigned int)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)" -> "js_free(JSContext *, void *)";
+"js_bigint_from_float64(JSContext *, int *, double)";
+"js_bigint_from_float64(JSContext *, int *, double)" -> "float64_as_uint64(double)";
+"js_bigint_from_float64(JSContext *, int *, double)" -> "js_bigint_new_si(JSContext *, js_slimb_t)";
+"js_bigint_from_float64(JSContext *, int *, double)" -> "js_bigint_set_si64(JSBigIntBuf *, int64_t)";
+"js_bigint_from_float64(JSContext *, int *, double)" -> "js_bigint_shl(JSContext *, const JSBigInt *, unsigned int)";
+}

@@ -1,0 +1,18 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -29139,6 +29139,7 @@
+ {
+     JSVarRef *var_ref;
+     var_ref = js_malloc(ctx, sizeof(JSVarRef));
++    if (!var_ref && !ctx->rt) funlogline();
+     if (!var_ref)
+         return NULL;
+     var_ref->header.ref_count = 1;
+@@ -29144,6 +29145,7 @@
+     var_ref->header.ref_count = 1;
+     if (is_lexical)
+         var_ref->value = JS_UNINITIALIZED;
++    else if (var_ref->value.tag != JS_TAG_UNDEFINED) funlogline();
+     else
+         var_ref->value = JS_UNDEFINED;
+     var_ref->pvalue = &var_ref->value;

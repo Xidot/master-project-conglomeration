@@ -1,0 +1,252 @@
+Target function: "JS_NewArrayBufferCopy(JSContext *, const uint8_t *, size_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 56
+typedef uint32_t JSClassID
+
+/// Line number here: 865
+typedef void JSFreeArrayBufferDataFunc(JSRuntime *rt, void *opaque, void *ptr)
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/* create a new ArrayBuffer of length 'len' and copy 'buf' to it */
+/// Line number here: 52632
+JSValue JS_NewArrayBufferCopy(JSContext *ctx, const uint8_t *buf, size_t len)
+{
+    return js_array_buffer_constructor3(ctx, JS_UNDEFINED, len,
+                                        JS_CLASS_ARRAY_BUFFER,
+                                        (uint8_t *)buf,
+                                        js_array_buffer_free, NULL,
+                                        TRUE);
+}
+
+/// Line number here: 694
+typedef struct JSArrayBuffer {
+    int byte_length; /* 0 if detached */
+    uint8_t detached;
+    uint8_t shared; /* if shared, the array buffer cannot be detached */
+    uint8_t *data; /* NULL if detached */
+    struct list_head array_list;
+    void *opaque;
+    JSFreeArrayBufferDataFunc *free_func;
+} JSArrayBuffer
+
+/// Line number here: 52541
+static JSValue js_array_buffer_constructor3(JSContext *ctx,
+                                            JSValueConst new_target,
+                                            uint64_t len, JSClassID class_id,
+                                            uint8_t *buf,
+                                            JSFreeArrayBufferDataFunc *free_func,
+                                            void *opaque, BOOL alloc_flag)
+{
+    JSRuntime *rt = ctx->rt;
+    JSValue obj;
+    JSArrayBuffer *abuf = NULL;
+
+    obj = js_create_from_ctor(ctx, new_target, class_id);
+    if (JS_IsException(obj))
+        return obj;
+    /* XXX: we are currently limited to 2 GB */
+    if (len > INT32_MAX) {
+        JS_ThrowRangeError(ctx, "invalid array buffer length");
+        goto fail;
+    }
+    abuf = js_malloc(ctx, sizeof(*abuf));
+    if (!abuf)
+        goto fail;
+    abuf->byte_length = len;
+    if (alloc_flag) {
+        if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER &&
+            rt->sab_funcs.sab_alloc) {
+            abuf->data = rt->sab_funcs.sab_alloc(rt->sab_funcs.sab_opaque,
+                                                 max_int(len, 1));
+            if (!abuf->data)
+                goto fail;
+            memset(abuf->data, 0, len);
+        } else {
+            /* the allocation must be done after the object creation */
+            abuf->data = js_mallocz(ctx, max_int(len, 1));
+            if (!abuf->data)
+                goto fail;
+        }
+    } else {
+        if (class_id == JS_CLASS_SHARED_ARRAY_BUFFER &&
+            rt->sab_funcs.sab_dup) {
+            rt->sab_funcs.sab_dup(rt->sab_funcs.sab_opaque, buf);
+        }
+        abuf->data = buf;
+    }
+    init_list_head(&abuf->array_list);
+    abuf->detached = FALSE;
+    abuf->shared = (class_id == JS_CLASS_SHARED_ARRAY_BUFFER);
+    abuf->opaque = opaque;
+    abuf->free_func = free_func;
+    if (alloc_flag && buf)
+        memcpy(abuf->data, buf, len);
+    JS_SetOpaque(obj, abuf);
+    return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    js_free(ctx, abuf);
+    return JS_EXCEPTION;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewArrayBufferCopy(JSContext *, const uint8_t *, size_t)";
+"JS_NewArrayBufferCopy(JSContext *, const uint8_t *, size_t)" -> "js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "js_create_from_ctor(JSContext *, JSValue, int)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JS_IsException(JSValue)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "js_malloc(JSContext *, size_t)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JSSharedArrayBufferFunctions::sab_alloc";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "max_int(int, int)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "memset(void *, int, size_t)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "js_mallocz(JSContext *, size_t)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JSSharedArrayBufferFunctions::sab_dup";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "init_list_head(struct list_head *)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JS_SetOpaque(JSValue, void *)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_array_buffer_constructor3(JSContext *, JSValue, uint64_t, JSClassID, uint8_t *, JSFreeArrayBufferDataFunc *, void *, BOOL)" -> "js_free(JSContext *, void *)";
+}

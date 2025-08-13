@@ -1,0 +1,25 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-init_shape_hash(JSRuntime *)
+-------------------------
+Based on the provided code and context, here's the analysis:
+
+:quickjs.c:init_shape_hash:4602
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4595,6 +4595,8 @@
+     rt->shape_hash_bits = 4;   /* 16 shapes */
+     rt->shape_hash_size = 1 << rt->shape_hash_bits;
+     rt->shape_hash_count = 0;
++    if (rt->shape_hash_size == 0)
++        funlogline();
+     rt->shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
+                                    rt->shape_hash_size);
+     if (!rt->shape_hash)
+```
+
+Reason: The logical error is that there's no check for shape_hash_size being 0 before using it in the allocation size calculation. While currently hardcoded to 4 bits (16 shapes), if shape_hash_bits were ever set to 0 (perhaps via configuration), this would lead to a zero-size allocation which might not be handled properly by the memory allocator.

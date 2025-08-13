@@ -1,0 +1,58 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_create_resolving_functions(JSContext *, JSValue *, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_create_resolving_functions` function:
+
+:js_create_resolving_functions:49424
+:js_create_resolving_functions:49456
+:js_create_resolving_functions:49462
+
+---
+
+1. Line 49424: The function doesn't check if the input `promise` is valid before using it. If it's invalid (e.g., JS_NULL or corrupted), this could lead to issues when duplicating it.
+
+2. Line 49456: After malloc fails for `s`, it jumps to `fail` label but doesn't free the allocated `sr` which was successfully allocated earlier, causing a memory leak.
+
+3. Line 49462: The `sr->ref_count` is incremented before setting it in `s->presolved`, but if setting the opaque fails or other operations fail, this could lead to incorrect ref counting.
+
+Here are the proposed fixes in unified diff format:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49421,6 +49421,8 @@
+     JSPromiseFunctionDataResolved *sr;
+     int i, ret;
+ 
++    if (JS_VALUE_GET_TAG(promise) == JS_TAG_NULL)
++        funlogline();
+     sr = js_malloc(ctx, sizeof(*sr));
+     if (!sr)
+         return -1;
+@@ -49453,6 +49455,8 @@
+         resolving_funcs[i] = obj;
+     }
+     js_promise_resolve_function_free_resolved(ctx->rt, sr);
++    if (sr->ref_count != 1)
++        funlogline();
+     return ret;
+ }
+ 
+@@ -49462,6 +49466,8 @@
+     if (--sr->ref_count == 0) {
+         js_free_rt(rt, sr);
+     }
++    if (sr->ref_count < 0)
++        funlogline();
+ }
+ 
+ /* Promise */
+```
+
+The fixes add checks for:
+1. Invalid promise input
+2. Incorrect ref counting after operations
+3. Negative ref count during free
+
+Note that some checks use `funlogline()` directly since we can't always create a valid predicate for the error condition.

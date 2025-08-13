@@ -1,0 +1,19 @@
+--- a/dtoa.c
++++ b/dtoa.c
+@@ -594,6 +594,9 @@
+     char buf1[10], *q;
+     size_t len;
+     
++    if (n == 0) {
++        funlogline();
++    }
+     q = buf1 + sizeof(buf1);
+     do {
+         *--q = n % 10 + '0';
+@@ -601,6 +604,7 @@
+     } while (n != 0);
+     len = buf1 + sizeof(buf1) - q;
++    funlogline(); // Potential buffer overflow if buf is too small
+     memcpy(buf, q, len);
+     return len;
+ }

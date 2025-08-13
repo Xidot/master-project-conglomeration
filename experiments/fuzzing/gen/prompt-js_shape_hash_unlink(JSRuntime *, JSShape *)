@@ -1,0 +1,236 @@
+Target function: "js_shape_hash_unlink(JSRuntime *, JSShape *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 215
+typedef struct JSShape JSShape
+
+/// Line number here: 4664
+static void js_shape_hash_unlink(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t h;
+    JSShape **psh;
+
+    h = get_shape_hash(sh->hash, rt->shape_hash_bits);
+    psh = &rt->shape_hash[h];
+    while (*psh != sh)
+        psh = &(*psh)->shape_hash_next;
+    *psh = sh->shape_hash_next;
+    rt->shape_hash_count--;
+}
+
+/* truncate the shape hash to 'hash_bits' bits */
+/// Line number here: 4615
+static uint32_t get_shape_hash(uint32_t h, int hash_bits)
+{
+    return h >> (32 - hash_bits);
+}
+
+/// Line number here: 892
+typedef struct JSShapeProperty {
+    uint32_t hash_next : 26; /* 0 if last in list */
+    uint32_t flags : 6;   /* JS_PROP_XXX */
+    JSAtom atom; /* JS_ATOM_NULL = free property entry */
+} JSShapeProperty
+
+/// Line number here: 4756
+static void js_free_shape0(JSRuntime *rt, JSShape *sh)
+{
+    uint32_t i;
+    JSShapeProperty *pr;
+
+    assert(sh->header.ref_count == 0);
+    if (sh->is_hashed)
+        js_shape_hash_unlink(rt, sh);
+    if (sh->proto != NULL) {
+        JS_FreeValueRT(rt, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+    }
+    pr = get_shape_prop(sh);
+    for(i = 0; i < sh->prop_count; i++) {
+        JS_FreeAtomRT(rt, pr->atom);
+        pr++;
+    }
+    remove_gc_object(&sh->header);
+    js_free_rt(rt, get_alloc_from_shape(sh));
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 4919
+static int add_shape_property(JSContext *ctx, JSShape **psh,
+                              JSObject *p, JSAtom atom, int prop_flags)
+{
+    JSRuntime *rt = ctx->rt;
+    JSShape *sh = *psh;
+    JSShapeProperty *pr, *prop;
+    uint32_t hash_mask, new_shape_hash = 0;
+    intptr_t h;
+
+    /* update the shape hash */
+    if (sh->is_hashed) {
+        js_shape_hash_unlink(rt, sh);
+        new_shape_hash = shape_hash(shape_hash(sh->hash, atom), prop_flags);
+    }
+
+    if (unlikely(sh->prop_count >= sh->prop_size)) {
+        if (resize_properties(ctx, psh, p, sh->prop_count + 1)) {
+            /* in case of error, reinsert in the hash table.
+               sh is still valid if resize_properties() failed */
+            if (sh->is_hashed)
+                js_shape_hash_link(rt, sh);
+            return -1;
+        }
+        sh = *psh;
+    }
+    if (sh->is_hashed) {
+        sh->hash = new_shape_hash;
+        js_shape_hash_link(rt, sh);
+    }
+    /* Initialize the new shape property.
+       The object property at p->prop[sh->prop_count] is uninitialized */
+    prop = get_shape_prop(sh);
+    pr = &prop[sh->prop_count++];
+    pr->atom = JS_DupAtom(ctx, atom);
+    pr->flags = prop_flags;
+    sh->has_small_array_index |= __JS_AtomIsTaggedInt(atom);
+    /* add in hash table */
+    hash_mask = sh->prop_hash_mask;
+    h = atom & hash_mask;
+    pr->hash_next = prop_hash_end(sh)[-h - 1];
+    prop_hash_end(sh)[-h - 1] = sh->prop_count;
+    return 0;
+}
+
+/* ensure that the shape can be safely modified */
+/// Line number here: 9479
+static int js_shape_prepare_update(JSContext *ctx, JSObject *p,
+                                   JSShapeProperty **pprs)
+{
+    JSShape *sh;
+    uint32_t idx = 0;    /* prevent warning */
+
+    sh = p->shape;
+    if (sh->is_hashed) {
+        if (sh->header.ref_count != 1) {
+            if (pprs)
+                idx = *pprs - get_shape_prop(sh);
+            /* clone the shape (the resulting one is no longer hashed) */
+            sh = js_clone_shape(ctx, sh);
+            if (!sh)
+                return -1;
+            js_free_shape(ctx->rt, p->shape);
+            p->shape = sh;
+            if (pprs)
+                *pprs = get_shape_prop(sh) + idx;
+        } else {
+            js_shape_hash_unlink(ctx->rt, sh);
+            sh->is_hashed = FALSE;
+        }
+    }
+    return 0;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/stdint.h
+
+/// Line number here: 75
+typedef long int		intptr_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_shape_hash_unlink(JSRuntime *, JSShape *)" -> "get_shape_hash(uint32_t, int)";
+"js_free_shape0(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_shape_prop(JSShape *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "JS_FreeAtomRT(JSRuntime *, JSAtom)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "remove_gc_object(JSGCObjectHeader *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_shape0(JSRuntime *, JSShape *)" -> "get_alloc_from_shape(JSShape *)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "shape_hash(uint32_t, uint32_t)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "__builtin_expect(long, long)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "resize_properties(JSContext *, JSShape **, JSObject *, uint32_t)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "js_shape_hash_link(JSRuntime *, JSShape *)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "get_shape_prop(JSShape *)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "JS_DupAtom(JSContext *, JSAtom)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "__JS_AtomIsTaggedInt(JSAtom)";
+"add_shape_property(JSContext *, JSShape **, JSObject *, JSAtom, int)" -> "prop_hash_end(JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "get_shape_prop(JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_clone_shape(JSContext *, JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_free_shape(JSRuntime *, JSShape *)";
+"js_shape_prepare_update(JSContext *, JSObject *, JSShapeProperty **)" -> "js_shape_hash_unlink(JSRuntime *, JSShape *)";
+}

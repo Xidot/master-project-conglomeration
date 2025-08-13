@@ -1,0 +1,103 @@
+Target function: "math_mod(int64_t, int64_t)"
+
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* Date */
+/// Line number here: 50910
+static int64_t math_mod(int64_t a, int64_t b) {
+    /* return positive modulo */
+    int64_t m = a % b;
+    return m + (m < 0) * b;
+}
+
+/// Line number here: 50985
+static __exception int get_date_fields(JSContext *ctx, JSValueConst obj,
+                                       double fields[minimum_length(9)], int is_local, int force)
+{
+    double dval;
+    int64_t d, days, wd, y, i, md, h, m, s, ms, tz = 0;
+
+    if (JS_ThisTimeValue(ctx, &dval, obj))
+        return -1;
+
+    if (isnan(dval)) {
+        if (!force)
+            return FALSE; /* NaN */
+        d = 0;        /* initialize all fields to 0 */
+    } else {
+        d = dval;     /* assuming -8.64e15 <= dval <= -8.64e15 */
+        if (is_local) {
+            tz = -getTimezoneOffset(d);
+            d += tz * 60000;
+        }
+    }
+
+    /* result is >= 0, we can use % */
+    h = math_mod(d, 86400000);
+    days = (d - h) / 86400000;
+    ms = h % 1000;
+    h = (h - ms) / 1000;
+    s = h % 60;
+    h = (h - s) / 60;
+    m = h % 60;
+    h = (h - m) / 60;
+    wd = math_mod(days + 4, 7); /* week day */
+    y = year_from_days(&days);
+
+    for(i = 0; i < 11; i++) {
+        md = month_days[i];
+        if (i == 1)
+            md += days_in_year(y) - 365;
+        if (days < md)
+            break;
+        days -= md;
+    }
+    fields[0] = y;
+    fields[1] = i;
+    fields[2] = days + 1;
+    fields[3] = h;
+    fields[4] = m;
+    fields[5] = s;
+    fields[6] = ms;
+    fields[7] = wd;
+    fields[8] = tz;
+    return TRUE;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"get_date_fields(JSContext *, JSValue, double *, int, int)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "__builtin_isnan()";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "getTimezoneOffset(int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "math_mod(int64_t, int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "year_from_days(int64_t *)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "days_in_year(int64_t)";
+}

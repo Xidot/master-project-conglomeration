@@ -1,0 +1,524 @@
+Target function: "JS_ThrowInterrupted(JSContext *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 669
+void JS_SetUncatchableException(JSContext *ctx, JS_BOOL flag)
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 7209
+static void JS_ThrowInterrupted(JSContext *ctx)
+{
+    JS_ThrowInternalError(ctx, "interrupted");
+    JS_SetUncatchableException(ctx, TRUE);
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7134
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowInternalError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_INTERNAL_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 7215
+static no_inline __exception int __js_poll_interrupts(JSContext *ctx)
+{
+    JSRuntime *rt = ctx->rt;
+    ctx->interrupt_counter = JS_INTERRUPT_COUNTER_INIT;
+    if (rt->interrupt_handler) {
+        if (rt->interrupt_handler(rt, rt->interrupt_opaque)) {
+            JS_ThrowInterrupted(ctx);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/// Line number here: 677
+typedef struct JSRegExp {
+    JSString *pattern;
+    JSString *bytecode; /* also contains the flags */
+} JSRegExp
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 45166
+static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    JSRegExp *re = js_get_regexp(ctx, this_val, TRUE);
+    JSString *str;
+    JSValue t, ret, str_val, obj, val, groups;
+    JSValue indices, indices_groups;
+    uint8_t *re_bytecode;
+    uint8_t **capture, *str_buf;
+    int rc, capture_count, shift, i, re_flags;
+    int64_t last_index;
+    const char *group_name_ptr;
+
+    if (!re)
+        return JS_EXCEPTION;
+
+    str_val = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(str_val))
+        return JS_EXCEPTION;
+
+    ret = JS_EXCEPTION;
+    obj = JS_NULL;
+    groups = JS_UNDEFINED;
+    indices = JS_UNDEFINED;
+    indices_groups = JS_UNDEFINED;
+    capture = NULL;
+
+    val = JS_GetProperty(ctx, this_val, JS_ATOM_lastIndex);
+    if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
+        goto fail;
+
+    re_bytecode = re->bytecode->u.str8;
+    re_flags = lre_get_flags(re_bytecode);
+    if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
+        last_index = 0;
+    }
+    str = JS_VALUE_GET_STRING(str_val);
+    capture_count = lre_get_capture_count(re_bytecode);
+    if (capture_count > 0) {
+        capture = js_malloc(ctx, sizeof(capture[0]) * capture_count * 2);
+        if (!capture)
+            goto fail;
+    }
+    shift = str->is_wide_char;
+    str_buf = str->u.str8;
+    if (last_index > str->len) {
+        rc = 2;
+    } else {
+        rc = lre_exec(capture, re_bytecode,
+                      str_buf, last_index, str->len,
+                      shift, ctx);
+    }
+    if (rc != 1) {
+        if (rc >= 0) {
+            if (rc == 2 || (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY))) {
+                if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                                   JS_NewInt32(ctx, 0)) < 0)
+                    goto fail;
+            }
+        } else {
+            if (rc == LRE_RET_TIMEOUT) {
+                JS_ThrowInterrupted(ctx);
+            } else {
+                JS_ThrowInternalError(ctx, "out of memory in regexp execution");
+            }
+            goto fail;
+        }
+    } else {
+        int prop_flags;
+        if (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) {
+            if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                               JS_NewInt32(ctx, (capture[1] - str_buf) >> shift)) < 0)
+                goto fail;
+        }
+        obj = JS_NewArray(ctx);
+        if (JS_IsException(obj))
+            goto fail;
+        prop_flags = JS_PROP_C_W_E | JS_PROP_THROW;
+        group_name_ptr = lre_get_groupnames(re_bytecode);
+        if (group_name_ptr) {
+            groups = JS_NewObjectProto(ctx, JS_NULL);
+            if (JS_IsException(groups))
+                goto fail;
+        }
+        if (re_flags & LRE_FLAG_INDICES) {
+            indices = JS_NewArray(ctx);
+            if (JS_IsException(indices))
+                goto fail;
+            if (group_name_ptr) {
+                indices_groups = JS_NewObjectProto(ctx, JS_NULL);
+                if (JS_IsException(indices_groups))
+                    goto fail;
+            }
+        }
+
+        for(i = 0; i < capture_count; i++) {
+            const char *name = NULL;
+            uint8_t **match = &capture[2 * i];
+            int start = -1;
+            int end = -1;
+            JSValue val;
+
+            if (group_name_ptr && i > 0) {
+                if (*group_name_ptr) name = group_name_ptr;
+                group_name_ptr += strlen(group_name_ptr) + 1;
+            }
+
+            if (match[0] && match[1]) {
+                start = (match[0] - str_buf) >> shift;
+                end = (match[1] - str_buf) >> shift;
+            }
+
+            if (!JS_IsUndefined(indices)) {
+                val = JS_UNDEFINED;
+                if (start != -1) {
+                    val = JS_NewArray(ctx);
+                    if (JS_IsException(val))
+                        goto fail;
+                    if (JS_DefinePropertyValueUint32(ctx, val, 0,
+                                                     JS_NewInt32(ctx, start),
+                                                     prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                    if (JS_DefinePropertyValueUint32(ctx, val, 1,
+                                                     JS_NewInt32(ctx, end),
+                                                     prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                }
+                if (name && !JS_IsUndefined(indices_groups)) {
+                    val = JS_DupValue(ctx, val);
+                    if (JS_DefinePropertyValueStr(ctx, indices_groups,
+                                                  name, val, prop_flags) < 0) {
+                        JS_FreeValue(ctx, val);
+                        goto fail;
+                    }
+                }
+                if (JS_DefinePropertyValueUint32(ctx, indices, i, val,
+                                                 prop_flags) < 0) {
+                    goto fail;
+                }
+            }
+
+            val = JS_UNDEFINED;
+            if (start != -1) {
+                val = js_sub_string(ctx, str, start, end);
+                if (JS_IsException(val))
+                    goto fail;
+            }
+
+            if (name) {
+                if (JS_DefinePropertyValueStr(ctx, groups, name,
+                                              JS_DupValue(ctx, val),
+                                              prop_flags) < 0) {
+                    JS_FreeValue(ctx, val);
+                    goto fail;
+                }
+            }
+
+            if (JS_DefinePropertyValueUint32(ctx, obj, i, val, prop_flags) < 0)
+                goto fail;
+        }
+
+        t = JS_NewInt32(ctx, (capture[0] - str_buf) >> shift);
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_index, t, prop_flags) < 0)
+            goto fail;
+
+        t = str_val, str_val = JS_UNDEFINED;
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_input, t, prop_flags) < 0)
+            goto fail;
+
+        t = groups, groups = JS_UNDEFINED;
+        if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_groups,
+                                   t, prop_flags) < 0) {
+            goto fail;
+        }
+
+        if (!JS_IsUndefined(indices)) {
+            t = indices_groups, indices_groups = JS_UNDEFINED;
+            if (JS_DefinePropertyValue(ctx, indices, JS_ATOM_groups,
+                                       t, prop_flags) < 0) {
+                goto fail;
+            }
+            t = indices, indices = JS_UNDEFINED;
+            if (JS_DefinePropertyValue(ctx, obj, JS_ATOM_indices,
+                                       t, prop_flags) < 0) {
+                goto fail;
+            }
+        }
+    }
+    ret = obj;
+    obj = JS_UNDEFINED;
+fail:
+    JS_FreeValue(ctx, indices_groups);
+    JS_FreeValue(ctx, indices);
+    JS_FreeValue(ctx, str_val);
+    JS_FreeValue(ctx, groups);
+    JS_FreeValue(ctx, obj);
+    js_free(ctx, capture);
+    return ret;
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/* delete portions of a string that match a given regex */
+/// Line number here: 45371
+static JSValue JS_RegExpDelete(JSContext *ctx, JSValueConst this_val, JSValueConst arg)
+{
+    JSRegExp *re = js_get_regexp(ctx, this_val, TRUE);
+    JSString *str;
+    JSValue str_val, val;
+    uint8_t *re_bytecode;
+    int ret;
+    uint8_t **capture, *str_buf;
+    int capture_count, shift, re_flags;
+    int next_src_pos, start, end;
+    int64_t last_index;
+    StringBuffer b_s, *b = &b_s;
+
+    if (!re)
+        return JS_EXCEPTION;
+
+    string_buffer_init(ctx, b, 0);
+
+    capture = NULL;
+    str_val = JS_ToString(ctx, arg);
+    if (JS_IsException(str_val))
+        goto fail;
+    str = JS_VALUE_GET_STRING(str_val);
+    re_bytecode = re->bytecode->u.str8;
+    re_flags = lre_get_flags(re_bytecode);
+    if ((re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY)) == 0) {
+        last_index = 0;
+    } else {
+        val = JS_GetProperty(ctx, this_val, JS_ATOM_lastIndex);
+        if (JS_IsException(val) || JS_ToLengthFree(ctx, &last_index, val))
+            goto fail;
+    }
+    capture_count = lre_get_capture_count(re_bytecode);
+    if (capture_count > 0) {
+        capture = js_malloc(ctx, sizeof(capture[0]) * capture_count * 2);
+        if (!capture)
+            goto fail;
+    }
+    shift = str->is_wide_char;
+    str_buf = str->u.str8;
+    next_src_pos = 0;
+    for (;;) {
+        if (last_index > str->len)
+            break;
+
+        ret = lre_exec(capture, re_bytecode,
+                       str_buf, last_index, str->len, shift, ctx);
+        if (ret != 1) {
+            if (ret >= 0) {
+                if (ret == 2 || (re_flags & (LRE_FLAG_GLOBAL | LRE_FLAG_STICKY))) {
+                    if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                                       JS_NewInt32(ctx, 0)) < 0)
+                        goto fail;
+                }
+            } else {
+                if (ret == LRE_RET_TIMEOUT) {
+                    JS_ThrowInterrupted(ctx);
+                } else {
+                    JS_ThrowInternalError(ctx, "out of memory in regexp execution");
+                }
+                goto fail;
+            }
+            break;
+        }
+        start = (capture[0] - str_buf) >> shift;
+        end = (capture[1] - str_buf) >> shift;
+        last_index = end;
+        if (next_src_pos < start) {
+            if (string_buffer_concat(b, str, next_src_pos, start))
+                goto fail;
+        }
+        next_src_pos = end;
+        if (!(re_flags & LRE_FLAG_GLOBAL)) {
+            if (JS_SetProperty(ctx, this_val, JS_ATOM_lastIndex,
+                               JS_NewInt32(ctx, end)) < 0)
+                goto fail;
+            break;
+        }
+        if (end == start) {
+            if (!(re_flags & LRE_FLAG_UNICODE) || (unsigned)end >= str->len || !str->is_wide_char) {
+                end++;
+            } else {
+                string_getc(str, &end);
+            }
+        }
+        last_index = end;
+    }
+    if (string_buffer_concat(b, str, next_src_pos, str->len))
+        goto fail;
+    JS_FreeValue(ctx, str_val);
+    js_free(ctx, capture);
+    return string_buffer_end(b);
+fail:
+    JS_FreeValue(ctx, str_val);
+    js_free(ctx, capture);
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ThrowInterrupted(JSContext *)";
+"JS_ThrowInterrupted(JSContext *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ThrowInterrupted(JSContext *)" -> "JS_SetUncatchableException(JSContext *, int)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"__js_poll_interrupts(JSContext *)";
+"__js_poll_interrupts(JSContext *)" -> "JSRuntime::interrupt_handler";
+"__js_poll_interrupts(JSContext *)" -> "JS_ThrowInterrupted(JSContext *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_get_regexp(JSContext *, JSValue, BOOL)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToString(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_flags(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_capture_count(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_malloc(JSContext *, size_t)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_exec(uint8_t **, const uint8_t *, const uint8_t *, int, int, int, void *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowInterrupted(JSContext *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewArray(JSContext *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "lre_get_groupnames(const uint8_t *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewObjectProto(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "strlen(const char *)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueUint32(JSContext *, JSValue, uint32_t, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValueStr(JSContext *, JSValue, const char *, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_sub_string(JSContext *, JSString *, int, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"js_regexp_exec(JSContext *, JSValue, int, JSValue *)" -> "js_free(JSContext *, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_get_regexp(JSContext *, JSValue, BOOL)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_IsException(JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_get_flags(const uint8_t *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ToLengthFree(JSContext *, int64_t *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_get_capture_count(const uint8_t *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_malloc(JSContext *, size_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "lre_exec(uint8_t **, const uint8_t *, const uint8_t *, int, int, int, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_SetProperty(JSContext *, JSValue, JSAtom, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ThrowInterrupted(JSContext *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_getc(const JSString *, int *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "js_free(JSContext *, void *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_end(StringBuffer *)";
+"JS_RegExpDelete(JSContext *, JSValue, JSValue)" -> "string_buffer_free(StringBuffer *)";
+}

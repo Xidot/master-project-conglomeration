@@ -1,0 +1,42 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8878,6 +8878,9 @@
+     tag = JS_VALUE_GET_TAG(this_obj);
+     if (unlikely(tag != JS_TAG_OBJECT)) {
+         if (JS_VALUE_GET_TAG(obj) == JS_TAG_OBJECT) {
++            if (JS_IsProxy(obj)) {
++                funlogline();
++            }
+             p = NULL;
+             p1 = JS_VALUE_GET_OBJ(obj);
+             goto prototype_lookup;
+@@ -8920,6 +8923,9 @@
+         if (likely((prs->flags & (JS_PROP_TMASK | JS_PROP_WRITABLE |
+                                   JS_PROP_LENGTH)) == JS_PROP_WRITABLE)) {
+             /* fast case */
++            if (p->is_exotic && !p->fast_array) {
++                funlogline();
++            }
+             set_value(ctx, &pr->u.value, val);
+             return TRUE;
+         } else if (prs->flags & JS_PROP_LENGTH) {
+@@ -8990,6 +8996,9 @@
+                     if (em->set_property) {
+                         /* set_property can free the prototype */
+                         obj1 = JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, p1));
++                        if (JS_IsProxy(obj1)) {
++                            funlogline();
++                        }
+                         ret = em->set_property(ctx, obj1, prop,
+                                                val, this_obj, flags);
+                         JS_FreeValue(ctx, obj1);
+@@ -9130,6 +9139,9 @@
+     if (unlikely(!p)) {
+         JS_FreeValue(ctx, val);
+         return JS_ThrowTypeErrorOrFalse(ctx, flags, "not an object");
++    } else if (JS_IsProxy(JS_MKPTR(JS_TAG_OBJECT, p))) {
++        funlogline();
++        JS_FreeValue(ctx, val);
+     }
+ 
+     if (unlikely(!p->extensible)) {

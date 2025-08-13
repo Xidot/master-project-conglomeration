@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_from_string(JSContext *, const char *, int)
+-------------------------
+Here are the potential logical bugs in the target function `js_bigint_from_string`:
+
+:js_bigint_from_string:11743
+:js_bigint_from_string:11743
+:js_bigint_from_string:11743
+
+---
+
+1. The first potential bug is at the calculation of `n_bits` for radix 10. The formula `(n_digits * 27 + 7) / 8` may overflow if `n_digits` is very large, but there's no overflow check (marked with `/* XXX: overflow */` comment).
+
+2. The second potential bug is in the radix 10 processing loop where `v = v * 10 + c` could overflow since there's no check on the intermediate multiplication result.
+
+3. The third potential bug is in the power-of-two base processing where `r->tab[pos] |= c << shift` could overflow if `c << shift` exceeds the limb size, but there's no check for this.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11762,6 +11762,9 @@
+     /* compute the maximum number of limbs */
+     /* XXX: overflow */
+     if (radix == 10) {
++        if (n_digits > (INT_MAX - 7) / 27) {
++            funlogline();
++        }
+         n_bits = (n_digits * 27 + 7) / 8; /* >= ceil(n_digits * log2(10)) */
+     } else {
+         n_bits = n_digits * log2_radix;
+@@ -11789,6 +11789,9 @@
+                 if (c >= radix)
+                     break;
+                 p++;
++                if (v > UINT64_MAX / 10) {
++                    funlogline();
++                }
+                 v = v * 10 + c;
+             }
+             if (i == 0)
+@@ -11822,6 +11822,9 @@
+             bit_pos = i * log2_radix;
+             shift = bit_pos & (JS_LIMB_BITS - 1);
+             pos = bit_pos / JS_LIMB_BITS;
++            if (c << shift < c) {
++                funlogline();
++            }
+             r->tab[pos] |= c << shift;
+             /* if log2_radix does not divide JS_LIMB_BITS, needed an
+                additional op */
+```
+
+The modifications add overflow checks before the potentially problematic operations. Each check calls `funlogline()` if an overflow condition is detected.

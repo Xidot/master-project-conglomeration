@@ -1,0 +1,23 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -12315,6 +12315,9 @@
+ 
+ static JSValue JS_ToNumericFree(JSContext *ctx, JSValue val)
+ {
++    if (JS_VALUE_GET_TAG(val) == JS_TAG_UNINITIALIZED) {
++        funlogline();
++    }
+     return JS_ToNumberHintFree(ctx, val, TON_FLAG_NUMERIC);
+ }
+ 
+@@ -12236,6 +12239,9 @@
+                                    JSToNumberHintEnum flag)
+ {
+     uint32_t tag;
+     JSValue ret;
++    if (flag == TON_FLAG_NUMERIC && JS_VALUE_GET_TAG(val) <= JS_TAG_FLOAT64) {
++        funlogline();
++    }
+ 
+  redo:
+     tag = JS_VALUE_GET_NORM_TAG(val);

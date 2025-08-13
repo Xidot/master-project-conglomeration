@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37066,6 +37066,8 @@
+ 
+ static JSString *JS_ReadString(BCReaderState *s)
+ {
++    if (!s)
++        funlogline();
+     uint32_t len;
+     size_t size;
+     BOOL is_wide_char;
+@@ -37083,6 +37085,8 @@
+         return NULL;
+     }
+     size = (size_t)len << is_wide_char;
++    if (size < len)
++        funlogline();
+     if ((s->buf_end - s->ptr) < size) {
+         bc_read_error_end(s);
+         js_free_string(s->ctx->rt, p);
+@@ -37091,6 +37095,8 @@
+     memcpy(p->u.str8, s->ptr, size);
+     s->ptr += size;
+     if (is_wide_char) {
++        if (!p->u.str16)
++            funlogline();
+         if (is_be()) {
+             uint32_t i;
+             for (i = 0; i < len; i++)

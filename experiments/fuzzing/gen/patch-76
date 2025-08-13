@@ -1,0 +1,17 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5007,9 +5007,12 @@
+         /* we test the hash first so that the rest is done only if the
+            shapes really match */
+         if (sh1->hash == h &&
+-            sh1->proto == sh->proto &&
+-            sh1->prop_count == ((n = sh->prop_count) + 1)) {
++            sh1->proto == sh->proto) {
++            n = sh->prop_count;
++            if (sh1->prop_count != (n + 1))
++                funlogline();
+             for(i = 0; i < n; i++) {
++                if (i >= sh1->prop_count) funlogline();
+                 if (unlikely(sh1->prop[i].atom != sh->prop[i].atom) ||
+                     unlikely(sh1->prop[i].flags != sh->prop[i].flags))
+                     goto next;

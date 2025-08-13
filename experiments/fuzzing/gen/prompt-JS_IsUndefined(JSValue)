@@ -1,0 +1,673 @@
+Target function: "JS_IsUndefined(JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 637
+static inline JS_BOOL JS_IsUndefined(JSValueConst v)
+{
+    return JS_VALUE_GET_TAG(v) == JS_TAG_UNDEFINED;
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 262
+typedef struct DynBuf {
+    uint8_t *buf;
+    size_t size;
+    size_t allocated_size;
+    BOOL error; /* true if a memory allocation error occurred */
+    DynBufReallocFunc *realloc_func;
+    void *opaque; /* for realloc_func */
+} DynBuf
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/* return > 0 if the attributes indicate a JSON module */
+/// Line number here: 648
+int js_module_test_json(JSContext *ctx, JSValueConst attributes)
+{
+    JSValue str;
+    const char *cstr;
+    size_t len;
+    BOOL res;
+
+    if (JS_IsUndefined(attributes))
+        return FALSE;
+    str = JS_GetPropertyStr(ctx, attributes, "type");
+    if (!JS_IsString(str))
+        return FALSE;
+    cstr = JS_ToCStringLen(ctx, &len, str);
+    JS_FreeValue(ctx, str);
+    if (!cstr)
+        return FALSE;
+    /* XXX: raise an error if unknown type ? */
+    if (len == 4 && !memcmp(cstr, "json", len)) {
+        res = 1;
+    } else if (len == 5 && !memcmp(cstr, "json5", len)) {
+        res = 2;
+    } else {
+        res = 0;
+    }
+    JS_FreeCString(ctx, cstr);
+    return res;
+}
+
+/// Line number here: 857
+static int get_bool_option(JSContext *ctx, BOOL *pbool,
+                           JSValueConst obj,
+                           const char *option)
+{
+    JSValue val;
+    val = JS_GetPropertyStr(ctx, obj, option);
+    if (JS_IsException(val))
+        return -1;
+    if (!JS_IsUndefined(val)) {
+        *pbool = JS_ToBool(ctx, val);
+    }
+    JS_FreeValue(ctx, val);
+    return 0;
+}
+
+/// Line number here: 995
+static void js_set_error_object(JSContext *ctx, JSValue obj, int err)
+{
+    if (!JS_IsUndefined(obj)) {
+        JS_SetPropertyStr(ctx, obj, "errno", JS_NewInt32(ctx, err));
+    }
+}
+
+/* XXX: could use less memory and go faster */
+/// Line number here: 1358
+static JSValue js_std_file_readAsString(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv)
+{
+    FILE *f = js_std_file_get(ctx, this_val);
+    int c;
+    DynBuf dbuf;
+    JSValue obj;
+    uint64_t max_size64;
+    size_t max_size;
+    JSValueConst max_size_val;
+
+    if (!f)
+        return JS_EXCEPTION;
+
+    if (argc >= 1)
+        max_size_val = argv[0];
+    else
+        max_size_val = JS_UNDEFINED;
+    max_size = (size_t)-1;
+    if (!JS_IsUndefined(max_size_val)) {
+        if (JS_ToIndex(ctx, &max_size64, max_size_val))
+            return JS_EXCEPTION;
+        if (max_size64 < max_size)
+            max_size = max_size64;
+    }
+
+    js_std_dbuf_init(ctx, &dbuf);
+    while (max_size != 0) {
+        c = fgetc(f);
+        if (c == EOF)
+            break;
+        if (dbuf_putc(&dbuf, c)) {
+            dbuf_free(&dbuf);
+            return JS_EXCEPTION;
+        }
+        max_size--;
+    }
+    obj = JS_NewStringLen(ctx, (const char *)dbuf.buf, dbuf.size);
+    dbuf_free(&dbuf);
+    return obj;
+}
+
+/**********************************************************/
+/* 'os' object */
+/// Line number here: 1727
+static JSValue js_os_open(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    const char *filename;
+    int flags, mode, ret;
+
+    filename = JS_ToCString(ctx, argv[0]);
+    if (!filename)
+        return JS_EXCEPTION;
+    if (JS_ToInt32(ctx, &flags, argv[1]))
+        goto fail;
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) {
+        if (JS_ToInt32(ctx, &mode, argv[2])) {
+        fail:
+            JS_FreeCString(ctx, filename);
+            return JS_EXCEPTION;
+        }
+    } else {
+        mode = 0666;
+    }
+#if defined(_WIN32)
+    /* force binary mode by default */
+    if (!(flags & O_TEXT))
+        flags |= O_BINARY;
+#endif
+    ret = js_get_errno(open(filename, flags, mode));
+    JS_FreeCString(ctx, filename);
+    return JS_NewInt32(ctx, ret);
+}
+
+/// Line number here: 154
+typedef struct JSThreadState {
+    struct list_head os_rw_handlers; /* list of JSOSRWHandler.link */
+    struct list_head os_signal_handlers; /* list JSOSSignalHandler.link */
+    struct list_head os_timers; /* list of JSOSTimer.link */
+    struct list_head port_list; /* list of JSWorkerMessageHandler.link */
+    struct list_head rejected_promise_list; /* list of JSRejectedPromiseEntry.link */
+    int eval_script_recurse; /* only used in the main thread */
+    int next_timer_id; /* for setTimeout() */
+    /* not used in the main thread */
+    JSWorkerMessagePipe *recv_pipe, *send_pipe;
+} JSThreadState
+
+/// Line number here: 96
+typedef struct {
+    struct list_head link;
+    int sig_num;
+    JSValue func;
+} JSOSSignalHandler
+
+/// Line number here: 2076
+static JSValue js_os_signal(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = JS_GetRuntimeOpaque(rt);
+    JSOSSignalHandler *sh;
+    uint32_t sig_num;
+    JSValueConst func;
+    sighandler_t handler;
+
+    if (!is_main_thread(rt))
+        return JS_ThrowTypeError(ctx, "signal handler can only be set in the main thread");
+
+    if (JS_ToUint32(ctx, &sig_num, argv[0]))
+        return JS_EXCEPTION;
+    if (sig_num >= 64)
+        return JS_ThrowRangeError(ctx, "invalid signal number");
+    func = argv[1];
+    /* func = null: SIG_DFL, func = undefined, SIG_IGN */
+    if (JS_IsNull(func) || JS_IsUndefined(func)) {
+        sh = find_sh(ts, sig_num);
+        if (sh) {
+            free_sh(JS_GetRuntime(ctx), sh);
+        }
+        if (JS_IsNull(func))
+            handler = SIG_DFL;
+        else
+            handler = SIG_IGN;
+        signal(sig_num, handler);
+    } else {
+        if (!JS_IsFunction(ctx, func))
+            return JS_ThrowTypeError(ctx, "not a function");
+        sh = find_sh(ts, sig_num);
+        if (!sh) {
+            sh = js_mallocz(ctx, sizeof(*sh));
+            if (!sh)
+                return JS_EXCEPTION;
+            sh->sig_num = sig_num;
+            list_add_tail(&sh->link, &ts->os_signal_handlers);
+        }
+        JS_FreeValue(ctx, sh->func);
+        sh->func = JS_DupValue(ctx, func);
+        signal(sig_num, os_signal_handler);
+    }
+    return JS_UNDEFINED;
+}
+
+/* exec(args[, options]) -> exitcode */
+/// Line number here: 3111
+static JSValue js_os_exec(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    JSValueConst options, args = argv[0];
+    JSValue val, ret_val;
+    const char **exec_argv, *file = NULL, *str, *cwd = NULL;
+    char **envp = environ;
+    uint32_t exec_argc, i;
+    int ret, pid, status;
+    BOOL block_flag = TRUE, use_path = TRUE;
+    static const char *std_name[3] = { "stdin", "stdout", "stderr" };
+    int std_fds[3];
+    uint32_t uid = -1, gid = -1;
+
+    val = JS_GetPropertyStr(ctx, args, "length");
+    if (JS_IsException(val))
+        return JS_EXCEPTION;
+    ret = JS_ToUint32(ctx, &exec_argc, val);
+    JS_FreeValue(ctx, val);
+    if (ret)
+        return JS_EXCEPTION;
+    /* arbitrary limit to avoid overflow */
+    if (exec_argc < 1 || exec_argc > 65535) {
+        return JS_ThrowTypeError(ctx, "invalid number of arguments");
+    }
+    exec_argv = js_mallocz(ctx, sizeof(exec_argv[0]) * (exec_argc + 1));
+    if (!exec_argv)
+        return JS_EXCEPTION;
+    for(i = 0; i < exec_argc; i++) {
+        val = JS_GetPropertyUint32(ctx, args, i);
+        if (JS_IsException(val))
+            goto exception;
+        str = JS_ToCString(ctx, val);
+        JS_FreeValue(ctx, val);
+        if (!str)
+            goto exception;
+        exec_argv[i] = str;
+    }
+    exec_argv[exec_argc] = NULL;
+
+    for(i = 0; i < 3; i++)
+        std_fds[i] = i;
+
+    /* get the options, if any */
+    if (argc >= 2) {
+        options = argv[1];
+
+        if (get_bool_option(ctx, &block_flag, options, "block"))
+            goto exception;
+        if (get_bool_option(ctx, &use_path, options, "usePath"))
+            goto exception;
+
+        val = JS_GetPropertyStr(ctx, options, "file");
+        if (JS_IsException(val))
+            goto exception;
+        if (!JS_IsUndefined(val)) {
+            file = JS_ToCString(ctx, val);
+            JS_FreeValue(ctx, val);
+            if (!file)
+                goto exception;
+        }
+
+        val = JS_GetPropertyStr(ctx, options, "cwd");
+        if (JS_IsException(val))
+            goto exception;
+        if (!JS_IsUndefined(val)) {
+            cwd = JS_ToCString(ctx, val);
+            JS_FreeValue(ctx, val);
+            if (!cwd)
+                goto exception;
+        }
+
+        /* stdin/stdout/stderr handles */
+        for(i = 0; i < 3; i++) {
+            val = JS_GetPropertyStr(ctx, options, std_name[i]);
+            if (JS_IsException(val))
+                goto exception;
+            if (!JS_IsUndefined(val)) {
+                int fd;
+                ret = JS_ToInt32(ctx, &fd, val);
+                JS_FreeValue(ctx, val);
+                if (ret)
+                    goto exception;
+                std_fds[i] = fd;
+            }
+        }
+
+        val = JS_GetPropertyStr(ctx, options, "env");
+        if (JS_IsException(val))
+            goto exception;
+        if (!JS_IsUndefined(val)) {
+            envp = build_envp(ctx, val);
+            JS_FreeValue(ctx, val);
+            if (!envp)
+                goto exception;
+        }
+
+        val = JS_GetPropertyStr(ctx, options, "uid");
+        if (JS_IsException(val))
+            goto exception;
+        if (!JS_IsUndefined(val)) {
+            ret = JS_ToUint32(ctx, &uid, val);
+            JS_FreeValue(ctx, val);
+            if (ret)
+                goto exception;
+        }
+
+        val = JS_GetPropertyStr(ctx, options, "gid");
+        if (JS_IsException(val))
+            goto exception;
+        if (!JS_IsUndefined(val)) {
+            ret = JS_ToUint32(ctx, &gid, val);
+            JS_FreeValue(ctx, val);
+            if (ret)
+                goto exception;
+        }
+    }
+
+    pid = fork();
+    if (pid < 0) {
+        JS_ThrowTypeError(ctx, "fork error");
+        goto exception;
+    }
+    if (pid == 0) {
+        /* child */
+
+        /* remap the stdin/stdout/stderr handles if necessary */
+        for(i = 0; i < 3; i++) {
+            if (std_fds[i] != i) {
+                if (dup2(std_fds[i], i) < 0)
+                    _exit(127);
+            }
+        }
+#if defined(HAVE_CLOSEFROM)
+        /* closefrom() is available on many recent unix systems:
+           Linux with glibc 2.34+, Solaris 9+, FreeBSD 7.3+,
+           NetBSD 3.0+, OpenBSD 3.5+.
+           Linux with the musl libc and macOS don't have it.
+         */
+
+        closefrom(3);
+#else
+        {
+            /* Close the file handles manually, limit to 1024 to avoid
+               costly loop on linux Alpine where sysconf(_SC_OPEN_MAX)
+               returns a huge value 1048576.
+               Patch inspired by nicolas-duteil-nova. See also:
+               https://stackoverflow.com/questions/73229353/
+               https://stackoverflow.com/questions/899038/#918469
+             */
+            int fd_max = min_int(sysconf(_SC_OPEN_MAX), 1024);
+            for(i = 3; i < fd_max; i++)
+                close(i);
+        }
+#endif
+        if (cwd) {
+            if (chdir(cwd) < 0)
+                _exit(127);
+        }
+        if (uid != -1) {
+            if (setuid(uid) < 0)
+                _exit(127);
+        }
+        if (gid != -1) {
+            if (setgid(gid) < 0)
+                _exit(127);
+        }
+
+        if (!file)
+            file = exec_argv[0];
+        if (use_path)
+            ret = my_execvpe(file, (char **)exec_argv, envp);
+        else
+            ret = execve(file, (char **)exec_argv, envp);
+        _exit(127);
+    }
+    /* parent */
+    if (block_flag) {
+        for(;;) {
+            ret = waitpid(pid, &status, 0);
+            if (ret == pid) {
+                if (WIFEXITED(status)) {
+                    ret = WEXITSTATUS(status);
+                    break;
+                } else if (WIFSIGNALED(status)) {
+                    ret = -WTERMSIG(status);
+                    break;
+                }
+            }
+        }
+    } else {
+        ret = pid;
+    }
+    ret_val = JS_NewInt32(ctx, ret);
+ done:
+    JS_FreeCString(ctx, file);
+    JS_FreeCString(ctx, cwd);
+    for(i = 0; i < exec_argc; i++)
+        JS_FreeCString(ctx, exec_argv[i]);
+    js_free(ctx, exec_argv);
+    if (envp != environ) {
+        char **p;
+        p = envp;
+        while (*p != NULL) {
+            js_free(ctx, *p);
+            p++;
+        }
+        js_free(ctx, envp);
+    }
+    return ret_val;
+ exception:
+    ret_val = JS_EXCEPTION;
+    goto done;
+}
+
+/// Line number here: 130
+typedef struct {
+    int ref_count;
+#ifdef USE_WORKER
+    pthread_mutex_t mutex;
+#endif
+    struct list_head msg_queue; /* list of JSWorkerMessage.link */
+    JSWaker waker;
+} JSWorkerMessagePipe
+
+/* Worker */
+/// Line number here: 3431
+typedef struct {
+    JSWorkerMessagePipe *recv_pipe;
+    JSWorkerMessagePipe *send_pipe;
+    JSWorkerMessageHandler *msg_handler;
+} JSWorkerData
+
+/// Line number here: 3617
+static JSValue js_worker_ctor_internal(JSContext *ctx, JSValueConst new_target,
+                                       JSWorkerMessagePipe *recv_pipe,
+                                       JSWorkerMessagePipe *send_pipe)
+{
+    JSValue obj = JS_UNDEFINED, proto;
+    JSWorkerData *s;
+
+    /* create the object */
+    if (JS_IsUndefined(new_target)) {
+        proto = JS_GetClassProto(ctx, js_worker_class_id);
+    } else {
+        proto = JS_GetPropertyStr(ctx, new_target, "prototype");
+        if (JS_IsException(proto))
+            goto fail;
+    }
+    obj = JS_NewObjectProtoClass(ctx, proto, js_worker_class_id);
+    JS_FreeValue(ctx, proto);
+    if (JS_IsException(obj))
+        goto fail;
+    s = js_mallocz(ctx, sizeof(*s));
+    if (!s)
+        goto fail;
+    s->recv_pipe = js_dup_message_pipe(recv_pipe);
+    s->send_pipe = js_dup_message_pipe(send_pipe);
+
+    JS_SetOpaque(obj, s);
+    return obj;
+ fail:
+    JS_FreeValue(ctx, obj);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/include/bits/types/FILE.h
+
+/// Line number here: 6
+typedef struct _IO_FILE FILE
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/signal.h
+
+/// Line number here: 187
+typedef __sighandler_t sighandler_t
+
+/// Line number here: 71
+typedef void (*__sighandler_t) (int)
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_module_test_json(JSContext *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_IsUndefined(JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_GetPropertyStr(JSContext *, JSValue, const char *)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_IsString(JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_ToCStringLen(JSContext *, size_t *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_module_test_json(JSContext *, JSValue)" -> "memcmp(const void *, const void *, size_t)";
+"js_module_test_json(JSContext *, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)" -> "JS_GetPropertyStr(JSContext *, JSValue, const char *)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)" -> "JS_IsException(JSValue)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)" -> "JS_IsUndefined(JSValue)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)" -> "JS_ToBool(JSContext *, JSValue)";
+"get_bool_option(JSContext *, BOOL *, JSValue, const char *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_set_error_object(JSContext *, JSValue, int)";
+"js_set_error_object(JSContext *, JSValue, int)" -> "JS_IsUndefined(JSValue)";
+"js_set_error_object(JSContext *, JSValue, int)" -> "JS_SetPropertyStr(JSContext *, JSValue, const char *, JSValue)";
+"js_set_error_object(JSContext *, JSValue, int)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "js_std_file_get(JSContext *, JSValue)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "JS_ToIndex(JSContext *, uint64_t *, JSValue)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "js_std_dbuf_init(JSContext *, DynBuf *)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "fgetc(FILE *)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "dbuf_putc(DynBuf *, uint8_t)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "dbuf_free(DynBuf *)";
+"js_std_file_readAsString(JSContext *, JSValue, int, JSValue *)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "js_get_errno(ssize_t)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "open(const char *, int, ...)";
+"js_os_open(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_GetRuntime(JSContext *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_GetRuntimeOpaque(JSRuntime *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "is_main_thread(JSRuntime *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_IsNull(JSValue)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "find_sh(JSThreadState *, int)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "free_sh(JSRuntime *, JSOSSignalHandler *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "signal(int, __sighandler_t)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_IsFunction(JSContext *, JSValue)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "js_mallocz(JSContext *, size_t)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "list_add_tail(struct list_head *, struct list_head *)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_os_signal(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyStr(JSContext *, JSValue, const char *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "js_mallocz(JSContext *, size_t)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyUint32(JSContext *, JSValue, uint32_t)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToCString(JSContext *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "get_bool_option(JSContext *, BOOL *, JSValue, const char *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32(JSContext *, int32_t *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "build_envp(JSContext *, JSValue)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "fork()";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "dup2(int, int)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "_exit(int)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "closefrom(int)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "chdir(const char *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "setuid(__uid_t)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "setgid(__gid_t)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "my_execvpe(const char *, char **, char **)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "execve(const char *, char *const *, char *const *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "waitpid(__pid_t, int *, int)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt32(JSContext *, int32_t)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeCString(JSContext *, const char *)";
+"js_os_exec(JSContext *, JSValue, int, JSValue *)" -> "js_free(JSContext *, void *)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_IsUndefined(JSValue)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_GetClassProto(JSContext *, JSClassID)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_GetPropertyStr(JSContext *, JSValue, const char *)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_IsException(JSValue)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_NewObjectProtoClass(JSContext *, JSValue, JSClassID)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "js_mallocz(JSContext *, size_t)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "js_dup_message_pipe(JSWorkerMessagePipe *)";
+"js_worker_ctor_internal(JSContext *, JSValue, JSWorkerMessagePipe *, JSWorkerMessagePipe *)" -> "JS_SetOpaque(JSValue, void *)";
+}

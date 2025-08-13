@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3073,6 +3073,9 @@
+ static JSValue __JS_AtomToValue(JSContext *ctx, JSAtom atom, BOOL force_string)
+ {
+     char buf[ATOM_GET_STR_BUF_SIZE];
++    if (atom == JS_ATOM_NULL) {
++        funlogline();
++    }
+ 
+     if (__JS_AtomIsTaggedInt(atom)) {
+         size_t len = u32toa(buf, __JS_AtomToUInt32(atom));
+@@ -3080,6 +3083,9 @@
+     } else {
+         JSRuntime *rt = ctx->rt;
+         JSAtomStruct *p;
++        if (atom >= rt->atom_size) {
++            funlogline();
++        }
+         assert(atom < rt->atom_size);
+         p = rt->atom_array[atom];
+         if (p->atom_type == JS_ATOM_TYPE_STRING) {

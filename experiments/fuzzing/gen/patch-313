@@ -1,0 +1,22 @@
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -3527,6 +3527,9 @@
+         return;
+ 
+     ref_count = atomic_add_int(&ps->ref_count, -1);
++    if (ref_count < 0) {
++        funlogline();
++    }
+     assert(ref_count >= 0);
+     if (ref_count == 0) {
+         list_for_each_safe(el, el1, &ps->msg_queue) {
+@@ -3534,6 +3537,9 @@
+             js_free_message(msg);
+         }
+         pthread_mutex_destroy(&ps->mutex);
++        if (ps->msg_queue.next != &ps->msg_queue) {
++            funlogline();
++        }
+         js_waker_close(&ps->waker);
+         free(ps);
+     }

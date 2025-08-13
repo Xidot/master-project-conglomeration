@@ -1,0 +1,52 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_AddIntrinsicProxy(JSContext *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `JS_AddIntrinsicProxy`:
+
+:quickjs.c:JS_AddIntrinsicProxy:48093
+:quickjs.c:JS_AddIntrinsicProxy:48100
+:quickjs.c:JS_AddIntrinsicProxy:48103
+
+---
+
+1. **quickjs.c:JS_AddIntrinsicProxy:48093** - No check if `ctx->rt` is NULL before dereferencing it.
+2. **quickjs.c:JS_AddIntrinsicProxy:48100** - No error handling if `init_class_range` fails (returns -1).
+3. **quickjs.c:JS_AddIntrinsicProxy:48103** - No check if `JS_NewCFunction2` returns an exception/error value before using it.
+
+Here are the corresponding diffs:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -48090,6 +48090,8 @@
+ void JS_AddIntrinsicProxy(JSContext *ctx)
+ {
+     JSRuntime *rt = ctx->rt;
++    if (!rt)
++        funlogline();
+     JSValue obj1;
+ 
+     if (!JS_IsRegisteredClass(rt, JS_CLASS_PROXY)) {
+@@ -48097,6 +48099,8 @@
+                          countof(js_proxy_class_def));
+         rt->class_array[JS_CLASS_PROXY].exotic = &js_proxy_exotic_methods;
+         rt->class_array[JS_CLASS_PROXY].call = js_proxy_call;
++        if (init_class_range(rt, js_proxy_class_def, JS_CLASS_PROXY, countof(js_proxy_class_def)) < 0)
++            funlogline();
+     }
+ 
+     obj1 = JS_NewCFunction2(ctx, js_proxy_constructor, "Proxy", 2,
++    if (JS_IsException(obj1))
++        funlogline();
+     JS_SetConstructorBit(ctx, obj1, TRUE);
+     JS_SetPropertyFunctionList(ctx, obj1, js_proxy_funcs,
+                                countof(js_proxy_funcs));
+```
+
+The modifications add checks for:
+1. NULL runtime pointer
+2. Failed class initialization
+3. Exception value from function creation
+
+Each condition will call `funlogline()` when the error condition is met.

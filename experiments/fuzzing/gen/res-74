@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-find_exported_name(GetExportNamesState *, JSAtom)
+-------------------------
+Based on the provided code, here are the potential logical bugs:
+
+:find_exported_name:28870
+
+---
+
+The logical bug in `find_exported_name` is that it compares JSAtom values directly using `==` operator. While this might work in some cases, JSAtom is a uint32_t and atom comparison should typically use a proper atom comparison function since atoms can be reused or have special meanings. The direct comparison could lead to false positives if atom values are reused or if there are special atom values that need special handling.
+
+Here's the diff to instrument this potential issue:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28870,6 +28870,7 @@
+ {
+     int i;
+     for(i = 0; i < s->exported_names_count; i++) {
++        if (s->exported_names[i].export_name == name) funlogline();
+         if (s->exported_names[i].export_name == name)
+             return i;
+     }
+```
+
+The instrumentation adds a check that will call `funlogline()` whenever the direct atom comparison is made. This helps track when this potentially problematic comparison occurs.
+
+Note that this is a subtle issue and might not always be a bug depending on how JSAtom values are managed in the rest of the system. The instrumentation helps track when these comparisons happen without changing the behavior of the code.

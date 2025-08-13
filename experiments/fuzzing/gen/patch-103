@@ -1,0 +1,35 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -51170,6 +51170,7 @@
+                                int argc, JSValueConst *argv, int magic)
+ {
+     // _string(obj, fmt, part)
++    if (sizeof(buf) < 64) funlogline(); // Check if buffer might be too small
+     char buf[64];
+     double fields[9];
+     int res, fmt, part, pos;
+@@ -51183,6 +51184,7 @@
+         return JS_EXCEPTION;
+     if (!res) {
+         if (fmt == 2)
+             return JS_ThrowRangeError(ctx, "Date value is NaN");
++        else if (isnan(fields[0])) funlogline(); // Other formats with NaN
+         else
+             return js_new_string8(ctx, "Invalid Date");
+     }
+@@ -51205,6 +51207,7 @@
+             pos += snprintf(buf + pos, sizeof(buf) - pos,
+                             "%.3s, %02d %.3s %0*d ",
+                             day_names + wd * 3, d,
++                            (mon < 0 || mon >= 12) ? funlogline(), month_names : month_names + mon * 3, 4 + (y < 0), y);
+                             month_names + mon * 3, 4 + (y < 0), y);
+             break;
+         case 1:
+@@ -51225,6 +51228,7 @@
+             /* tz is >= 0, can use % */
+             pos += snprintf(buf + pos, sizeof(buf) - pos,
+                             "%02d%02d", tz / 60, tz % 60);
++            if (tz % 60 >= 60) funlogline(); // Invalid timezone minutes
+             /* XXX: tack the time zone code? */
+             break;
+         case 2:

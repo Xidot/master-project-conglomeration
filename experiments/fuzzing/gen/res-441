@@ -1,0 +1,35 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewObjectClass(JSContext *, int)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewObjectClass` function and its callers:
+
+:quickjs.c:JS_NewObjectClass:5234
+:quickjs.c:JS_NewObjectProtoClass:5169
+
+---
+
+The main logical issue is that `JS_NewObjectClass` doesn't validate the `class_id` parameter before using it to index into `ctx->class_proto[]`. This could lead to out-of-bounds access if an invalid class_id is passed.
+
+Here's the diff to add validation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5233,6 +5233,9 @@
+ 
+ JSValue JS_NewObjectClass(JSContext *ctx, int class_id)
+ {
++    if (class_id <= 0 || class_id >= JS_CLASS_INIT_COUNT) {
++        funlogline();
++    }
+     return JS_NewObjectProtoClass(ctx, ctx->class_proto[class_id], class_id);
+ }
+```
+
+The second issue is in `JS_NewObjectProtoClass` where it assumes `proto_val` is valid but doesn't fully validate it before calling `get_proto_obj()`. However, this is mitigated by the comment warning that proto must be an object or JS_NULL, so it's more of an API contract issue than a pure logic bug.
+
+The instrumentation checks for invalid class IDs which could lead to undefined behavior when accessing the class prototypes array. The condition will trigger when:
+1. class_id is negative
+2. class_id is zero (JS_CLASS_OBJECT starts at 1)
+3. class_id is >= JS_CLASS_INIT_COUNT (beyond last predefined class)

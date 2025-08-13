@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -50084,6 +50084,9 @@
+                                             JSValueConst *cap_resolving_funcs)
+ {
+     JSPromiseData *s = JS_GetOpaque(promise, JS_CLASS_PROMISE);
++    if (!s) {
++        funlogline();
++    }
+     JSPromiseReactionData *rd_array[2], *rd;
+     int i, j;
+ 
+@@ -50125,6 +50128,9 @@
+         }
+         i = s->promise_state - JS_PROMISE_FULFILLED;
+         rd = rd_array[i];
++        if (i < 0 || i > 1 || !rd) {
++            funlogline();
++        }
+         args[0] = rd->resolving_funcs[0];
+         args[1] = rd->resolving_funcs[1];
+         args[2] = rd->handler;

@@ -1,0 +1,48 @@
+Target function: "lre_is_space_non_ascii(uint32_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/libunicode.c
+
+/// Line number here: 1901
+BOOL lre_is_space_non_ascii(uint32_t c)
+{
+    size_t i, n;
+
+    n = countof(char_range_s);
+    for(i = 5; i < n; i += 2) {
+        uint32_t low = char_range_s[i];
+        uint32_t high = char_range_s[i + 1];
+        if (c < low)
+            return FALSE;
+        if (c < high)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+}

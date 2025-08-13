@@ -1,0 +1,46 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_get_si_sat(const JSBigInt *)
+-------------------------
+Here are the potential logical bugs in the target function "js_bigint_get_si_sat(const JSBigInt *)":
+
+:js_bigint_get_si_sat:11056
+:js_bigint_get_si_sat:11060
+:js_bigint_get_si_sat:11062
+
+---
+
+1. Line 11056: The function assumes a single-limb bigint can always be safely returned as a js_slimb_t, but there's no check for overflow when converting from unsigned limb to signed value.
+
+2. Lines 11060/11062: The function always returns INT32_MIN/MAX or INT64_MIN/MAX for multi-limb bigints based only on the sign, without considering if the actual value could be represented within those bounds.
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11053,6 +11053,9 @@
+ static js_slimb_t js_bigint_get_si_sat(const JSBigInt *a)
+ {
+     if (a->len == 1) {
++        if (a->tab[0] > (js_limb_t)INT64_MAX) {
++            funlogline();
++        }
+         return a->tab[0];
+     } else {
+ #if JS_LIMB_BITS == 32
+@@ -11060,6 +11063,7 @@
+             return INT32_MIN;
+         else
+             return INT32_MAX;
++        funlogline(); // Multi-limb bigint being saturated without checking actual value
+ #else
+         if (js_bigint_sign(a))
+             return INT64_MIN;
+```
+
+The instrumentation checks for:
+1. Single-limb values that exceed INT64_MAX when converted to signed
+2. Multi-limb values being saturated without checking if they could fit in the target type
+
+Note that for multi-limb values, we can't easily create a condition to check if the saturation is incorrect, so we just log when this path is taken.

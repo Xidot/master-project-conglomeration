@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-async_func_free_frame(JSRuntime *, JSAsyncFunctionState *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `async_func_free_frame`:
+
+:async_func_free_frame:19600
+:async_func_free_frame:19607
+
+---
+
+Reasoning:
+1. Line 19600: The function assumes `sf->arg_buf` is non-NULL when checking `sf->cur_sp != NULL`, but there's no check that `sf->arg_buf` is valid before dereferencing it in the loop.
+2. Line 19607: The function frees `sf->cur_func` and `s->this_val` unconditionally, but these values might still be in use if the function is not properly completed.
+
+Here are the proposed modifications:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -19603,6 +19603,9 @@
+     JSStackFrame *sf = &s->frame;
+     JSValue *sp;
+ 
++    if (sf->arg_buf && sf->cur_sp == NULL) {
++        funlogline();
++    }
+     if (sf->arg_buf) {
+         /* cannot free the function if it is running */
+         assert(sf->cur_sp != NULL);
+@@ -19612,6 +19612,9 @@
+         js_free_rt(rt, sf->arg_buf);
+         sf->arg_buf = NULL;
+     }
++    if (!s->is_completed) {
++        funlogline();
++    }
+     JS_FreeValueRT(rt, sf->cur_func);
+     JS_FreeValueRT(rt, s->this_val);
+ }
+```

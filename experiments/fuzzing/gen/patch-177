@@ -1,0 +1,22 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3136,6 +3136,8 @@
+     JSValue num, str;
+ 
+     if (__JS_AtomIsTaggedInt(atom))
+         return JS_NewInt32(ctx, __JS_AtomToUInt32(atom));
++    if (atom == JS_ATOM_NULL)
++        return JS_UNDEFINED;
+     assert(atom < rt->atom_size);
+     p1 = rt->atom_array[atom];
+     if (p1->atom_type != JS_ATOM_TYPE_STRING)
+@@ -3158,6 +3160,8 @@
+         return JS_UNDEFINED;
+     c = string_get(p, 0);
+     if (!is_num(c) && c != '-')
++        return JS_UNDEFINED;
++    if (p == NULL)
+         return JS_UNDEFINED;
+     /* this is ECMA CanonicalNumericIndexString primitive */
+     num = JS_ToNumber(ctx, JS_MKPTR(JS_TAG_STRING, p));
+     if (JS_IsException(num))

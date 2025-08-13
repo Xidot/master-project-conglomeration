@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4735,6 +4735,8 @@
+     sh_alloc = js_malloc(ctx, size);
+     if (!sh_alloc)
+         return NULL;
++    if (size != get_shape_size(sh1->prop_hash_mask + 1, sh1->prop_size))
++        funlogline();
+     sh_alloc1 = get_alloc_from_shape(sh1);
+     memcpy(sh_alloc, sh_alloc1, size);
+     sh = get_shape_from_alloc(sh_alloc, hash_size);
+@@ -4742,6 +4744,8 @@
+     add_gc_object(ctx->rt, &sh->header, JS_GC_OBJ_TYPE_SHAPE);
+     sh->is_hashed = FALSE;
+     if (sh->proto) {
++        if (!sh->proto)
++            funlogline();
+         JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, sh->proto));
+     }
+     for(i = 0, pr = get_shape_prop(sh); i < sh->prop_count; i++, pr++) {

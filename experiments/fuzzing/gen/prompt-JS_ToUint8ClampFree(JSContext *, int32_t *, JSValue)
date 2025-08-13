@@ -1,0 +1,346 @@
+Target function: "JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 642
+static inline JS_BOOL JS_IsException(JSValueConst v)
+{
+    return js_unlikely(JS_VALUE_GET_TAG(v) == JS_TAG_EXCEPTION);
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 12672
+static int JS_ToUint8ClampFree(JSContext *ctx, int32_t *pres, JSValue val)
+{
+    uint32_t tag;
+    int res;
+
+ redo:
+    tag = JS_VALUE_GET_NORM_TAG(val);
+    switch(tag) {
+    case JS_TAG_INT:
+    case JS_TAG_BOOL:
+    case JS_TAG_NULL:
+    case JS_TAG_UNDEFINED:
+        res = JS_VALUE_GET_INT(val);
+        res = max_int(0, min_int(255, res));
+        break;
+    case JS_TAG_FLOAT64:
+        {
+            double d = JS_VALUE_GET_FLOAT64(val);
+            if (isnan(d)) {
+                res = 0;
+            } else {
+                if (d < 0)
+                    res = 0;
+                else if (d > 255)
+                    res = 255;
+                else
+                    res = lrint(d);
+            }
+        }
+        break;
+    default:
+        val = JS_ToNumberFree(ctx, val);
+        if (JS_IsException(val)) {
+            *pres = 0;
+            return -1;
+        }
+        goto redo;
+    }
+    *pres = res;
+    return 0;
+}
+
+/// Line number here: 12232
+enum JSToNumberHintEnum {
+    TON_FLAG_NUMBER,
+    TON_FLAG_NUMERIC,
+}
+
+/// Line number here: 12311
+static JSValue JS_ToNumberFree(JSContext *ctx, JSValue val)
+{
+    return JS_ToNumberHintFree(ctx, val, TON_FLAG_NUMBER);
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 485
+typedef union JSFloat64Union {
+    double d;
+    uint64_t u64;
+    uint32_t u32[2];
+} JSFloat64Union
+
+/// Line number here: 53442
+static JSValue js_typed_array_fill(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv)
+{
+    JSObject *p;
+    int len, k, final, shift;
+    uint64_t v64;
+
+    len = js_typed_array_get_length_internal(ctx, this_val);
+    if (len < 0)
+        return JS_EXCEPTION;
+    p = JS_VALUE_GET_OBJ(this_val);
+
+    if (p->class_id == JS_CLASS_UINT8C_ARRAY) {
+        int32_t v;
+        if (JS_ToUint8ClampFree(ctx, &v, JS_DupValue(ctx, argv[0])))
+            return JS_EXCEPTION;
+        v64 = v;
+    } else if (p->class_id <= JS_CLASS_UINT32_ARRAY) {
+        uint32_t v;
+        if (JS_ToUint32(ctx, &v, argv[0]))
+            return JS_EXCEPTION;
+        v64 = v;
+    } else if (p->class_id <= JS_CLASS_BIG_UINT64_ARRAY) {
+        if (JS_ToBigInt64(ctx, (int64_t *)&v64, argv[0]))
+            return JS_EXCEPTION;
+    } else {
+        double d;
+        if (JS_ToFloat64(ctx, &d, argv[0]))
+            return JS_EXCEPTION;
+        if (p->class_id == JS_CLASS_FLOAT16_ARRAY) {
+            v64 = tofp16(d);
+        } else if (p->class_id == JS_CLASS_FLOAT32_ARRAY) {
+            union {
+                float f;
+                uint32_t u32;
+            } u;
+            u.f = d;
+            v64 = u.u32;
+        } else {
+            JSFloat64Union u;
+            u.d = d;
+            v64 = u.u64;
+        }
+    }
+
+    k = 0;
+    if (argc > 1) {
+        if (JS_ToInt32Clamp(ctx, &k, argv[1], 0, len, len))
+            return JS_EXCEPTION;
+    }
+
+    final = len;
+    if (argc > 2 && !JS_IsUndefined(argv[2])) {
+        if (JS_ToInt32Clamp(ctx, &final, argv[2], 0, len, len))
+            return JS_EXCEPTION;
+    }
+
+    if (typed_array_is_detached(ctx, p))
+        return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+
+    shift = typed_array_size_log2(p->class_id);
+    switch(shift) {
+    case 0:
+        if (k < final) {
+            memset(p->u.array.u.uint8_ptr + k, v64, final - k);
+        }
+        break;
+    case 1:
+        for(; k < final; k++) {
+            p->u.array.u.uint16_ptr[k] = v64;
+        }
+        break;
+    case 2:
+        for(; k < final; k++) {
+            p->u.array.u.uint32_ptr[k] = v64;
+        }
+        break;
+    case 3:
+        for(; k < final; k++) {
+            p->u.array.u.uint64_ptr[k] = v64;
+        }
+        break;
+    default:
+        abort();
+    }
+    return JS_DupValue(ctx, this_val);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 79
+static inline int max_int(int a, int b)
+{
+    if (a > b)
+        return a;
+    else
+        return b;
+}
+
+/// Line number here: 87
+static inline int min_int(int a, int b)
+{
+    if (a < b)
+        return a;
+    else
+        return b;
+}
+
+---- File: /usr/include/bits/mathcalls.h
+
+/// Line number here: 349
+__MATHDECL (long int,lrint,, (_Mdouble_ __x))
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "max_int(int, int)";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "min_int(int, int)";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "__builtin_isnan()";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "lrint(double)";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ToNumberFree(JSContext *, JSValue)";
+"JS_ToNumberFree(JSContext *, JSValue)" -> "JS_ToNumberHintFree(JSContext *, JSValue, JSToNumberHintEnum)";
+"JS_IsException(JSValue)";
+"JS_IsException(JSValue)" -> "__builtin_expect(long, long)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "js_typed_array_get_length_internal(JSContext *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint8ClampFree(JSContext *, int32_t *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ToUint32(JSContext *, uint32_t *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ToBigInt64(JSContext *, int64_t *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ToFloat64(JSContext *, double *, JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "tofp16(double)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ToInt32Clamp(JSContext *, int *, JSValue, int, int, int)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "typed_array_is_detached(JSContext *, JSObject *)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "JS_ThrowTypeErrorDetachedArrayBuffer(JSContext *)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "memset(void *, int, size_t)";
+"js_typed_array_fill(JSContext *, JSValue, int, JSValue *)" -> "abort()";
+}

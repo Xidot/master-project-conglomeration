@@ -1,0 +1,53 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_compare_bigint` function:
+
+:quickjs.c:js_compare_bigint:14631
+:quickjs.c:js_compare_bigint:14638
+:quickjs.c:js_compare_bigint:14652
+
+---
+
+1. Line 14631: The function doesn't validate that at least one operand is a bigint as stated in the comment
+2. Line 14638: The fast path comparison may incorrectly handle negative numbers when mixing JS_TAG_INT and JS_TAG_SHORT_BIG_INT
+3. Line 14652: The float64 comparison path doesn't properly handle NaN cases before calling js_bigint_float64_cmp
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14628,6 +14628,9 @@
+     int res, val, tag1, tag2;
+     JSBigIntBuf buf1, buf2;
+     JSBigInt *p1, *p2;
++
++    if (!(tag1 == JS_TAG_BIG_INT || tag1 == JS_TAG_SHORT_BIG_INT || 
++          tag2 == JS_TAG_BIG_INT || tag2 == JS_TAG_SHORT_BIG_INT)) funlogline();
+     
+     tag1 = JS_VALUE_GET_NORM_TAG(op1);
+     tag2 = JS_VALUE_GET_NORM_TAG(op2);
+@@ -14635,6 +14638,7 @@
+         (tag2 == JS_TAG_SHORT_BIG_INT || tag2 == JS_TAG_INT)) {
+         /* fast path */
+         js_slimb_t v1, v2;
++        if ((tag1 == JS_TAG_INT && v1 < 0) || (tag2 == JS_TAG_INT && v2 < 0)) funlogline();
+         if (tag1 == JS_TAG_INT)
+             v1 = JS_VALUE_GET_INT(op1);
+         else
+@@ -14649,6 +14653,7 @@
+     } else {
+         if (tag1 == JS_TAG_FLOAT64) {
+             p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
++            if (isnan(JS_VALUE_GET_FLOAT64(op1))) funlogline();
+             val = js_bigint_float64_cmp(ctx, p2, JS_VALUE_GET_FLOAT64(op1));
+             if (val == 2)
+                 goto unordered;
+```
+
+The instrumentation checks:
+1. That at least one operand is a bigint type
+2. For potential signedness issues in the fast path
+3. For NaN values before float comparison

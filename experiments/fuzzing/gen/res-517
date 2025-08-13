@@ -1,0 +1,53 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_ReadDate(BCReaderState *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_ReadDate` function:
+
+:quickjs.c:JS_ReadDate:37742
+:quickjs.c:JS_ReadDate:37750
+:quickjs.c:JS_ReadDate:37753
+
+---
+
+Reasons:
+1. Line 37742: No check if `s->ctx` is NULL before using it
+2. Line 37750: No validation that `ctx->class_proto[JS_CLASS_DATE]` exists before using it
+3. Line 37753: No check if `BC_add_object_ref` fails before proceeding to set object data
+
+Here's the diff with the instrumentation:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37739,6 +37739,8 @@
+ static JSValue JS_ReadDate(BCReaderState *s)
+ {
+     JSContext *ctx = s->ctx;
++    if (!ctx)
++        funlogline();
+     JSValue val, obj = JS_UNDEFINED;
+ 
+     val = JS_ReadObjectRec(s);
+@@ -37747,9 +37749,13 @@
+     if (!JS_IsNumber(val)) {
+         JS_ThrowTypeError(ctx, "Number tag expected for date");
+         goto fail;
+     }
++    if (!ctx->class_proto[JS_CLASS_DATE])
++        funlogline();
+     obj = JS_NewObjectProtoClass(ctx, ctx->class_proto[JS_CLASS_DATE],
+                                  JS_CLASS_DATE);
+     if (JS_IsException(obj))
+         goto fail;
++    if (BC_add_object_ref(s, obj))
++        funlogline();
+     if (BC_add_object_ref(s, obj))
+         goto fail;
+     JS_SetObjectData(ctx, obj, val);
+```
+
+The instrumentation checks for:
+1. NULL context pointer
+2. Missing date class prototype
+3. Failed object reference addition (duplicate check to catch before goto)

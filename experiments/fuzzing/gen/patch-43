@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6905,6 +6905,8 @@
+     if (!JS_IsObject(error_obj))
+         return; /* protection in the out of memory case */
+     
++    if (ctx->rt->current_stack_frame == NULL)
++        return;
+     js_dbuf_init(ctx, &dbuf);
+     if (filename) {
+         dbuf_printf(&dbuf, "    at %s", filename);
+@@ -6923,6 +6925,8 @@
+             return;
+         }
+     }
++    if (backtrace_flags & ~JS_BACKTRACE_FLAG_SKIP_FIRST_LEVEL)
++        return;
+     for(sf = ctx->rt->current_stack_frame; sf != NULL; sf = sf->prev_frame) {
+         if (sf->js_mode & JS_MODE_BACKTRACE_BARRIER)
+             break;
+@@ -6966,6 +6970,8 @@
+         dbuf_putc(&dbuf, '\0');
+     if (dbuf_error(&dbuf))
+         str = JS_NULL;
+     else
++        if (dbuf.buf == NULL)
++            str = JS_NULL;
+         str = JS_NewString(ctx, (char *)dbuf.buf);
+     dbuf_free(&dbuf);
+     JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_stack, str,

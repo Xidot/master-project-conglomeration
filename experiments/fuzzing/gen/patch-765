@@ -1,0 +1,21 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3482,6 +3482,9 @@
+ static int string_buffer_init2(JSContext *ctx, StringBuffer *s, int size,
+                                int is_wide)
+ {
++    if (size < 0) {
++        return s->error_status = -1;
++    }
+     s->ctx = ctx;
+     s->size = size;
+     s->len = 0;
+@@ -3503,6 +3506,9 @@
+ 
+ static inline int string_buffer_init(JSContext *ctx, StringBuffer *s, int size)
+ {
++    if (size < 0) {
++        return s->error_status = -1;
++    }
+     return string_buffer_init2(ctx, s, size, 0);
+ }

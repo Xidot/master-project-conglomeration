@@ -1,0 +1,377 @@
+Target function: "js_linearize_string_rope(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 702
+static inline JSValue JS_DupValue(JSContext *ctx, JSValueConst v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        p->ref_count++;
+    }
+    return (JSValue)v;
+}
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/* 'rope' must be a rope. return a string and modify the rope so that
+   it won't need to be linearized again. */
+/// Line number here: 4280
+static JSValue js_linearize_string_rope(JSContext *ctx, JSValue rope)
+{
+    StringBuffer b_s, *b = &b_s;
+    JSStringRope *r;
+    JSValue ret;
+    
+    r = JS_VALUE_GET_STRING_ROPE(rope);
+
+    /* check whether it is already linearized */
+    if (JS_VALUE_GET_TAG(r->right) == JS_TAG_STRING &&
+        JS_VALUE_GET_STRING(r->right)->len == 0) {
+        ret = JS_DupValue(ctx, r->left);
+        JS_FreeValue(ctx, rope);
+        return ret;
+    }
+    if (string_buffer_init2(ctx, b, r->len, r->is_wide_char))
+        goto fail;
+    if (string_buffer_concat_value(b, rope))
+        goto fail;
+    ret = string_buffer_end(b);
+    if (r->header.ref_count > 1) {
+        /* update the rope so that it won't need to be linearized again */
+        JS_FreeValue(ctx, r->left);
+        JS_FreeValue(ctx, r->right);
+        r->left = JS_DupValue(ctx, ret);
+        r->right = JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    JS_FreeValue(ctx, rope);
+    return ret;
+ fail:
+    JS_FreeValue(ctx, rope);
+    return JS_EXCEPTION;
+}
+
+/* It is valid to call string_buffer_end() and all string_buffer functions even
+   if string_buffer_init() or another string_buffer function returns an error.
+   If the error_status is set, string_buffer_end() returns JS_EXCEPTION.
+ */
+/// Line number here: 3485
+static int string_buffer_init2(JSContext *ctx, StringBuffer *s, int size,
+                               int is_wide)
+{
+    s->ctx = ctx;
+    s->size = size;
+    s->len = 0;
+    s->is_wide_char = is_wide;
+    s->error_status = 0;
+    s->str = js_alloc_string(ctx, size, is_wide);
+    if (unlikely(!s->str)) {
+        s->size = 0;
+        return s->error_status = -1;
+    }
+#ifdef DUMP_LEAKS
+    /* the StringBuffer may reallocate the JSString, only link it at the end */
+    list_del(&s->str->link);
+#endif
+    return 0;
+}
+
+/// Line number here: 3717
+static int string_buffer_concat_value(StringBuffer *s, JSValueConst v)
+{
+    JSString *p;
+    JSValue v1;
+    int res;
+
+    if (s->error_status) {
+        /* prevent exception overload */
+        return -1;
+    }
+    if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
+        if (JS_VALUE_GET_TAG(v) == JS_TAG_STRING_ROPE) {
+            JSStringRope *r = JS_VALUE_GET_STRING_ROPE(v);
+            /* recursion is acceptable because the rope depth is bounded */
+            if (string_buffer_concat_value(s, r->left))
+                return -1;
+            return string_buffer_concat_value(s, r->right);
+        } else {
+            v1 = JS_ToString(s->ctx, v);
+            if (JS_IsException(v1))
+                return string_buffer_set_error(s);
+            p = JS_VALUE_GET_STRING(v1);
+            res = string_buffer_concat(s, p, 0, p->len);
+            JS_FreeValue(s->ctx, v1);
+            return res;
+        }
+    }
+    p = JS_VALUE_GET_STRING(v);
+    return string_buffer_concat(s, p, 0, p->len);
+}
+
+/// Line number here: 3783
+static JSValue string_buffer_end(StringBuffer *s)
+{
+    JSString *str;
+    str = s->str;
+    if (s->error_status)
+        return JS_EXCEPTION;
+    if (s->len == 0) {
+        js_free(s->ctx, str);
+        s->str = NULL;
+        return JS_AtomToString(s->ctx, JS_ATOM_empty_string);
+    }
+    if (s->len < s->size) {
+        /* smaller size so js_realloc should not fail, but OK if it does */
+        /* XXX: should add some slack to avoid unnecessary calls */
+        /* XXX: might need to use malloc+free to ensure smaller size */
+        str = js_realloc_rt(s->ctx->rt, str, sizeof(JSString) +
+                            (s->len << s->is_wide_char) + 1 - s->is_wide_char);
+        if (str == NULL)
+            str = s->str;
+        s->str = str;
+    }
+    if (!s->is_wide_char)
+        str->u.str8[s->len] = 0;
+#ifdef DUMP_LEAKS
+    list_add_tail(&str->link, &s->ctx->rt->string_list);
+#endif
+    str->is_wide_char = s->is_wide_char;
+    str->len = s->len;
+    s->str = NULL;
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3106
+JSValue JS_AtomToString(JSContext *ctx, JSAtom atom)
+{
+    return __JS_AtomToValue(ctx, atom, TRUE);
+}
+
+/// Line number here: 12879
+static JSValue JS_ToStringInternal(JSContext *ctx, JSValueConst val, BOOL is_ToPropertyKey)
+{
+    uint32_t tag;
+    char buf[32];
+
+    tag = JS_VALUE_GET_NORM_TAG(val);
+    switch(tag) {
+    case JS_TAG_STRING:
+        return JS_DupValue(ctx, val);
+    case JS_TAG_STRING_ROPE:
+        return js_linearize_string_rope(ctx, JS_DupValue(ctx, val));
+    case JS_TAG_INT:
+        {
+            size_t len;
+            len = i32toa(buf, JS_VALUE_GET_INT(val));
+            return js_new_string8_len(ctx, buf, len);
+        }
+        break;
+    case JS_TAG_BOOL:
+        return JS_AtomToString(ctx, JS_VALUE_GET_BOOL(val) ?
+                          JS_ATOM_true : JS_ATOM_false);
+    case JS_TAG_NULL:
+        return JS_AtomToString(ctx, JS_ATOM_null);
+    case JS_TAG_UNDEFINED:
+        return JS_AtomToString(ctx, JS_ATOM_undefined);
+    case JS_TAG_EXCEPTION:
+        return JS_EXCEPTION;
+    case JS_TAG_OBJECT:
+        {
+            JSValue val1, ret;
+            val1 = JS_ToPrimitive(ctx, val, HINT_STRING);
+            if (JS_IsException(val1))
+                return val1;
+            ret = JS_ToStringInternal(ctx, val1, is_ToPropertyKey);
+            JS_FreeValue(ctx, val1);
+            return ret;
+        }
+        break;
+    case JS_TAG_FUNCTION_BYTECODE:
+        return js_new_string8(ctx, "[function bytecode]");
+    case JS_TAG_SYMBOL:
+        if (is_ToPropertyKey) {
+            return JS_DupValue(ctx, val);
+        } else {
+            return JS_ThrowTypeError(ctx, "cannot convert symbol to string");
+        }
+    case JS_TAG_FLOAT64:
+        return js_dtoa2(ctx, JS_VALUE_GET_FLOAT64(val), 10, 0,
+                        JS_DTOA_FORMAT_FREE);
+    case JS_TAG_SHORT_BIG_INT:
+    case JS_TAG_BIG_INT:
+        return js_bigint_to_string(ctx, val);
+    default:
+        return js_new_string8(ctx, "[unsupported type]");
+    }
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+/// Line number here: 59
+typedef int BOOL
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_linearize_string_rope(JSContext *, JSValue)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "string_buffer_concat_value(StringBuffer *, JSValue)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "string_buffer_end(StringBuffer *)";
+"js_linearize_string_rope(JSContext *, JSValue)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)" -> "js_alloc_string(JSContext *, int, int)";
+"string_buffer_init2(JSContext *, StringBuffer *, int, int)" -> "__builtin_expect(long, long)";
+"string_buffer_concat_value(StringBuffer *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "__builtin_expect(long, long)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_concat_value(StringBuffer *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_IsException(JSValue)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_set_error(StringBuffer *)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "string_buffer_concat(StringBuffer *, const JSString *, uint32_t, uint32_t)";
+"string_buffer_concat_value(StringBuffer *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"string_buffer_end(StringBuffer *)";
+"string_buffer_end(StringBuffer *)" -> "js_free(JSContext *, void *)";
+"string_buffer_end(StringBuffer *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"string_buffer_end(StringBuffer *)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"JS_AtomToString(JSContext *, JSAtom)";
+"JS_AtomToString(JSContext *, JSAtom)" -> "__JS_AtomToValue(JSContext *, JSAtom, BOOL)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "js_linearize_string_rope(JSContext *, JSValue)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "i32toa(char *, int32_t)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_ToPrimitive(JSContext *, JSValue, int)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_IsException(JSValue)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_ToStringInternal(JSContext *, JSValue, BOOL)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "js_new_string8(JSContext *, const char *)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "js_dtoa2(JSContext *, double, int, int, int)";
+"JS_ToStringInternal(JSContext *, JSValue, BOOL)" -> "js_bigint_to_string(JSContext *, JSValue)";
+}

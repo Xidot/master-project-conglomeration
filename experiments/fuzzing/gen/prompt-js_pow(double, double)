@@ -1,0 +1,340 @@
+Target function: "js_pow(double, double)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 13800
+static double js_pow(double a, double b)
+{
+    if (unlikely(!isfinite(b)) && fabs(a) == 1) {
+        /* not compatible with IEEE 754 */
+        return JS_FLOAT64_NAN;
+    } else {
+        return pow(a, b);
+    }
+}
+
+/// Line number here: 230
+typedef enum OPCodeEnum OPCodeEnum
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/// Line number here: 406
+typedef int128_t js_sdlimb_t
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/// Line number here: 14138
+static no_inline __exception int js_binary_arith_slow(JSContext *ctx, JSValue *sp,
+                                                      OPCodeEnum op)
+{
+    JSValue op1, op2;
+    uint32_t tag1, tag2;
+    double d1, d2;
+
+    op1 = sp[-2];
+    op2 = sp[-1];
+    tag1 = JS_VALUE_GET_NORM_TAG(op1);
+    tag2 = JS_VALUE_GET_NORM_TAG(op2);
+    /* fast path for float operations */
+    if (tag1 == JS_TAG_FLOAT64 && tag2 == JS_TAG_FLOAT64) {
+        d1 = JS_VALUE_GET_FLOAT64(op1);
+        d2 = JS_VALUE_GET_FLOAT64(op2);
+        goto handle_float64;
+    }
+    /* fast path for short big int operations */
+    if (tag1 == JS_TAG_SHORT_BIG_INT && tag2 == JS_TAG_SHORT_BIG_INT) {
+        js_slimb_t v1, v2;
+        js_sdlimb_t v;
+        v1 = JS_VALUE_GET_SHORT_BIG_INT(op1);
+        v2 = JS_VALUE_GET_SHORT_BIG_INT(op2);
+        switch(op) {
+        case OP_sub:
+            v = (js_sdlimb_t)v1 - (js_sdlimb_t)v2;
+            break;
+        case OP_mul:
+            v = (js_sdlimb_t)v1 * (js_sdlimb_t)v2;
+            break;
+        case OP_div:
+            if (v2 == 0 ||
+                ((js_limb_t)v1 == (js_limb_t)1 << (JS_LIMB_BITS - 1) &&
+                 v2 == -1)) {
+                goto slow_big_int;
+            }
+            sp[-2] = __JS_NewShortBigInt(ctx, v1 / v2);
+            return 0;
+        case OP_mod:
+            if (v2 == 0 ||
+                ((js_limb_t)v1 == (js_limb_t)1 << (JS_LIMB_BITS - 1) &&
+                 v2 == -1)) {
+                goto slow_big_int;
+            }
+            sp[-2] = __JS_NewShortBigInt(ctx, v1 % v2);
+            return 0;
+        case OP_pow:
+            goto slow_big_int;
+        default:
+            abort();
+        }
+        if (likely(v >= JS_SHORT_BIG_INT_MIN && v <= JS_SHORT_BIG_INT_MAX)) {
+            sp[-2] = __JS_NewShortBigInt(ctx, v);
+        } else {
+            JSBigInt *r = js_bigint_new_di(ctx, v);
+            if (!r)
+                goto exception;
+            sp[-2] = JS_MKPTR(JS_TAG_BIG_INT, r);
+        }
+        return 0;
+    }
+    op1 = JS_ToNumericFree(ctx, op1);
+    if (JS_IsException(op1)) {
+        JS_FreeValue(ctx, op2);
+        goto exception;
+    }
+    op2 = JS_ToNumericFree(ctx, op2);
+    if (JS_IsException(op2)) {
+        JS_FreeValue(ctx, op1);
+        goto exception;
+    }
+    tag1 = JS_VALUE_GET_NORM_TAG(op1);
+    tag2 = JS_VALUE_GET_NORM_TAG(op2);
+
+    if (tag1 == JS_TAG_INT && tag2 == JS_TAG_INT) {
+        int32_t v1, v2;
+        int64_t v;
+        v1 = JS_VALUE_GET_INT(op1);
+        v2 = JS_VALUE_GET_INT(op2);
+        switch(op) {
+        case OP_sub:
+            v = (int64_t)v1 - (int64_t)v2;
+            break;
+        case OP_mul:
+            v = (int64_t)v1 * (int64_t)v2;
+            if (v == 0 && (v1 | v2) < 0) {
+                sp[-2] = __JS_NewFloat64(ctx, -0.0);
+                return 0;
+            }
+            break;
+        case OP_div:
+            sp[-2] = JS_NewFloat64(ctx, (double)v1 / (double)v2);
+            return 0;
+        case OP_mod:
+            if (v1 < 0 || v2 <= 0) {
+                sp[-2] = JS_NewFloat64(ctx, fmod(v1, v2));
+                return 0;
+            } else {
+                v = (int64_t)v1 % (int64_t)v2;
+            }
+            break;
+        case OP_pow:
+            sp[-2] = JS_NewFloat64(ctx, js_pow(v1, v2));
+            return 0;
+        default:
+            abort();
+        }
+        sp[-2] = JS_NewInt64(ctx, v);
+    } else if ((tag1 == JS_TAG_SHORT_BIG_INT || tag1 == JS_TAG_BIG_INT) &&
+               (tag2 == JS_TAG_SHORT_BIG_INT || tag2 == JS_TAG_BIG_INT)) {
+        JSBigInt *p1, *p2, *r;
+        JSBigIntBuf buf1, buf2;
+    slow_big_int:
+        /* bigint result */
+        if (JS_VALUE_GET_TAG(op1) == JS_TAG_SHORT_BIG_INT)
+            p1 = js_bigint_set_short(&buf1, op1);
+        else
+            p1 = JS_VALUE_GET_PTR(op1);
+        if (JS_VALUE_GET_TAG(op2) == JS_TAG_SHORT_BIG_INT)
+            p2 = js_bigint_set_short(&buf2, op2);
+        else
+            p2 = JS_VALUE_GET_PTR(op2);
+        switch(op) {
+        case OP_add:
+            r = js_bigint_add(ctx, p1, p2, 0);
+            break;
+        case OP_sub:
+            r = js_bigint_add(ctx, p1, p2, 1);
+            break;
+        case OP_mul:
+            r = js_bigint_mul(ctx, p1, p2);
+            break;
+        case OP_div:
+            r = js_bigint_divrem(ctx, p1, p2, FALSE);
+            break;
+        case OP_mod:
+            r = js_bigint_divrem(ctx, p1, p2, TRUE);
+            break;
+        case OP_pow:
+            r = js_bigint_pow(ctx, p1, p2);
+            break;
+        default:
+            abort();
+        }
+        JS_FreeValue(ctx, op1);
+        JS_FreeValue(ctx, op2);
+        if (!r)
+            goto exception;
+        sp[-2] = JS_CompactBigInt(ctx, r);
+    } else {
+        double dr;
+        /* float64 result */
+        if (JS_ToFloat64Free(ctx, &d1, op1)) {
+            JS_FreeValue(ctx, op2);
+            goto exception;
+        }
+        if (JS_ToFloat64Free(ctx, &d2, op2))
+            goto exception;
+    handle_float64:
+        switch(op) {
+        case OP_sub:
+            dr = d1 - d2;
+            break;
+        case OP_mul:
+            dr = d1 * d2;
+            break;
+        case OP_div:
+            dr = d1 / d2;
+            break;
+        case OP_mod:
+            dr = fmod(d1, d2);
+            break;
+        case OP_pow:
+            dr = js_pow(d1, d2);
+            break;
+        default:
+            abort();
+        }
+        sp[-2] = __JS_NewFloat64(ctx, dr);
+    }
+    return 0;
+ exception:
+    sp[-2] = JS_UNDEFINED;
+    sp[-1] = JS_UNDEFINED;
+    return -1;
+}
+
+---- File: /usr/include/bits/mathcalls.h
+
+/// Line number here: 194
+__MATHCALLX (fabs,, (_Mdouble_ __x), (__const__))
+
+/// Line number here: 172
+__MATHCALL_VEC (pow,, (_Mdouble_ __x, _Mdouble_ __y))
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_pow(double, double)";
+"js_pow(double, double)" -> "__builtin_expect(long, long)";
+"js_pow(double, double)" -> "__builtin_isfinite()";
+"js_pow(double, double)" -> "fabs(double)";
+"js_pow(double, double)" -> "__builtin_nanf(const char *)";
+"js_pow(double, double)" -> "pow(double, double)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "__JS_NewShortBigInt(JSContext *, int64_t)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "abort()";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "__builtin_expect(long, long)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_new_di(JSContext *, js_sdlimb_t)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_ToNumericFree(JSContext *, JSValue)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_IsException(JSValue)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "__JS_NewFloat64(JSContext *, double)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_NewFloat64(JSContext *, double)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "fmod(double, double)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_pow(double, double)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_set_short(JSBigIntBuf *, JSValue)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_add(JSContext *, const JSBigInt *, const JSBigInt *, int)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_mul(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_divrem(JSContext *, const JSBigInt *, const JSBigInt *, BOOL)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "js_bigint_pow(JSContext *, const JSBigInt *, JSBigInt *)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_CompactBigInt(JSContext *, JSBigInt *)";
+"js_binary_arith_slow(JSContext *, JSValue *, OPCodeEnum)" -> "JS_ToFloat64Free(JSContext *, double *, JSValue)";
+}

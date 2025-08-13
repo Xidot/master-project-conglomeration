@@ -1,0 +1,53 @@
+Target function: "pstrcat(char *, int, const char *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* strcat and truncate. */
+/// Line number here: 49
+char *pstrcat(char *buf, int buf_size, const char *s)
+{
+    int len;
+    len = strlen(buf);
+    if (len < buf_size)
+        pstrcpy(buf + len, buf_size - len, s);
+    return buf;
+}
+
+/// Line number here: 31
+void pstrcpy(char *buf, int buf_size, const char *str)
+{
+    int c;
+    char *q = buf;
+
+    if (buf_size <= 0)
+        return;
+
+    for(;;) {
+        c = *str++;
+        if (c == 0 || q >= buf + buf_size - 1)
+            break;
+        *q++ = c;
+    }
+    *q = '\0';
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/string.h
+
+/// Line number here: 406
+extern size_t strlen (const char *__s)
+     __THROW __attribute_pure__ __nonnull ((1))
+
+
+
+----- Callgraph:
+strict digraph G {
+"pstrcat(char *, int, const char *)";
+"pstrcat(char *, int, const char *)" -> "strlen(const char *)";
+"pstrcat(char *, int, const char *)" -> "pstrcpy(char *, int, const char *)";
+}

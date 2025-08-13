@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-tag_is_number(uint32_t)
+-------------------------
+Based on the provided code and context, here are the potential logical bugs:
+
+:quickjs.c:14834
+
+---
+
+The logical bug in `tag_is_number()` is that it doesn't handle the case where the tag could be JS_TAG_BOOL (1), which is also a numeric type in JavaScript (true/false being equivalent to 1/0). The function incorrectly returns FALSE for boolean tags when it should consider them as numbers for comparison purposes.
+
+Here's the diff to instrument this bug:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -14834,6 +14834,9 @@
+ static BOOL tag_is_number(uint32_t tag)
+ {
++    if (tag == JS_TAG_BOOL) {
++        funlogline();
++    }
+     return (tag == JS_TAG_INT || 
+             tag == JS_TAG_FLOAT64 ||
+             tag == JS_TAG_BIG_INT || tag == JS_TAG_SHORT_BIG_INT);
+ }
+```
+
+The instrumentation will trigger when a boolean value is being checked for numeric comparison, which is a logical error since booleans should be treated as numbers in this context (as evidenced by the later handling in js_eq_slow where boolean values are converted to int32 for comparison).

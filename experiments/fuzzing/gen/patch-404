@@ -1,0 +1,31 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2211,6 +2211,8 @@
+ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
+                            JS_MarkFunc *mark_func)
+ {
+     int i;
++    if (ctx == NULL)
++        funlogline();
+     struct list_head *el;
+ 
+     list_for_each(el, &ctx->loaded_modules) {
+@@ -2217,6 +2219,8 @@
+         JSModuleDef *m = list_entry(el, JSModuleDef, link);
+         JS_MarkValue(rt, JS_MKPTR(JS_TAG_MODULE, m), mark_func);
+     }
+ 
++    if (ctx->global_obj.tag == JS_TAG_UNINITIALIZED)
++        funlogline();
+     JS_MarkValue(rt, ctx->global_obj, mark_func);
+     JS_MarkValue(rt, ctx->global_var_obj, mark_func);
+ 
+@@ -2224,6 +2228,8 @@
+     JS_MarkValue(rt, ctx->eval_obj, mark_func);
+ 
+     JS_MarkValue(rt, ctx->array_proto_values, mark_func);
++    if (JS_NATIVE_ERROR_COUNT <= 0)
++        funlogline();
+     for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
+         JS_MarkValue(rt, ctx->native_error_proto[i], mark_func);
+     }

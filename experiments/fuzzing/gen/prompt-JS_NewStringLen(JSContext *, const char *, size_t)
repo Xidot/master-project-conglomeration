@@ -1,0 +1,690 @@
+Target function: "JS_NewStringLen(JSContext *, const char *, size_t)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/* create a string from a UTF-8 buffer */
+/// Line number here: 3816
+JSValue JS_NewStringLen(JSContext *ctx, const char *buf, size_t buf_len)
+{
+    const uint8_t *p, *p_end, *p_start, *p_next;
+    uint32_t c;
+    StringBuffer b_s, *b = &b_s;
+    size_t len1;
+
+    p_start = (const uint8_t *)buf;
+    p_end = p_start + buf_len;
+    len1 = count_ascii(p_start, buf_len);
+    p = p_start + len1;
+    if (len1 > JS_STRING_LEN_MAX)
+        return JS_ThrowInternalError(ctx, "string too long");
+    if (p == p_end) {
+        /* ASCII string */
+        return js_new_string8_len(ctx, buf, buf_len);
+    } else {
+        if (string_buffer_init(ctx, b, buf_len))
+            goto fail;
+        string_buffer_write8(b, p_start, len1);
+        while (p < p_end) {
+            if (*p < 128) {
+                string_buffer_putc8(b, *p++);
+            } else {
+                /* parse utf-8 sequence, return 0xFFFFFFFF for error */
+                c = unicode_from_utf8(p, p_end - p, &p_next);
+                if (c < 0x10000) {
+                    p = p_next;
+                } else if (c <= 0x10FFFF) {
+                    p = p_next;
+                    /* surrogate pair */
+                    string_buffer_putc16(b, get_hi_surrogate(c));
+                    c = get_lo_surrogate(c);
+                } else {
+                    /* invalid char */
+                    c = 0xfffd;
+                    /* skip the invalid chars */
+                    /* XXX: seems incorrect. Why not just use c = *p++; ? */
+                    while (p < p_end && (*p >= 0x80 && *p < 0xc0))
+                        p++;
+                    if (p < p_end) {
+                        p++;
+                        while (p < p_end && (*p >= 0x80 && *p < 0xc0))
+                            p++;
+                    }
+                }
+                string_buffer_putc16(b, c);
+            }
+        }
+    }
+    return string_buffer_end(b);
+
+ fail:
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+/* XXX: optimize */
+/// Line number here: 2928
+static size_t count_ascii(const uint8_t *buf, size_t len)
+{
+    const uint8_t *p, *p_end;
+    p = buf;
+    p_end = buf + len;
+    while (p < p_end && *p < 128)
+        p++;
+    return p - buf;
+}
+
+/// Line number here: 186
+enum JSErrorEnum {
+    JS_EVAL_ERROR,
+    JS_RANGE_ERROR,
+    JS_REFERENCE_ERROR,
+    JS_SYNTAX_ERROR,
+    JS_TYPE_ERROR,
+    JS_URI_ERROR,
+    JS_INTERNAL_ERROR,
+    JS_AGGREGATE_ERROR,
+
+    JS_NATIVE_ERROR_COUNT, /* number of different NativeError objects */
+}
+
+/// Line number here: 7134
+JSValue __attribute__((format(printf, 2, 3))) JS_ThrowInternalError(JSContext *ctx, const char *fmt, ...)
+{
+    JSValue val;
+    va_list ap;
+
+    va_start(ap, fmt);
+    val = JS_ThrowError(ctx, JS_INTERNAL_ERROR, fmt, ap);
+    va_end(ap);
+    return val;
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 3402
+static JSValue js_new_string8_len(JSContext *ctx, const char *buf, int len)
+{
+    JSString *str;
+
+    if (len <= 0) {
+        return JS_AtomToString(ctx, JS_ATOM_empty_string);
+    }
+    str = js_alloc_string(ctx, len, 0);
+    if (!str)
+        return JS_EXCEPTION;
+    memcpy(str->u.str8, buf, len);
+    str->u.str8[len] = '\0';
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3505
+static inline int string_buffer_init(JSContext *ctx, StringBuffer *s, int size)
+{
+    return string_buffer_init2(ctx, s, size, 0);
+}
+
+/// Line number here: 3654
+static int string_buffer_write8(StringBuffer *s, const uint8_t *p, int len)
+{
+    int i;
+
+    if (s->len + len > s->size) {
+        if (string_buffer_realloc(s, s->len + len, 0))
+            return -1;
+    }
+    if (s->is_wide_char) {
+        for (i = 0; i < len; i++) {
+            s->str->u.str16[s->len + i] = p[i];
+        }
+        s->len += len;
+    } else {
+        memcpy(&s->str->u.str8[s->len], p, len);
+        s->len += len;
+    }
+    return 0;
+}
+
+/* 0 <= c <= 0xff */
+/// Line number here: 3593
+static int string_buffer_putc8(StringBuffer *s, uint32_t c)
+{
+    if (unlikely(s->len >= s->size)) {
+        if (string_buffer_realloc(s, s->len + 1, c))
+            return -1;
+    }
+    if (s->is_wide_char) {
+        s->str->u.str16[s->len++] = c;
+    } else {
+        s->str->u.str8[s->len++] = c;
+    }
+    return 0;
+}
+
+/* 0 <= c <= 0xffff */
+/// Line number here: 3608
+static int string_buffer_putc16(StringBuffer *s, uint32_t c)
+{
+    if (likely(s->len < s->size)) {
+        if (s->is_wide_char) {
+            s->str->u.str16[s->len++] = c;
+            return 0;
+        } else if (c < 0x100) {
+            s->str->u.str8[s->len++] = c;
+            return 0;
+        }
+    }
+    return string_buffer_putc_slow(s, c);
+}
+
+/// Line number here: 3783
+static JSValue string_buffer_end(StringBuffer *s)
+{
+    JSString *str;
+    str = s->str;
+    if (s->error_status)
+        return JS_EXCEPTION;
+    if (s->len == 0) {
+        js_free(s->ctx, str);
+        s->str = NULL;
+        return JS_AtomToString(s->ctx, JS_ATOM_empty_string);
+    }
+    if (s->len < s->size) {
+        /* smaller size so js_realloc should not fail, but OK if it does */
+        /* XXX: should add some slack to avoid unnecessary calls */
+        /* XXX: might need to use malloc+free to ensure smaller size */
+        str = js_realloc_rt(s->ctx->rt, str, sizeof(JSString) +
+                            (s->len << s->is_wide_char) + 1 - s->is_wide_char);
+        if (str == NULL)
+            str = s->str;
+        s->str = str;
+    }
+    if (!s->is_wide_char)
+        str->u.str8[s->len] = 0;
+#ifdef DUMP_LEAKS
+    list_add_tail(&str->link, &s->ctx->rt->string_list);
+#endif
+    str->is_wide_char = s->is_wide_char;
+    str->len = s->len;
+    s->str = NULL;
+    return JS_MKPTR(JS_TAG_STRING, str);
+}
+
+/// Line number here: 3510
+static void string_buffer_free(StringBuffer *s)
+{
+    js_free(s->ctx, s->str);
+    s->str = NULL;
+}
+
+/// Line number here: 218
+typedef struct JSObject JSObject
+
+/// Line number here: 610
+typedef enum JSFunctionKindEnum {
+    JS_FUNC_NORMAL = 0,
+    JS_FUNC_GENERATOR = (1 << 0),
+    JS_FUNC_ASYNC = (1 << 1),
+    JS_FUNC_ASYNC_GENERATOR = (JS_FUNC_GENERATOR | JS_FUNC_ASYNC),
+} JSFunctionKindEnum
+
+/// Line number here: 650
+typedef struct JSFunctionBytecode {
+    JSGCObjectHeader header; /* must come first */
+    uint8_t js_mode;
+    uint8_t has_prototype : 1; /* true if a prototype field is necessary */
+    uint8_t has_simple_parameter_list : 1;
+    uint8_t is_derived_class_constructor : 1;
+    /* true if home_object needs to be initialized */
+    uint8_t need_home_object : 1;
+    uint8_t func_kind : 2;
+    uint8_t new_target_allowed : 1;
+    uint8_t super_call_allowed : 1;
+    uint8_t super_allowed : 1;
+    uint8_t arguments_allowed : 1;
+    uint8_t has_debug : 1;
+    uint8_t read_only_bytecode : 1;
+    uint8_t is_direct_or_indirect_eval : 1; /* used by JS_GetScriptOrModuleName() */
+    /* XXX: 10 bits available */
+    uint8_t *byte_code_buf; /* (self pointer) */
+    int byte_code_len;
+    JSAtom func_name;
+    JSVarDef *vardefs; /* arguments + local variables (arg_count + var_count) (self pointer) */
+    JSClosureVar *closure_var; /* list of variables in the closure (self pointer) */
+    uint16_t arg_count;
+    uint16_t var_count;
+    uint16_t defined_arg_count; /* for length function property */
+    uint16_t stack_size; /* maximum stack size */
+    JSContext *realm; /* function realm */
+    JSValue *cpool; /* constant pool (self pointer) */
+    int cpool_count;
+    int closure_var_count;
+    struct {
+        /* debug info, move to separate structure to save memory? */
+        JSAtom filename;
+        int source_len; 
+        int pc2line_len;
+        uint8_t *pc2line_buf;
+        char *source;
+    } debug;
+} JSFunctionBytecode
+
+/// Line number here: 39832
+static JSValue js_function_toString(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    JSObject *p;
+    JSFunctionKindEnum func_kind = JS_FUNC_NORMAL;
+
+    if (check_function(ctx, this_val))
+        return JS_EXCEPTION;
+
+    p = JS_VALUE_GET_OBJ(this_val);
+    if (js_class_has_bytecode(p->class_id)) {
+        JSFunctionBytecode *b = p->u.func.function_bytecode;
+        if (b->has_debug && b->debug.source) {
+            return JS_NewStringLen(ctx, b->debug.source, b->debug.source_len);
+        }
+        func_kind = b->func_kind;
+    }
+    {
+        JSValue name;
+        const char *pref, *suff;
+
+        switch(func_kind) {
+        default:
+        case JS_FUNC_NORMAL:
+            pref = "function ";
+            break;
+        case JS_FUNC_GENERATOR:
+            pref = "function *";
+            break;
+        case JS_FUNC_ASYNC:
+            pref = "async function ";
+            break;
+        case JS_FUNC_ASYNC_GENERATOR:
+            pref = "async function *";
+            break;
+        }
+        suff = "() {\n    [native code]\n}";
+        name = JS_GetProperty(ctx, this_val, JS_ATOM_name);
+        if (JS_IsUndefined(name))
+            name = JS_AtomToString(ctx, JS_ATOM_empty_string);
+        return JS_ConcatString3(ctx, pref, name, suff);
+    }
+}
+
+/// Line number here: 45036
+static JSValue js_regexp_get_flags(JSContext *ctx, JSValueConst this_val)
+{
+    char str[RE_FLAG_COUNT], *p = str;
+    int res, i;
+    static const int flag_atom[RE_FLAG_COUNT] = {
+        JS_ATOM_hasIndices,
+        JS_ATOM_global,
+        JS_ATOM_ignoreCase,
+        JS_ATOM_multiline,
+        JS_ATOM_dotAll,
+        JS_ATOM_unicode,
+        JS_ATOM_unicodeSets,
+        JS_ATOM_sticky,
+    };
+    static const char flag_char[RE_FLAG_COUNT] = { 'd', 'g', 'i', 'm', 's', 'u', 'v', 'y' };
+    
+    if (JS_VALUE_GET_TAG(this_val) != JS_TAG_OBJECT)
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+
+    for(i = 0; i < RE_FLAG_COUNT; i++) {
+        res = JS_ToBoolFree(ctx, JS_GetProperty(ctx, this_val, flag_atom[i]));
+        if (res < 0)
+            goto exception;
+        if (res)
+            *p++ = flag_char[i];
+    }
+    return JS_NewStringLen(ctx, str, p - str);
+
+exception:
+    return JS_EXCEPTION;
+}
+
+/* fmt:
+   0: toUTCString: "Tue, 02 Jan 2018 23:04:46 GMT"
+   1: toString: "Wed Jan 03 2018 00:05:22 GMT+0100 (CET)"
+   2: toISOString: "2018-01-02T23:02:56.927Z"
+   3: toLocaleString: "1/2/2018, 11:40:40 PM"
+   part: 1=date, 2=time 3=all
+   XXX: should use a variant of strftime().
+ */
+/// Line number here: 51170
+static JSValue get_date_string(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv, int magic)
+{
+    // _string(obj, fmt, part)
+    char buf[64];
+    double fields[9];
+    int res, fmt, part, pos;
+    int y, mon, d, h, m, s, ms, wd, tz;
+
+    fmt = (magic >> 4) & 0x0F;
+    part = magic & 0x0F;
+
+    res = get_date_fields(ctx, this_val, fields, fmt & 1, 0);
+    if (res < 0)
+        return JS_EXCEPTION;
+    if (!res) {
+        if (fmt == 2)
+            return JS_ThrowRangeError(ctx, "Date value is NaN");
+        else
+            return js_new_string8(ctx, "Invalid Date");
+    }
+
+    y = fields[0];
+    mon = fields[1];
+    d = fields[2];
+    h = fields[3];
+    m = fields[4];
+    s = fields[5];
+    ms = fields[6];
+    wd = fields[7];
+    tz = fields[8];
+
+    pos = 0;
+
+    if (part & 1) { /* date part */
+        switch(fmt) {
+        case 0:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%.3s, %02d %.3s %0*d ",
+                            day_names + wd * 3, d,
+                            month_names + mon * 3, 4 + (y < 0), y);
+            break;
+        case 1:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%.3s %.3s %02d %0*d",
+                            day_names + wd * 3,
+                            month_names + mon * 3, d, 4 + (y < 0), y);
+            if (part == 3) {
+                buf[pos++] = ' ';
+            }
+            break;
+        case 2:
+            if (y >= 0 && y <= 9999) {
+                pos += snprintf(buf + pos, sizeof(buf) - pos,
+                                "%04d", y);
+            } else {
+                pos += snprintf(buf + pos, sizeof(buf) - pos,
+                                "%+07d", y);
+            }
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "-%02d-%02dT", mon + 1, d);
+            break;
+        case 3:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d/%02d/%0*d", mon + 1, d, 4 + (y < 0), y);
+            if (part == 3) {
+                buf[pos++] = ',';
+                buf[pos++] = ' ';
+            }
+            break;
+        }
+    }
+    if (part & 2) { /* time part */
+        switch(fmt) {
+        case 0:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d:%02d:%02d GMT", h, m, s);
+            break;
+        case 1:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d:%02d:%02d GMT", h, m, s);
+            if (tz < 0) {
+                buf[pos++] = '-';
+                tz = -tz;
+            } else {
+                buf[pos++] = '+';
+            }
+            /* tz is >= 0, can use % */
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d%02d", tz / 60, tz % 60);
+            /* XXX: tack the time zone code? */
+            break;
+        case 2:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d:%02d:%02d.%03dZ", h, m, s, ms);
+            break;
+        case 3:
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%02d:%02d:%02d %cM", (h + 11) % 12 + 1, m, s,
+                            (h < 12) ? 'A' : 'P');
+            break;
+        }
+    }
+    return JS_NewStringLen(ctx, buf, pos);
+}
+
+---- File: /usr/lib/clang/20/include/__stdarg_va_list.h
+
+/// Line number here: 11
+typedef __builtin_va_list va_list
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.c
+
+/* return -1 if error. *pp is not updated in this case. max_len must
+   be >= 1. The maximum length for a UTF8 byte sequence is 6 bytes. */
+/// Line number here: 252
+int unicode_from_utf8(const uint8_t *p, int max_len, const uint8_t **pp)
+{
+    int l, c, b, i;
+
+    c = *p++;
+    if (c < 0x80) {
+        *pp = p;
+        return c;
+    }
+    switch(c) {
+    case 0xc0: case 0xc1: case 0xc2: case 0xc3:
+    case 0xc4: case 0xc5: case 0xc6: case 0xc7:
+    case 0xc8: case 0xc9: case 0xca: case 0xcb:
+    case 0xcc: case 0xcd: case 0xce: case 0xcf:
+    case 0xd0: case 0xd1: case 0xd2: case 0xd3:
+    case 0xd4: case 0xd5: case 0xd6: case 0xd7:
+    case 0xd8: case 0xd9: case 0xda: case 0xdb:
+    case 0xdc: case 0xdd: case 0xde: case 0xdf:
+        l = 1;
+        break;
+    case 0xe0: case 0xe1: case 0xe2: case 0xe3:
+    case 0xe4: case 0xe5: case 0xe6: case 0xe7:
+    case 0xe8: case 0xe9: case 0xea: case 0xeb:
+    case 0xec: case 0xed: case 0xee: case 0xef:
+        l = 2;
+        break;
+    case 0xf0: case 0xf1: case 0xf2: case 0xf3:
+    case 0xf4: case 0xf5: case 0xf6: case 0xf7:
+        l = 3;
+        break;
+    case 0xf8: case 0xf9: case 0xfa: case 0xfb:
+        l = 4;
+        break;
+    case 0xfc: case 0xfd:
+        l = 5;
+        break;
+    default:
+        return -1;
+    }
+    /* check that we have enough characters */
+    if (l > (max_len - 1))
+        return -1;
+    c &= utf8_first_code_mask[l - 1];
+    for(i = 0; i < l; i++) {
+        b = *p++;
+        if (b < 0x80 || b >= 0xc0)
+            return -1;
+        c = (c << 6) | (b & 0x3f);
+    }
+    if (c < utf8_min_code[l - 1])
+        return -1;
+    *pp = p;
+    return c;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 315
+static inline uint32_t get_hi_surrogate(uint32_t c)
+{
+    return (c >> 10) - (0x10000 >> 10) + 0xD800;
+}
+
+/// Line number here: 320
+static inline uint32_t get_lo_surrogate(uint32_t c)
+{
+    return (c & 0x3FF) | 0xDC00;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_NewStringLen(JSContext *, const char *, size_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "count_ascii(const uint8_t *, size_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "js_new_string8_len(JSContext *, const char *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_write8(StringBuffer *, const uint8_t *, int)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_putc8(StringBuffer *, uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "unicode_from_utf8(const uint8_t *, int, const uint8_t **)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_putc16(StringBuffer *, uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "get_hi_surrogate(uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "get_lo_surrogate(uint32_t)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_end(StringBuffer *)";
+"JS_NewStringLen(JSContext *, const char *, size_t)" -> "string_buffer_free(StringBuffer *)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "__builtin_va_start(struct __va_list_tag *, ...)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "JS_ThrowError(JSContext *, JSErrorEnum, const char *, struct __va_list_tag *)";
+"JS_ThrowInternalError(JSContext *, const char *, ...)" -> "__builtin_va_end(struct __va_list_tag *)";
+"js_new_string8_len(JSContext *, const char *, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "js_alloc_string(JSContext *, int, int)";
+"js_new_string8_len(JSContext *, const char *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"string_buffer_init(JSContext *, StringBuffer *, int)";
+"string_buffer_init(JSContext *, StringBuffer *, int)" -> "string_buffer_init2(JSContext *, StringBuffer *, int, int)";
+"string_buffer_write8(StringBuffer *, const uint8_t *, int)";
+"string_buffer_write8(StringBuffer *, const uint8_t *, int)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_write8(StringBuffer *, const uint8_t *, int)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"string_buffer_putc8(StringBuffer *, uint32_t)";
+"string_buffer_putc8(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc8(StringBuffer *, uint32_t)" -> "string_buffer_realloc(StringBuffer *, int, int)";
+"string_buffer_putc16(StringBuffer *, uint32_t)";
+"string_buffer_putc16(StringBuffer *, uint32_t)" -> "__builtin_expect(long, long)";
+"string_buffer_putc16(StringBuffer *, uint32_t)" -> "string_buffer_putc_slow(StringBuffer *, uint32_t)";
+"string_buffer_end(StringBuffer *)";
+"string_buffer_end(StringBuffer *)" -> "js_free(JSContext *, void *)";
+"string_buffer_end(StringBuffer *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"string_buffer_end(StringBuffer *)" -> "js_realloc_rt(JSRuntime *, void *, size_t)";
+"string_buffer_free(StringBuffer *)";
+"string_buffer_free(StringBuffer *)" -> "js_free(JSContext *, void *)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "check_function(JSContext *, JSValue)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "js_class_has_bytecode(JSClassID)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_IsUndefined(JSValue)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_AtomToString(JSContext *, JSAtom)";
+"js_function_toString(JSContext *, JSValue, int, JSValue *)" -> "JS_ConcatString3(JSContext *, const char *, JSValue, const char *)";
+"js_regexp_get_flags(JSContext *, JSValue)";
+"js_regexp_get_flags(JSContext *, JSValue)" -> "JS_ThrowTypeErrorNotAnObject(JSContext *)";
+"js_regexp_get_flags(JSContext *, JSValue)" -> "JS_ToBoolFree(JSContext *, JSValue)";
+"js_regexp_get_flags(JSContext *, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_regexp_get_flags(JSContext *, JSValue)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)" -> "get_date_fields(JSContext *, JSValue, double *, int, int)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)" -> "JS_ThrowRangeError(JSContext *, const char *, ...)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)" -> "js_new_string8(JSContext *, const char *)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)" -> "snprintf(char *restrict, size_t, const char *restrict, ...)";
+"get_date_string(JSContext *, JSValue, int, JSValue *, int)" -> "JS_NewStringLen(JSContext *, const char *, size_t)";
+}

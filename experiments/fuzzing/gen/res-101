@@ -1,0 +1,28 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-get_alloc_from_shape(JSShape *)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `get_alloc_from_shape(JSShape *)`:
+
+:quickjs.c:get_alloc_from_shape:4586
+
+---
+
+The logical bug occurs in `get_alloc_from_shape()` where it calculates the allocation pointer by subtracting `((intptr_t)sh->prop_hash_mask + 1)` from `prop_hash_end(sh)`. The issue is that this calculation assumes `prop_hash_end(sh)` points to the end of the allocated memory, but there's no validation that `sh->prop_hash_mask` is valid or that the subtraction won't underflow.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4585,6 +4585,9 @@
+ static inline void *get_alloc_from_shape(JSShape *sh)
+ {
++    if (prop_hash_end(sh) <= ((uint32_t *)((intptr_t)sh->prop_hash_mask + 1))) {
++        funlogline();
++    }
+     return prop_hash_end(sh) - ((intptr_t)sh->prop_hash_mask + 1);
+ }
+```
+
+The condition checks if the subtraction would underflow by verifying the pointer arithmetic is valid before performing it. This would catch cases where the shape's hash mask is corrupted or invalid.

@@ -1,0 +1,49 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-resize_properties(JSContext *, JSShape **, JSObject *, uint32_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `resize_properties` function:
+
+:quickjs.c:resize_properties:4810
+:quickjs.c:resize_properties:4821
+:quickjs.c:resize_properties:4833
+
+---
+
+Reasons:
+1. Line 4810: The `new_size` calculation could overflow if `sh->prop_size * 3 / 2` exceeds uint32_t max value
+2. Line 4821: No check if `new_hash_size` becomes 0 after multiplication which would cause issues with hash mask calculation
+3. Line 4833: The memcpy could copy more data than allocated if `old_sh->prop_count` is corrupted
+
+Here are the proposed changes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4807,6 +4807,8 @@
+ 
+     sh = *psh;
+     new_size = max_int(count, sh->prop_size * 3 / 2);
++    if (new_size < sh->prop_size) /* overflow check */
++        funlogline();
+     /* Reallocate prop array first to avoid crash or size inconsistency
+        in case of memory allocation failure */
+     if (p) {
+@@ -4818,6 +4820,8 @@
+     }
+     new_hash_size = sh->prop_hash_mask + 1;
+     while (new_hash_size < new_size)
++        if (new_hash_size == 0) /* would overflow */
++            funlogline();
+         new_hash_size = 2 * new_hash_size;
+     /* resize the property shapes. Using js_realloc() is not possible in
+        case the GC runs during the allocation */
+@@ -4830,6 +4834,8 @@
+     list_del(&old_sh->header.link);
+     /* copy all the shape properties */
+     memcpy(sh, old_sh,
++           if (old_sh->prop_count > new_size) /* corrupted prop_count */
++               funlogline();
+            sizeof(JSShape) + sizeof(sh->prop[0]) * old_sh->prop_count);
+     list_add_tail(&sh->header.link, &ctx->rt->gc_obj_list);
+```

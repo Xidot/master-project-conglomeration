@@ -1,0 +1,1699 @@
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_error.h
+
+/**
+ * \typedef igraph_error_t
+ * \brief Return type for functions returning an error code.
+ *
+ * This type is used as the return type of igraph functions that return an
+ * error code. It is a type alias because \type igraph_error_t used to be
+ * an \c int, and was used slightly differenly than \type igraph_error_type_t.
+ */
+/// Line: 408
+typedef igraph_error_type_t igraph_error_t
+
+/**
+ * \typedef igraph_error_type_t
+ * \brief Error code type.
+ * These are the possible values returned by \a igraph functions.
+ * Note that these are interesting only if you defined an error handler
+ * with \ref igraph_set_error_handler(). Otherwise the program is aborted
+ * and the function causing the error never returns.
+ *
+ * \enumval IGRAPH_SUCCESS The function successfully completed its task.
+ * \enumval IGRAPH_FAILURE Something went wrong. You'll almost never
+ *    meet this error as normally more specific error codes are used.
+ * \enumval IGRAPH_ENOMEM There wasn't enough memory to allocate
+ *    on the heap.
+ * \enumval IGRAPH_PARSEERROR A parse error was found in a file.
+ * \enumval IGRAPH_EINVAL A parameter's value is invalid. E.g. negative
+ *    number was specified as the number of vertices.
+ * \enumval IGRAPH_EXISTS A graph/vertex/edge attribute is already
+ *    installed with the given name.
+ * \enumval IGRAPH_EINVEVECTOR Invalid vector of vertex IDs. A vertex ID
+ *    is either negative or bigger than the number of vertices minus one.
+ * \enumval IGRAPH_EINVVID Invalid vertex ID, negative or too big.
+ * \enumval IGRAPH_NONSQUARE A non-square matrix was received while a
+ *    square matrix was expected.
+ * \enumval IGRAPH_EINVMODE Invalid mode parameter.
+ * \enumval IGRAPH_EFILE A file operation failed. E.g. a file doesn't exist,
+ *   or the user has no rights to open it.
+ * \enumval IGRAPH_UNIMPLEMENTED Attempted to call an unimplemented or
+ *   disabled (at compile-time) function.
+ * \enumval IGRAPH_DIVERGED A numeric algorithm failed to converge.
+ * \enumval IGRAPH_ARPACK_PROD Matrix-vector product failed (not used any more).
+ * \enumval IGRAPH_ARPACK_NPOS N must be positive.
+ * \enumval IGRAPH_ARPACK_NEVNPOS NEV must be positive.
+ * \enumval IGRAPH_ARPACK_NCVSMALL NCV must be bigger.
+ * \enumval IGRAPH_ARPACK_NONPOSI Maximum number of iterations should be positive.
+ * \enumval IGRAPH_ARPACK_WHICHINV Invalid WHICH parameter.
+ * \enumval IGRAPH_ARPACK_BMATINV Invalid BMAT parameter.
+ * \enumval IGRAPH_ARPACK_WORKLSMALL WORKL is too small.
+ * \enumval IGRAPH_ARPACK_TRIDERR LAPACK error in tridiagonal eigenvalue calculation.
+ * \enumval IGRAPH_ARPACK_ZEROSTART Starting vector is zero.
+ * \enumval IGRAPH_ARPACK_MODEINV MODE is invalid.
+ * \enumval IGRAPH_ARPACK_MODEBMAT MODE and BMAT are not compatible.
+ * \enumval IGRAPH_ARPACK_ISHIFT ISHIFT must be 0 or 1.
+ * \enumval IGRAPH_ARPACK_NEVBE NEV and WHICH='BE' are incompatible.
+ * \enumval IGRAPH_ARPACK_NOFACT Could not build an Arnoldi factorization.
+ * \enumval IGRAPH_ARPACK_FAILED No eigenvalues to sufficient accuracy.
+ * \enumval IGRAPH_ARPACK_HOWMNY HOWMNY is invalid.
+ * \enumval IGRAPH_ARPACK_HOWMNYS HOWMNY='S' is not implemented.
+ * \enumval IGRAPH_ARPACK_EVDIFF Different number of converged Ritz values.
+ * \enumval IGRAPH_ARPACK_SHUR Error from calculation of a real Schur form.
+ * \enumval IGRAPH_ARPACK_LAPACK LAPACK (dtrevc) error for calculating eigenvectors.
+ * \enumval IGRAPH_ARPACK_UNKNOWN Unknown ARPACK error.
+ * \enumval IGRAPH_ENEGLOOP Negative loop detected while calculating shortest paths.
+ * \enumval IGRAPH_EINTERNAL Internal error, likely a bug in igraph.
+ * \enumval IGRAPH_EDIVZERO Big integer division by zero.
+ * \enumval IGRAPH_GLP_EBOUND GLPK error (GLP_EBOUND).
+ * \enumval IGRAPH_GLP_EROOT GLPK error (GLP_EROOT).
+ * \enumval IGRAPH_GLP_ENOPFS GLPK error (GLP_ENOPFS).
+ * \enumval IGRAPH_GLP_ENODFS GLPK error (GLP_ENODFS).
+ * \enumval IGRAPH_GLP_EFAIL GLPK error (GLP_EFAIL).
+ * \enumval IGRAPH_GLP_EMIPGAP GLPK error (GLP_EMIPGAP).
+ * \enumval IGRAPH_GLP_ETMLIM GLPK error (GLP_ETMLIM).
+ * \enumval IGRAPH_GLP_ESTOP GLPK error (GLP_ESTOP).
+ * \enumval IGRAPH_EATTRIBUTES Attribute handler error. The user is not
+ *   expected to find this; it is signalled if some igraph function is
+ *   not using the attribute handler interface properly.
+ * \enumval IGRAPH_EATTRCOMBINE Unimplemented attribute combination
+ *   method for the given attribute type.
+ * \enumval IGRAPH_ELAPACK A LAPACK call resulted in an error.
+ * \enumval IGRAPH_EDRL Internal error in the DrL layout generator; not used
+ *   any more (replaced by IGRAPH_EINTERNAL).
+ * \enumval IGRAPH_EOVERFLOW Integer or double overflow.
+ * \enumval IGRAPH_EGLP Internal GLPK error.
+ * \enumval IGRAPH_CPUTIME CPU time exceeded.
+ * \enumval IGRAPH_EUNDERFLOW Integer or double underflow.
+ * \enumval IGRAPH_ERWSTUCK Random walk got stuck.
+ * \enumval IGRAPH_ERANGE Maximum vertex or edge count exceeded.
+ * \enumval IGRAPH_ENOSOL Input problem has no solution.
+ */
+/// Line: 317
+enum {
+    IGRAPH_SUCCESS           = 0,
+    IGRAPH_FAILURE           = 1,
+    IGRAPH_ENOMEM            = 2,
+    IGRAPH_PARSEERROR        = 3,
+    IGRAPH_EINVAL            = 4,
+    IGRAPH_EXISTS            = 5,
+    IGRAPH_EINVEVECTOR       = 6,
+    IGRAPH_EINVVID           = 7,
+    IGRAPH_NONSQUARE         = 8,
+    IGRAPH_EINVMODE          = 9,
+    IGRAPH_EFILE             = 10,
+    IGRAPH_UNIMPLEMENTED     = 12,
+    IGRAPH_INTERRUPTED       = 13,
+    IGRAPH_DIVERGED          = 14,
+    IGRAPH_ARPACK_PROD       = 15,   /* unused, reserved */
+    IGRAPH_ARPACK_NPOS       = 16,
+    IGRAPH_ARPACK_NEVNPOS    = 17,
+    IGRAPH_ARPACK_NCVSMALL   = 18,
+    IGRAPH_ARPACK_NONPOSI    = 19,
+    IGRAPH_ARPACK_WHICHINV   = 20,
+    IGRAPH_ARPACK_BMATINV    = 21,
+    IGRAPH_ARPACK_WORKLSMALL = 22,
+    IGRAPH_ARPACK_TRIDERR    = 23,
+    IGRAPH_ARPACK_ZEROSTART  = 24,
+    IGRAPH_ARPACK_MODEINV    = 25,
+    IGRAPH_ARPACK_MODEBMAT   = 26,
+    IGRAPH_ARPACK_ISHIFT     = 27,
+    IGRAPH_ARPACK_NEVBE      = 28,
+    IGRAPH_ARPACK_NOFACT     = 29,
+    IGRAPH_ARPACK_FAILED     = 30,
+    IGRAPH_ARPACK_HOWMNY     = 31,
+    IGRAPH_ARPACK_HOWMNYS    = 32,
+    IGRAPH_ARPACK_EVDIFF     = 33,
+    IGRAPH_ARPACK_SHUR       = 34,
+    IGRAPH_ARPACK_LAPACK     = 35,
+    IGRAPH_ARPACK_UNKNOWN    = 36,
+    IGRAPH_ENEGLOOP          = 37,
+    IGRAPH_EINTERNAL         = 38,
+    IGRAPH_ARPACK_MAXIT      = 39,
+    IGRAPH_ARPACK_NOSHIFT    = 40,
+    IGRAPH_ARPACK_REORDER    = 41,
+    IGRAPH_EDIVZERO          = 42,
+    IGRAPH_GLP_EBOUND        = 43,
+    IGRAPH_GLP_EROOT         = 44,
+    IGRAPH_GLP_ENOPFS        = 45,
+    IGRAPH_GLP_ENODFS        = 46,
+    IGRAPH_GLP_EFAIL         = 47,
+    IGRAPH_GLP_EMIPGAP       = 48,
+    IGRAPH_GLP_ETMLIM        = 49,
+    IGRAPH_GLP_ESTOP         = 50,
+    IGRAPH_EATTRIBUTES       = 51,
+    IGRAPH_EATTRCOMBINE      = 52,
+    IGRAPH_ELAPACK           = 53,
+    IGRAPH_EDRL IGRAPH_DEPRECATED_ENUMVAL = 54,
+    IGRAPH_EOVERFLOW         = 55,
+    IGRAPH_EGLP              = 56,
+    IGRAPH_CPUTIME           = 57,
+    IGRAPH_EUNDERFLOW        = 58,
+    IGRAPH_ERWSTUCK          = 59,
+    IGRAPH_STOP              = 60,
+    IGRAPH_ERANGE            = 61,
+    IGRAPH_ENOSOL            = 62
+}
+
+/// Line: 563
+typedef void igraph_finally_func_t(void *)
+
+/// Line: 565
+void IGRAPH_FINALLY_REAL(igraph_finally_func_t *func, void *ptr)
+
+/// Line: 565
+void IGRAPH_FINALLY_REAL(igraph_finally_func_t *func, void *ptr)
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_datatype.h
+
+/**
+ * \ingroup internal
+ * \struct igraph_t
+ * \brief The internal data structure for storing graphs.
+ *
+ * It is simple and efficient. It has the following members:
+ * - <b>n</b> The number of vertices, redundant.
+ * - <b>directed</b> Whether the graph is directed.
+ * - <b>from</b> The first column of the edge list.
+ * - <b>to</b> The second column of the edge list.
+ * - <b>oi</b> The index of the edge list by the first column. Thus
+ *   the first edge according to this order goes from
+ *   \c from[oi[0]] to \c to[oi[0]]. The length of
+ *   this vector is the same as the number of edges in the graph.
+ * - <b>ii</b> The index of the edge list by the second column.
+ *   The length of this vector is the same as the number of edges.
+ * - <b>os</b> Contains pointers to the edgelist (\c from
+ *   and \c to for every vertex. The first edge \em from
+ *   vertex \c v is edge no. \c from[oi[os[v]]] if
+ *   \c os[v]<os[v+1]. If \c os[v]==os[v+1] then
+ *   there are no edges \em from node \c v. Its length is
+ *   the number of vertices plus one, the last element is always the
+ *   same as the number of edges and is contained only to ease the
+ *   queries.
+ * - <b>is</b> This is basically the same as <b>os</b>, but this time
+ *   for the incoming edges.
+ *
+ * For undirected graphs, the same edge list is stored, i.e. an
+ * undirected edge is stored only once. Currently, undirected edges
+ * are canonicalized so that the index of the 'from' vertex is not greater
+ * than the index of the 'to' vertex. Thus, if v1 <= v2, only the edge (v1, v2)
+ * needs to be searched for, not (v2, v1), to determine if v1 and v2 are connected.
+ * However, this fact is NOT guaranteed by the documented public API,
+ * and should not be relied upon by the implementation of any functions,
+ * except those belonging to the minimal API in type_indexededgelist.c.
+ *
+ * The storage requirements for a graph with \c |V| vertices
+ * and \c |E| edges is \c O(|E|+|V|).
+ */
+/// Line: 120
+typedef struct igraph_s {
+    igraph_integer_t n;
+    igraph_bool_t directed;
+    igraph_vector_int_t from;
+    igraph_vector_int_t to;
+    igraph_vector_int_t oi;
+    igraph_vector_int_t ii;
+    igraph_vector_int_t os;
+    igraph_vector_int_t is;
+    void *attr;
+    igraph_i_property_cache_t *cache;
+} igraph_t
+
+/// Line: 35
+enum {
+    /* Stores whether the graph has at least one self-loop. */
+    IGRAPH_PROP_HAS_LOOP = 0,
+
+    /* Stores whether the graph has at least one multi-edge, taking into account
+     * edge directions in directed graphs. In other words, this property should
+     * be false for a directed graph with edges (a, b) and (b, a), and true
+     * for a directed graph with edges (a, b) and (a, b) again. */
+    IGRAPH_PROP_HAS_MULTI,
+
+    /* Stores whether the graph has at least one reciprocal edge pair. Ignored
+     * in undirected graphs. This property should be true for a directed graph
+     * with edges (a, b) and (b, a), and false for a directed graph with
+     * edges (a, b) and (a, b) again. Self-loops (a, a) are not considered
+     * reciprocal. */
+    IGRAPH_PROP_HAS_MUTUAL,
+
+    /* Stores whether the graph is weakly connected. */
+    IGRAPH_PROP_IS_WEAKLY_CONNECTED,
+
+    /* Stores whether the graph is strongly connected. Ignored in undirected graphs. */
+    IGRAPH_PROP_IS_STRONGLY_CONNECTED,
+
+    /* Stores whether the graph is a directed acyclic graph. Not used for
+     * undirected graphs. */
+    IGRAPH_PROP_IS_DAG,
+
+    /* Stores whether the graph is a forest, i.e. an undirected or directed
+     * graph that is cycle-free even if we ignore edge directions. */
+    IGRAPH_PROP_IS_FOREST,
+
+    /* Dummy value used to count enum values */
+    IGRAPH_PROP_I_SIZE
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_vector_type.h
+
+/**
+ * Vector, dealing with arrays efficiently.
+ * \ingroup types
+ */
+/// Line: 32
+typedef struct TYPE(igraph_vector) {
+    BASE* stor_begin;
+    BASE* stor_end;
+    BASE* end;
+} TYPE(igraph_vector)
+
+/**
+ * Vector, dealing with arrays efficiently.
+ * \ingroup types
+ */
+/// Line: 32
+typedef struct TYPE(igraph_vector) {
+    BASE* stor_begin;
+    BASE* stor_end;
+    BASE* end;
+} TYPE(igraph_vector)
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_constants.h
+
+/* Do not renumber the following values! Some internal code treats them as bitmasks
+ * and assumes that IGRAPH_ALL == IGRAPH_IN | IGRAPH_OUT and IGRAPH_IN & IGRAPH_OUT == 0. */
+/// Line: 51
+typedef enum { IGRAPH_OUT = 1, IGRAPH_IN = 2, IGRAPH_ALL = 3 } igraph_neimode_t
+
+/* Note for the enum below: yes, IGRAPH_LOOPS_TWICE is 1, and IGRAPH_LOOPS_ONCE
+ * is 2. This is intentional, for the sake of backwards compatibility with
+ * earlier versions where we only had IGRAPH_LOOPS and it meant
+ * IGRAPH_LOOPS_TWICE */
+/// Line: 41
+enum { IGRAPH_NO_LOOPS = 0, IGRAPH_LOOPS = 1, IGRAPH_LOOPS_TWICE = 1, IGRAPH_LOOPS_ONCE = 2 }
+
+/// Line: 43
+enum { IGRAPH_NO_MULTIPLE = 0, IGRAPH_MULTIPLE = 1 }
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_types.h
+
+/* IGRAPH_BOOL_TYPE is set to 'bool' by default, and it is not meant to be
+ * overridden, except for the R interface where we know what we are doing.
+ * See igraph_config.h for more info */
+/// Line: 61
+typedef IGRAPH_BOOL_TYPE igraph_bool_t
+
+/// Line: 47
+typedef int64_t igraph_integer_t
+
+/// Line: 48
+typedef uint64_t igraph_uint_t
+
+/// Line: 56
+typedef double igraph_real_t
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_adjlist.h
+
+/// Line: 115
+typedef struct igraph_lazy_adjlist_t {
+    const igraph_t *graph;
+    igraph_integer_t length;
+    igraph_vector_int_t **adjs;
+    igraph_neimode_t mode;
+    igraph_loops_t loops;
+    igraph_multiple_t multiple;
+} igraph_lazy_adjlist_t
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_bitset.h
+
+/// Line: 231
+typedef struct {
+    igraph_integer_t size;
+    igraph_uint_t *stor_begin;
+    igraph_uint_t *stor_end;
+} igraph_bitset_t
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/misc/cocitation.c
+
+/**
+ * \ingroup structural
+ * \function igraph_similarity_jaccard_pairs
+ * \brief Jaccard similarity coefficient for given vertex pairs.
+ *
+ * The Jaccard similarity coefficient of two vertices is the number of common
+ * neighbors divided by the number of vertices that are neighbors of at
+ * least one of the two vertices being considered. This function calculates
+ * the pairwise Jaccard similarities for a list of vertex pairs.
+ *
+ * \param graph The graph object to analyze
+ * \param res Pointer to a vector, the result of the calculation will
+ *        be stored here. The number of elements is the same as the number
+ *        of pairs in \p pairs.
+ * \param pairs A vector that contains the pairs for which the similarity
+ *        will be calculated. Each pair is defined by two consecutive elements,
+ *        i.e. the first and second element of the vector specifies the first
+ *        pair, the third and fourth element specifies the second pair and so on.
+ * \param mode The type of neighbors to be used for the calculation in
+ *        directed graphs. Possible values:
+ *        \clist
+ *        \cli IGRAPH_OUT
+ *          the outgoing edges will be considered for each node.
+ *        \cli IGRAPH_IN
+ *          the incoming edges will be considered for each node.
+ *        \cli IGRAPH_ALL
+ *          the directed graph is considered as an undirected one for the
+ *          computation.
+ *        \endclist
+ * \param loops Whether to include the vertices themselves in the neighbor
+ *        sets.
+ * \return Error code:
+ *        \clist
+ *        \cli IGRAPH_ENOMEM
+ *           not enough memory for temporary data.
+ *        \cli IGRAPH_EINVVID
+ *           invalid vertex ID passed.
+ *        \cli IGRAPH_EINVMODE
+ *           invalid mode argument.
+ *        \endclist
+ *
+ * Time complexity: O(nd), n is the number of pairs in the given vector, d is
+ * the (maximum) degree of the vertices in the graph.
+ *
+ * \sa \ref igraph_similarity_jaccard() to calculate the Jaccard similarity
+ *   between all pairs of a vertex set, or \ref igraph_similarity_dice() and
+ *   \ref igraph_similarity_dice_pairs() for a measure very similar to the
+ *   Jaccard coefficient
+ *
+ * \example examples/simple/igraph_similarity.c
+ */
+/// Line: 437
+igraph_error_t igraph_similarity_jaccard_pairs(const igraph_t *graph, igraph_vector_t *res,
+                                    const igraph_vector_int_t *pairs, igraph_neimode_t mode, igraph_bool_t loops) {
+    igraph_integer_t no_of_nodes = igraph_vcount(graph);
+    igraph_lazy_adjlist_t al;
+    igraph_integer_t u, v;
+    igraph_integer_t len_union, len_intersection;
+    igraph_vector_int_t *v1, *v2;
+
+    igraph_integer_t k = igraph_vector_int_size(pairs);
+    if (k % 2 != 0) {
+        IGRAPH_ERROR("Number of elements in `pairs' must be even.", IGRAPH_EINVAL);
+    }
+    if (!igraph_vector_int_isininterval(pairs, 0, no_of_nodes - 1)) {
+        IGRAPH_ERROR("Invalid vertex ID in pairs.", IGRAPH_EINVVID);
+    }
+    IGRAPH_CHECK(igraph_vector_resize(res, k / 2));
+
+    IGRAPH_CHECK(igraph_lazy_adjlist_init(graph, &al, mode, IGRAPH_NO_LOOPS, IGRAPH_NO_MULTIPLE));
+    IGRAPH_FINALLY(igraph_lazy_adjlist_destroy, &al);
+
+    if (loops) {
+        /* Add the loop edges */
+
+        igraph_bitset_t seen;
+        IGRAPH_BITSET_INIT_FINALLY(&seen, no_of_nodes);
+
+        for (igraph_integer_t i = 0; i < k; i++) {
+            igraph_integer_t j = VECTOR(*pairs)[i];
+            if (IGRAPH_BIT_TEST(seen, j)) {
+                continue;
+            }
+            IGRAPH_BIT_SET(seen, j);
+            v1 = igraph_lazy_adjlist_get(&al, j);
+            IGRAPH_CHECK_OOM(v1, "Failed to query neighbors.");
+            if (!igraph_vector_int_binsearch(v1, j, &u)) {
+                IGRAPH_CHECK(igraph_vector_int_insert(v1, u, j));
+            }
+        }
+
+        igraph_bitset_destroy(&seen);
+        IGRAPH_FINALLY_CLEAN(1);
+    }
+
+    for (igraph_integer_t i = 0, j = 0; i < k; i += 2, j++) {
+        u = VECTOR(*pairs)[i];
+        v = VECTOR(*pairs)[i + 1];
+
+        if (u == v) {
+            VECTOR(*res)[j] = 1.0;
+            continue;
+        }
+
+        v1 = igraph_lazy_adjlist_get(&al, u);
+        IGRAPH_CHECK_OOM(v1, "Failed to query neighbors.");
+        v2 = igraph_lazy_adjlist_get(&al, v);
+        IGRAPH_CHECK_OOM(v2, "Failed to query neighbors.");
+
+        IGRAPH_CHECK(igraph_i_neisets_intersect(v1, v2, &len_union, &len_intersection));
+        if (len_union > 0) {
+            VECTOR(*res)[j] = ((igraph_real_t)len_intersection) / len_union;
+        } else {
+            VECTOR(*res)[j] = 0.0;
+        }
+    }
+
+    igraph_lazy_adjlist_destroy(&al);
+    IGRAPH_FINALLY_CLEAN(1);
+
+    return IGRAPH_SUCCESS;
+}
+
+/// Line: 265
+static igraph_error_t igraph_i_neisets_intersect(
+    const igraph_vector_int_t *v1, const igraph_vector_int_t *v2,
+    igraph_integer_t *len_union, igraph_integer_t *len_intersection
+) {
+    /* ASSERT: v1 and v2 are sorted */
+    igraph_integer_t n1 = igraph_vector_int_size(v1), n2 = igraph_vector_int_size(v2);
+    *len_intersection = igraph_vector_int_intersection_size_sorted(v1, v2);
+    *len_union = n1 + n2 - *len_intersection;
+    return IGRAPH_SUCCESS;
+}
+
+/**
+ * \ingroup structural
+ * \function igraph_similarity_jaccard_es
+ * \brief Jaccard similarity coefficient for a given edge selector.
+ *
+ * The Jaccard similarity coefficient of two vertices is the number of common
+ * neighbors divided by the number of vertices that are neighbors of at
+ * least one of the two vertices being considered. This function calculates
+ * the pairwise Jaccard similarities for the endpoints of edges in a given edge
+ * selector.
+ *
+ * \param graph The graph object to analyze
+ * \param res Pointer to a vector, the result of the calculation will
+ *        be stored here. The number of elements is the same as the number
+ *        of edges in \p es.
+ * \param es An edge selector that specifies the edges to be included in the
+ *        result.
+ * \param mode The type of neighbors to be used for the calculation in
+ *        directed graphs. Possible values:
+ *        \clist
+ *        \cli IGRAPH_OUT
+ *          the outgoing edges will be considered for each node.
+ *        \cli IGRAPH_IN
+ *          the incoming edges will be considered for each node.
+ *        \cli IGRAPH_ALL
+ *          the directed graph is considered as an undirected one for the
+ *          computation.
+ *        \endclist
+ * \param loops Whether to include the vertices themselves in the neighbor
+ *        sets.
+ * \return Error code:
+ *        \clist
+ *        \cli IGRAPH_ENOMEM
+ *           not enough memory for temporary data.
+ *        \cli IGRAPH_EINVVID
+ *           invalid vertex ID passed.
+ *        \cli IGRAPH_EINVMODE
+ *           invalid mode argument.
+ *        \endclist
+ *
+ * Time complexity: O(nd), n is the number of edges in the edge selector, d is
+ * the (maximum) degree of the vertices in the graph.
+ *
+ * \sa \ref igraph_similarity_jaccard() and \ref igraph_similarity_jaccard_pairs()
+ *   to calculate the Jaccard similarity between all pairs of a vertex set or
+ *   some selected vertex pairs, or \ref igraph_similarity_dice(),
+ *   \ref igraph_similarity_dice_pairs() and \ref igraph_similarity_dice_es() for a
+ *   measure very similar to the Jaccard coefficient
+ *
+ * \example examples/simple/igraph_similarity.c
+ */
+/// Line: 559
+igraph_error_t igraph_similarity_jaccard_es(const igraph_t *graph, igraph_vector_t *res,
+                                 const igraph_es_t es, igraph_neimode_t mode, igraph_bool_t loops) {
+
+    igraph_vector_int_t pairs;
+
+    IGRAPH_VECTOR_INT_INIT_FINALLY(&pairs, 0);
+    IGRAPH_CHECK(igraph_edges(graph, es, &pairs));
+    IGRAPH_CHECK(igraph_similarity_jaccard_pairs(graph, res, &pairs, mode, loops));
+    igraph_vector_int_destroy(&pairs);
+    IGRAPH_FINALLY_CLEAN(1);
+
+    return IGRAPH_SUCCESS;
+}
+
+/**
+ * \ingroup structural
+ * \function igraph_similarity_dice_pairs
+ * \brief Dice similarity coefficient for given vertex pairs.
+ *
+ * The Dice similarity coefficient of two vertices is twice the number of common
+ * neighbors divided by the sum of the degrees of the vertices. This function
+ * calculates the pairwise Dice similarities for a list of vertex pairs.
+ *
+ * \param graph The graph object to analyze
+ * \param res Pointer to a vector, the result of the calculation will
+ *        be stored here. The number of elements is the same as the number
+ *        of pairs in \p pairs.
+ * \param pairs A vector that contains the pairs for which the similarity
+ *        will be calculated. Each pair is defined by two consecutive elements,
+ *        i.e. the first and second element of the vector specifies the first
+ *        pair, the third and fourth element specifies the second pair and so on.
+ * \param mode The type of neighbors to be used for the calculation in
+ *        directed graphs. Possible values:
+ *        \clist
+ *        \cli IGRAPH_OUT
+ *          the outgoing edges will be considered for each node.
+ *        \cli IGRAPH_IN
+ *          the incoming edges will be considered for each node.
+ *        \cli IGRAPH_ALL
+ *          the directed graph is considered as an undirected one for the
+ *          computation.
+ *        \endclist
+ * \param loops Whether to include the vertices themselves as their own
+ *        neighbors.
+ * \return Error code:
+ *        \clist
+ *        \cli IGRAPH_ENOMEM
+ *           not enough memory for temporary data.
+ *        \cli IGRAPH_EINVVID
+ *           invalid vertex ID passed.
+ *        \cli IGRAPH_EINVMODE
+ *           invalid mode argument.
+ *        \endclist
+ *
+ * Time complexity: O(nd), n is the number of pairs in the given vector, d is
+ * the (maximum) degree of the vertices in the graph.
+ *
+ * \sa \ref igraph_similarity_dice() to calculate the Dice similarity
+ *   between all pairs of a vertex set, or \ref igraph_similarity_jaccard(),
+ *   \ref igraph_similarity_jaccard_pairs() and \ref igraph_similarity_jaccard_es()
+ *   for a measure very similar to the Dice coefficient
+ *
+ * \example examples/simple/igraph_similarity.c
+ */
+/// Line: 688
+igraph_error_t igraph_similarity_dice_pairs(const igraph_t *graph, igraph_vector_t *res,
+                                 const igraph_vector_int_t *pairs, igraph_neimode_t mode, igraph_bool_t loops) {
+
+    IGRAPH_CHECK(igraph_similarity_jaccard_pairs(graph, res, pairs, mode, loops));
+    igraph_integer_t n = igraph_vector_size(res);
+    for (igraph_integer_t i = 0; i < n; i++) {
+        igraph_real_t x = VECTOR(*res)[i];
+        VECTOR(*res)[i] = 2 * x / (1 + x);
+    }
+
+    return IGRAPH_SUCCESS;
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/graph/type_indexededgelist.c
+
+/**
+ * \ingroup interface
+ * \function igraph_vcount
+ * \brief The number of vertices in a graph.
+ *
+ * \param graph The graph.
+ * \return Number of vertices.
+ *
+ * Time complexity: O(1)
+ */
+/// Line: 823
+igraph_integer_t igraph_vcount(const igraph_t *graph) {
+    return graph->n;
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/core/vector.pmt
+
+/**
+ * \ingroup vector
+ * \function igraph_vector_size
+ * \brief The size of the vector.
+ *
+ * Returns the number of elements stored in the vector.
+ *
+ * \param v The vector object
+ * \return The size of the vector.
+ *
+ * Time complexity: O(1).
+ */
+/// Line: 513
+igraph_integer_t FUNCTION(igraph_vector, size)(const TYPE(igraph_vector) *v) {
+    IGRAPH_ASSERT(v != NULL);
+    IGRAPH_ASSERT(v->stor_begin != NULL);
+    return v->end - v->stor_begin;
+}
+
+/**
+ * \ingroup vector
+ * \function igraph_vector_isininterval
+ * \brief Checks if all elements of a vector are in the given interval.
+ *
+ * \param v The vector object.
+ * \param low The lower limit of the interval (inclusive).
+ * \param high The higher limit of the interval (inclusive).
+ * \return True if the vector is empty or all vector elements
+ *   are in the interval, false otherwise. If any element is NaN, it will
+ *   return false.
+ *
+ * Time complexity: O(n), the number of elements in the vector.
+ */
+/// Line: 1900
+igraph_bool_t FUNCTION(igraph_vector, isininterval)(const TYPE(igraph_vector) *v,
+        BASE low,
+        BASE high) {
+    BASE *ptr;
+    IGRAPH_ASSERT(v != NULL);
+    IGRAPH_ASSERT(v->stor_begin != NULL);
+    for (ptr = v->stor_begin; ptr < v->end; ptr++) {
+        /* Note that the following is not equivalent to *ptr < low || *ptr > high
+         * when *ptr is NaN! */
+        if (!(*ptr >= low && *ptr <= high)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * \ingroup vector
+ * \function igraph_vector_resize
+ * \brief Resize the vector.
+ *
+ * </para><para>
+ * Note that this function does not free any memory, just sets the
+ * size of the vector to the given one. It can on the other hand
+ * allocate more memory if the new size is larger than the previous
+ * one. In this case the newly appeared elements in the vector are
+ * \em not set to zero, they are uninitialized.
+ * \param v The vector object
+ * \param new_size The new size of the vector.
+ * \return Error code,
+ *         \c IGRAPH_ENOMEM if there is not enough
+ *         memory. Note that this function \em never returns an error
+ *         if the vector is made smaller.
+ * \sa \ref igraph_vector_reserve() for allocating memory for future
+ * extensions of a vector. \ref igraph_vector_resize_min() for
+ * deallocating the unnneded memory for a vector.
+ *
+ * Time complexity: O(1) if the new
+ * size is smaller, operating system dependent if it is larger. In the
+ * latter case it is usually around
+ * O(n),
+ * n is the new size of the vector.
+ */
+/// Line: 1281
+igraph_error_t FUNCTION(igraph_vector, resize)(TYPE(igraph_vector)* v, igraph_integer_t new_size) {
+    IGRAPH_ASSERT(v != NULL);
+    IGRAPH_ASSERT(v->stor_begin != NULL);
+    IGRAPH_CHECK(FUNCTION(igraph_vector, reserve)(v, new_size));
+    v->end = v->stor_begin + new_size;
+    return IGRAPH_SUCCESS;
+}
+
+/**
+ * \ingroup vector
+ * \function igraph_vector_binsearch
+ * \brief Finds an element by binary searching a sorted vector.
+ *
+ * </para><para>
+ * It is assumed that the vector is sorted. If the specified element
+ * (\p what) is not in the vector, then the
+ * position of where it should be inserted (to keep the vector sorted)
+ * is returned. If the vector contains any NaN values, the returned
+ * value is undefined and \p pos may point to any position.
+ *
+ * \param v The \type igraph_vector_t object.
+ * \param what The element to search for.
+ * \param pos Pointer to an \type igraph_integer_t. This is set to the
+ *   position of an instance of \p what in the
+ *   vector if it is present. If \p v does not
+ *   contain \p what then
+ *   \p pos is set to the position to which it
+ *   should be inserted (to keep the the vector sorted of course).
+ * \return True if \p what is found in the vector, false otherwise.
+ *
+ * Time complexity: O(log(n)),
+ * n is the number of elements in
+ * \p v.
+ */
+/// Line: 2199
+igraph_bool_t FUNCTION(igraph_vector, binsearch)(const TYPE(igraph_vector) *v,
+        BASE what, igraph_integer_t *pos) {
+    return FUNCTION(igraph_i_vector, binsearch_slice)(v, what, pos,
+            0, FUNCTION(igraph_vector, size)(v));
+}
+
+/**
+ * \ingroup vector
+ * \function igraph_vector_insert
+ * \brief Inserts a single element into a vector.
+ *
+ * Note that this function does not do range checking. Insertion will shift the
+ * elements from the position given to the end of the vector one position to the
+ * right, and the new element will be inserted in the empty space created at
+ * the given position. The size of the vector will increase by one.
+ *
+ * \param v The vector object.
+ * \param pos The position where the new element is to be inserted.
+ * \param value The new element to be inserted.
+ */
+/// Line: 601
+igraph_error_t FUNCTION(igraph_vector, insert)(
+        TYPE(igraph_vector) *v, igraph_integer_t pos, BASE value) {
+    igraph_integer_t size = FUNCTION(igraph_vector, size)(v);
+    IGRAPH_ASSERT(0 <= pos && pos <= size);
+    if (size == IGRAPH_INTEGER_MAX) {
+        IGRAPH_ERROR("Cannot insert to vector, already at maximum size.", IGRAPH_EOVERFLOW);
+    }
+    IGRAPH_CHECK(FUNCTION(igraph_vector, resize)(v, size + 1));
+    if (pos < size) {
+        memmove(v->stor_begin + pos + 1, v->stor_begin + pos,
+                sizeof(BASE) * (size - pos));
+    }
+    v->stor_begin[pos] = value;
+    return IGRAPH_SUCCESS;
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/core/error.c
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function IGRAPH_FINALLY_CLEAN
+ * \brief Signals clean deallocation of objects.
+ *
+ * Removes the specified number of objects from the stack of
+ * temporarily allocated objects. It is typically called
+ * immediately after manually destroying the objects:
+ *
+ * <programlisting>
+ * igraph_vector_t vector;
+ * igraph_vector_init(&amp;vector, 10);
+ * IGRAPH_FINALLY(igraph_vector_destroy, &amp;vector);
+ * // use vector
+ * igraph_vector_destroy(&amp;vector);
+ * IGRAPH_FINALLY_CLEAN(1);
+ * </programlisting>
+ *
+ * \param num The number of objects to remove from the bookkeeping
+ *   stack.
+ */
+/// Line: 327
+void IGRAPH_FINALLY_CLEAN(int minus) {
+    igraph_i_finally_stack_size -= minus;
+    if (igraph_i_finally_stack_size < 0) {
+        int left = igraph_i_finally_stack_size + minus;
+        /* Reset finally stack in case fatal error handler does a longjmp instead of terminating the process: */
+        igraph_i_reset_finally_stack();
+        IGRAPH_FATALF("Corrupt finally stack: trying to pop %d element(s) when only %d left.", minus, left);
+    }
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function igraph_error
+ * \brief Reports an error.
+ *
+ * \a igraph functions usually call this function (most often via the
+ * \ref IGRAPH_ERROR macro) if they notice an error.
+ * It calls the currently installed error handler function with the
+ * supplied arguments.
+ *
+ * \param reason Textual description of the error.
+ * \param file The source file in which the error was noticed.
+ * \param line The number of line in the source file which triggered the
+ *   error.
+ * \param igraph_errno The \a igraph error code.
+ * \return the error code (if it returns)
+ *
+ * \sa \ref igraph_errorf()
+ */
+/// Line: 199
+igraph_error_t igraph_error(const char *reason, const char *file, int line,
+                            igraph_error_t igraph_errno) {
+
+    if (igraph_i_error_handler) {
+        igraph_i_error_handler(reason, file, line, igraph_errno);
+#ifndef USING_R
+    }  else {
+        igraph_error_handler_abort(reason, file, line, igraph_errno);
+#endif
+    }
+    return igraph_errno;
+}
+
+/**
+ * \function IGRAPH_FINALLY_CLEAN
+ * \brief Signals clean deallocation of objects.
+ *
+ * Removes the specified number of objects from the stack of
+ * temporarily allocated objects. It is typically called
+ * immediately after manually destroying the objects:
+ *
+ * <programlisting>
+ * igraph_vector_t vector;
+ * igraph_vector_init(&amp;vector, 10);
+ * IGRAPH_FINALLY(igraph_vector_destroy, &amp;vector);
+ * // use vector
+ * igraph_vector_destroy(&amp;vector);
+ * IGRAPH_FINALLY_CLEAN(1);
+ * </programlisting>
+ *
+ * \param num The number of objects to remove from the bookkeeping
+ *   stack.
+ */
+/// Line: 327
+void IGRAPH_FINALLY_CLEAN(int minus) {
+    igraph_i_finally_stack_size -= minus;
+    if (igraph_i_finally_stack_size < 0) {
+        int left = igraph_i_finally_stack_size + minus;
+        /* Reset finally stack in case fatal error handler does a longjmp instead of terminating the process: */
+        igraph_i_reset_finally_stack();
+        IGRAPH_FATALF("Corrupt finally stack: trying to pop %d element(s) when only %d left.", minus, left);
+    }
+}
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/graph/adjlist.c
+
+/**
+ * \function igraph_lazy_adjlist_init
+ * \brief Initializes a lazy adjacency list.
+ *
+ * Create a lazy adjacency list for vertices. This function only
+ * allocates some memory for storing the vectors of an adjacency list,
+ * but the neighbor vertices are not queried, only at the
+ * \ref igraph_lazy_adjlist_get() calls. Neighbor lists will be returned
+ * in sorted order.
+ *
+ * </para><para>
+ * As of igraph 0.10, there is a small performance cost to setting \p loops
+ * to a different value than \c IGRAPH_LOOPS_TWICE or setting \p multiple to a
+ * different value from \c IGRAPH_MULTIPLE.
+ *
+ * \param graph The input graph.
+ * \param al Pointer to an uninitialized adjacency list object.
+ * \param mode Constant specifying whether to include only outgoing
+ *   (\c IGRAPH_OUT), only incoming (\c IGRAPH_IN),
+ *   or both (\c IGRAPH_ALL) types of neighbors
+ *   in the adjacency list. It is ignored for undirected graphs.
+ * \param loops Specifies how to treat loop edges. \c IGRAPH_NO_LOOPS
+ *   removes loop edges from the adjacency list. \c IGRAPH_LOOPS_ONCE
+ *   makes each loop edge appear only once in the adjacency list of the
+ *   corresponding vertex. \c IGRAPH_LOOPS_TWICE makes loop edges
+ *   appear \em twice in the adjacency list of the corresponding vertex,
+ *   but only if the graph is undirected or \p mode is set to
+ *   \c IGRAPH_ALL.
+ * \param multiple Specifies how to treat multiple (parallel) edges.
+ *   \c IGRAPH_NO_MULTIPLE collapses parallel edges into a single one;
+ *   \c IGRAPH_MULTIPLE keeps the multiplicities of parallel edges
+ *   so the same vertex will appear as many times in the adjacency list of
+ *   another vertex as the number of parallel edges going between the two
+ *   vertices.
+ * \return Error code.
+ *
+ * \sa \ref igraph_neighbors() for getting the neighbor lists of individual
+ * vertices.
+ *
+ * Time complexity: O(|V|), the number of vertices, possibly, but
+ * depends on the underlying memory management too.
+ */
+/// Line: 1089
+igraph_error_t igraph_lazy_adjlist_init(const igraph_t *graph,
+                             igraph_lazy_adjlist_t *al,
+                             igraph_neimode_t mode,
+                             igraph_loops_t loops,
+                             igraph_multiple_t multiple) {
+    if (mode != IGRAPH_IN && mode != IGRAPH_OUT && mode != IGRAPH_ALL) {
+        IGRAPH_ERROR("Cannot create lazy adjacency list view.", IGRAPH_EINVMODE);
+    }
+
+    if (!igraph_is_directed(graph)) {
+        mode = IGRAPH_ALL;
+    }
+
+    /* if we already know there are no multi-edges, they don't need to be removed */
+    if (igraph_i_property_cache_has(graph, IGRAPH_PROP_HAS_MULTI) &&
+        !igraph_i_property_cache_get_bool(graph, IGRAPH_PROP_HAS_MULTI)) {
+        multiple = IGRAPH_MULTIPLE;
+    }
+
+    /* if we already know there are no loops, they don't need to be removed */
+    if (igraph_i_property_cache_has(graph, IGRAPH_PROP_HAS_LOOP) &&
+        !igraph_i_property_cache_get_bool(graph, IGRAPH_PROP_HAS_LOOP)) {
+        if (mode == IGRAPH_ALL) {
+            loops = IGRAPH_LOOPS_TWICE;
+        } else {
+            loops = IGRAPH_LOOPS_ONCE;
+        }
+    }
+
+    al->mode = mode;
+    al->loops = loops;
+    al->multiple = multiple;
+    al->graph = graph;
+
+    al->length = igraph_vcount(graph);
+    al->adjs = IGRAPH_CALLOC(al->length, igraph_vector_int_t*);
+    IGRAPH_CHECK_OOM(al->adjs, "Insufficient memory for creating lazy adjacency list view.");
+
+    return IGRAPH_SUCCESS;
+}
+
+/**
+ * \function igraph_lazy_adjlist_destroy
+ * \brief Deallocate a lazt adjacency list.
+ *
+ * Free all allocated memory for a lazy adjacency list.
+ * \param al The adjacency list to deallocate.
+ *
+ * Time complexity: depends on the memory management.
+ */
+/// Line: 1140
+void igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *al) {
+    igraph_lazy_adjlist_clear(al);
+    IGRAPH_FREE(al->adjs);
+}
+
+/// Line: 1176
+igraph_vector_int_t *igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *al, igraph_integer_t no) {
+    igraph_error_t ret;
+
+    if (al->adjs[no] == NULL) {
+        al->adjs[no] = IGRAPH_CALLOC(1, igraph_vector_int_t);
+        if (al->adjs[no] == NULL) {
+            return NULL;
+        }
+
+        ret = igraph_vector_int_init(al->adjs[no], 0);
+        if (ret != IGRAPH_SUCCESS) {
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_neighbors(al->graph, al->adjs[no], no, al->mode);
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_i_simplify_sorted_int_adjacency_vector_in_place(
+            al->adjs[no], no, al->mode, al->loops, al->multiple, NULL,
+            NULL
+        );
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+    }
+
+    return al->adjs[no];
+}
+
+/// Line: 1176
+igraph_vector_int_t *igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *al, igraph_integer_t no) {
+    igraph_error_t ret;
+
+    if (al->adjs[no] == NULL) {
+        al->adjs[no] = IGRAPH_CALLOC(1, igraph_vector_int_t);
+        if (al->adjs[no] == NULL) {
+            return NULL;
+        }
+
+        ret = igraph_vector_int_init(al->adjs[no], 0);
+        if (ret != IGRAPH_SUCCESS) {
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_neighbors(al->graph, al->adjs[no], no, al->mode);
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_i_simplify_sorted_int_adjacency_vector_in_place(
+            al->adjs[no], no, al->mode, al->loops, al->multiple, NULL,
+            NULL
+        );
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+    }
+
+    return al->adjs[no];
+}
+
+/// Line: 1176
+igraph_vector_int_t *igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *al, igraph_integer_t no) {
+    igraph_error_t ret;
+
+    if (al->adjs[no] == NULL) {
+        al->adjs[no] = IGRAPH_CALLOC(1, igraph_vector_int_t);
+        if (al->adjs[no] == NULL) {
+            return NULL;
+        }
+
+        ret = igraph_vector_int_init(al->adjs[no], 0);
+        if (ret != IGRAPH_SUCCESS) {
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_neighbors(al->graph, al->adjs[no], no, al->mode);
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+
+        ret = igraph_i_simplify_sorted_int_adjacency_vector_in_place(
+            al->adjs[no], no, al->mode, al->loops, al->multiple, NULL,
+            NULL
+        );
+        if (ret != IGRAPH_SUCCESS) {
+            igraph_vector_int_destroy(al->adjs[no]);
+            IGRAPH_FREE(al->adjs[no]);
+            return NULL;
+        }
+    }
+
+    return al->adjs[no];
+}
+
+/**
+ * \function igraph_lazy_adjlist_destroy
+ * \brief Deallocate a lazt adjacency list.
+ *
+ * Free all allocated memory for a lazy adjacency list.
+ * \param al The adjacency list to deallocate.
+ *
+ * Time complexity: depends on the memory management.
+ */
+/// Line: 1140
+void igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *al) {
+    igraph_lazy_adjlist_clear(al);
+    IGRAPH_FREE(al->adjs);
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/src/core/bitset.c
+
+/**
+ * \ingroup bitset
+ * \function igraph_bitset_init
+ * \brief Initializes a bitset object (constructor).
+ *
+ * \experimental
+ *
+ * </para><para>
+ * Every bitset needs to be initialized before it can be used, and
+ * there are a number of initialization functions or otherwise called
+ * constructors. This function constructs a bitset of the given size and
+ * initializes each entry to 0.
+ *
+ * </para><para>
+ * Every bitset object initialized by this function should be
+ * destroyed (ie. the memory allocated for it should be freed) when it
+ * is not needed anymore, the \ref igraph_bitset_destroy() function is
+ * responsible for this.
+ *
+ * \param bitset Pointer to a not yet initialized bitset object.
+ * \param size The size of the bitset.
+ * \return error code:
+ *       \c IGRAPH_ENOMEM if there is not enough memory.
+ *
+ * Time complexity: operating system dependent, the amount of
+ * \quote time \endquote required to allocate
+ * O(n/w) elements,
+ * n is the number of elements.
+ * w is the word size of the machine (32 or 64).
+ */
+/// Line: 174
+igraph_error_t igraph_bitset_init(igraph_bitset_t *bitset, igraph_integer_t size) {
+    igraph_integer_t alloc_size = IGRAPH_BIT_NSLOTS(size);
+    bitset->stor_begin = IGRAPH_CALLOC(alloc_size, igraph_uint_t);
+    IGRAPH_CHECK_OOM(bitset->stor_begin, "Cannot initialize bitset.");
+    bitset->size = size;
+    bitset->stor_end = bitset->stor_begin + alloc_size;
+    return IGRAPH_SUCCESS;
+}
+
+/**
+ * \ingroup bitset
+ * \function igraph_bitset_destroy
+ * \brief Destroys a bitset object.
+ *
+ * \experimental
+ *
+ * All bitsets initialized by \ref igraph_bitset_init() should be properly
+ * destroyed by this function. A destroyed bitset needs to be
+ * reinitialized by \ref igraph_bitset_init() or
+ * another constructor.
+ *
+ * \param bitset Pointer to the (previously initialized) bitset object to
+ *        destroy.
+ *
+ * Time complexity: operating system dependent.
+ */
+/// Line: 201
+void igraph_bitset_destroy(igraph_bitset_t *bitset) {
+    IGRAPH_ASSERT(bitset != NULL);
+    IGRAPH_FREE(bitset->stor_begin);
+    bitset->size = 0;
+}
+
+/**
+ * \ingroup bitset
+ * \function igraph_bitset_destroy
+ * \brief Destroys a bitset object.
+ *
+ * \experimental
+ *
+ * All bitsets initialized by \ref igraph_bitset_init() should be properly
+ * destroyed by this function. A destroyed bitset needs to be
+ * reinitialized by \ref igraph_bitset_init() or
+ * another constructor.
+ *
+ * \param bitset Pointer to the (previously initialized) bitset object to
+ *        destroy.
+ *
+ * Time complexity: operating system dependent.
+ */
+/// Line: 201
+void igraph_bitset_destroy(igraph_bitset_t *bitset) {
+    IGRAPH_ASSERT(bitset != NULL);
+    IGRAPH_FREE(bitset->stor_begin);
+    bitset->size = 0;
+}
+
+---- File: /home/sproid/_workspace/vu/proj-master/experiments/historic/igraph/include/igraph_iterators.h
+
+/// Line: 270
+typedef struct igraph_es_t {
+    igraph_es_type_t type;
+    union {
+        igraph_integer_t vid;
+        igraph_integer_t eid;
+        const igraph_vector_int_t *vecptr;
+        struct {
+            igraph_integer_t vid;
+            igraph_neimode_t mode;
+        } incident;
+        struct {
+            igraph_integer_t start; /* first index (inclusive) */
+            igraph_integer_t end;   /* last index (exclusive) */
+        } range;
+        struct {
+            const igraph_vector_int_t *ptr;
+            igraph_bool_t mode;
+        } path;
+        struct {
+            igraph_integer_t from;
+            igraph_integer_t to;
+            igraph_bool_t directed;
+        } between;
+    } data;
+} igraph_es_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vcount(const igraph_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_resize(igraph_vector_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_REAL(igraph_finally_func_t *, void *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_bitset_init(igraph_bitset_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_bitset_destroy(igraph_bitset_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_REAL(igraph_finally_func_t *, void *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_binsearch(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_bitset_destroy(igraph_bitset_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_CLEAN(int)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_i_neisets_intersect(const igraph_vector_int_t *, const igraph_vector_int_t *, igraph_integer_t *, igraph_integer_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)";
+"igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_CLEAN(int)";
+"igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_vector_int_size(const igraph_vector_int_t *)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_size(const igraph_vector_int_t *)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_vector_int_size(const igraph_vector_int_t *)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_size(const igraph_vector_int_t *)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)";
+"igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_isininterval(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "igraph_vector_reserve(igraph_vector_t *, igraph_integer_t)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_resize(igraph_vector_t *, igraph_integer_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_is_directed(const igraph_t *)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_i_property_cache_has(const igraph_t *, igraph_cached_property_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_i_property_cache_get_bool(const igraph_t *, igraph_cached_property_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_i_property_cache_has(const igraph_t *, igraph_cached_property_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_i_property_cache_get_bool(const igraph_t *, igraph_cached_property_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_vcount(const igraph_t *)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "calloc(size_t, size_t)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "__builtin_expect(long, long)";
+"igraph_lazy_adjlist_init(const igraph_t *, igraph_lazy_adjlist_t *, igraph_neimode_t, igraph_loops_t, igraph_multiple_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)" -> "igraph_lazy_adjlist_clear(igraph_lazy_adjlist_t *)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)" -> "free(void *)";
+"igraph_bitset_init(igraph_bitset_t *, igraph_integer_t)";
+"igraph_bitset_init(igraph_bitset_t *, igraph_integer_t)" -> "calloc(size_t, size_t)";
+"igraph_bitset_init(igraph_bitset_t *, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_bitset_init(igraph_bitset_t *, igraph_integer_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_bitset_destroy(igraph_bitset_t *)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "__builtin_expect(long, long)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "calloc(size_t, size_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_init(igraph_vector_int_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_neighbors(const igraph_t *, igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_i_simplify_sorted_int_adjacency_vector_in_place(igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t, igraph_loops_t, igraph_multiple_t, igraph_bool_t *, igraph_bool_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_vector_int_binsearch(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t *)";
+"igraph_vector_int_binsearch(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t *)" -> "igraph_i_vector_int_binsearch_slice(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t *, igraph_integer_t, igraph_integer_t)";
+"igraph_vector_int_binsearch(const igraph_vector_int_t *, igraph_integer_t, igraph_integer_t *)" -> "igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_vector_int_resize(igraph_vector_int_t *, igraph_integer_t)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "__builtin_expect(long, long)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_vector_int_insert(igraph_vector_int_t *, igraph_integer_t, igraph_integer_t)" -> "memmove(void *, const void *, size_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_bitset_destroy(igraph_bitset_t *)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "__builtin_expect(long, long)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "igraph_fatal(const char *, const char *, int)";
+"igraph_bitset_destroy(igraph_bitset_t *)" -> "free(void *)";
+"IGRAPH_FINALLY_CLEAN(int)";
+"IGRAPH_FINALLY_CLEAN(int)" -> "igraph_i_reset_finally_stack()";
+"IGRAPH_FINALLY_CLEAN(int)" -> "igraph_fatalf(const char *, const char *, int, ...)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "calloc(size_t, size_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_init(igraph_vector_int_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_neighbors(const igraph_t *, igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_i_simplify_sorted_int_adjacency_vector_in_place(igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t, igraph_loops_t, igraph_multiple_t, igraph_bool_t *, igraph_bool_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "calloc(size_t, size_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_init(igraph_vector_int_t *, igraph_integer_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_neighbors(const igraph_t *, igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_i_simplify_sorted_int_adjacency_vector_in_place(igraph_vector_int_t *, igraph_integer_t, igraph_neimode_t, igraph_loops_t, igraph_multiple_t, igraph_bool_t *, igraph_bool_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_i_lazy_adjlist_get_real(igraph_lazy_adjlist_t *, igraph_integer_t)" -> "free(void *)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_i_neisets_intersect(const igraph_vector_int_t *, const igraph_vector_int_t *, igraph_integer_t *, igraph_integer_t *)";
+"igraph_i_neisets_intersect(const igraph_vector_int_t *, const igraph_vector_int_t *, igraph_integer_t *, igraph_integer_t *)" -> "igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_i_neisets_intersect(const igraph_vector_int_t *, const igraph_vector_int_t *, igraph_integer_t *, igraph_integer_t *)" -> "igraph_vector_int_size(const igraph_vector_int_t *)";
+"igraph_i_neisets_intersect(const igraph_vector_int_t *, const igraph_vector_int_t *, igraph_integer_t *, igraph_integer_t *)" -> "igraph_vector_int_intersection_size_sorted(const igraph_vector_int_t *, const igraph_vector_int_t *)";
+"igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_i_error_handler";
+"igraph_error(const char *, const char *, int, igraph_error_t)" -> "igraph_error_handler_abort(const char *, const char *, int, igraph_error_t)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)" -> "igraph_lazy_adjlist_clear(igraph_lazy_adjlist_t *)";
+"igraph_lazy_adjlist_destroy(igraph_lazy_adjlist_t *)" -> "free(void *)";
+"IGRAPH_FINALLY_CLEAN(int)";
+"IGRAPH_FINALLY_CLEAN(int)" -> "igraph_i_reset_finally_stack()";
+"IGRAPH_FINALLY_CLEAN(int)" -> "igraph_fatalf(const char *, const char *, int, ...)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_init(igraph_vector_int_t *, igraph_integer_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_REAL(igraph_finally_func_t *, void *)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_edges(const igraph_t *, igraph_es_t, igraph_vector_int_t *)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_int_destroy(igraph_vector_int_t *)";
+"igraph_similarity_jaccard_es(const igraph_t *, igraph_vector_t *, const igraph_es_t, igraph_neimode_t, igraph_bool_t)" -> "IGRAPH_FINALLY_CLEAN(int)";
+"igraph_similarity_dice_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)";
+"igraph_similarity_dice_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_similarity_jaccard_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)";
+"igraph_similarity_dice_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "__builtin_expect(long, long)";
+"igraph_similarity_dice_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_error(const char *, const char *, int, igraph_error_t)";
+"igraph_similarity_dice_pairs(const igraph_t *, igraph_vector_t *, const igraph_vector_int_t *, igraph_neimode_t, igraph_bool_t)" -> "igraph_vector_size(const igraph_vector_t *)";
+}

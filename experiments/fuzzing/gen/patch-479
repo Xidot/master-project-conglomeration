@@ -1,0 +1,66 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15264,6 +15264,9 @@
+     case JS_TAG_BIG_INT:
+         atom = JS_ATOM_bigint;
+         break;
++    case JS_TAG_MODULE:
++        atom = JS_ATOM_object;
++        break;
+     case JS_TAG_INT:
+     case JS_TAG_FLOAT64:
+         atom = JS_ATOM_number;
+@@ -15300,10 +15303,12 @@
+         {
+             JSObject *p;
+             p = JS_VALUE_GET_OBJ(op1);
++            if (JS_IsFunction(ctx, op1)) {
++                atom = JS_ATOM_function;
++            }
+             if (unlikely(p->is_HTMLDDA))
+                 atom = JS_ATOM_undefined;
+-            else if (JS_IsFunction(ctx, op1))
+-                atom = JS_ATOM_function;
++            else if (p->is_HTMLDDA)
+             else
+                 goto obj_type;
+         }
+@@ -15308,6 +15313,8 @@
+         }
+         break;
+     case JS_TAG_NULL:
++        atom = JS_ATOM_object;
++        break;
+     obj_type:
+         atom = JS_ATOM_object;
+         break;
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15264,6 +15264,9 @@
+     case JS_TAG_BIG_INT:
+         atom = JS_ATOM_bigint;
+         break;
++    if (tag == JS_TAG_MODULE)
++        funlogline();
+     case JS_TAG_MODULE:
+         atom = JS_ATOM_object;
+         break;
+@@ -15300,6 +15303,8 @@
+         {
+             JSObject *p;
+             p = JS_VALUE_GET_OBJ(op1);
++            if (JS_IsFunction(ctx, op1) && p->is_HTMLDDA)
++                funlogline();
+             if (unlikely(p->is_HTMLDDA))
+                 atom = JS_ATOM_undefined;
+             else if (JS_IsFunction(ctx, op1))
+@@ -15308,6 +15313,8 @@
+         }
+         break;
+     case JS_TAG_NULL:
++        if (1) funlogline(); // null falling through to obj_type
++        atom = JS_ATOM_object;
++        break;
+     obj_type:
+         atom = JS_ATOM_object;
+         break;

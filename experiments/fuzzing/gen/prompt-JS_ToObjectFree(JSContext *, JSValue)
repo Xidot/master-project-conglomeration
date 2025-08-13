@@ -1,0 +1,296 @@
+Target function: "JS_ToObjectFree(JSContext *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 682
+static inline void JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValue(ctx, v);
+        }
+    }
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 38347
+static JSValue JS_ToObjectFree(JSContext *ctx, JSValue val)
+{
+    JSValue obj = JS_ToObject(ctx, val);
+    JS_FreeValue(ctx, val);
+    return obj;
+}
+
+/// Line number here: 119
+enum {
+    /* classid tag        */    /* union usage   | properties */
+    JS_CLASS_OBJECT = 1,        /* must be first */
+    JS_CLASS_ARRAY,             /* u.array       | length */
+    JS_CLASS_ERROR,
+    JS_CLASS_NUMBER,            /* u.object_data */
+    JS_CLASS_STRING,            /* u.object_data */
+    JS_CLASS_BOOLEAN,           /* u.object_data */
+    JS_CLASS_SYMBOL,            /* u.object_data */
+    JS_CLASS_ARGUMENTS,         /* u.array       | length */
+    JS_CLASS_MAPPED_ARGUMENTS,  /*               | length */
+    JS_CLASS_DATE,              /* u.object_data */
+    JS_CLASS_MODULE_NS,
+    JS_CLASS_C_FUNCTION,        /* u.cfunc */
+    JS_CLASS_BYTECODE_FUNCTION, /* u.func */
+    JS_CLASS_BOUND_FUNCTION,    /* u.bound_function */
+    JS_CLASS_C_FUNCTION_DATA,   /* u.c_function_data_record */
+    JS_CLASS_GENERATOR_FUNCTION, /* u.func */
+    JS_CLASS_FOR_IN_ITERATOR,   /* u.for_in_iterator */
+    JS_CLASS_REGEXP,            /* u.regexp */
+    JS_CLASS_ARRAY_BUFFER,      /* u.array_buffer */
+    JS_CLASS_SHARED_ARRAY_BUFFER, /* u.array_buffer */
+    JS_CLASS_UINT8C_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT8_ARRAY,        /* u.array (typed_array) */
+    JS_CLASS_UINT8_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_INT16_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT16_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_INT32_ARRAY,       /* u.array (typed_array) */
+    JS_CLASS_UINT32_ARRAY,      /* u.array (typed_array) */
+    JS_CLASS_BIG_INT64_ARRAY,   /* u.array (typed_array) */
+    JS_CLASS_BIG_UINT64_ARRAY,  /* u.array (typed_array) */
+    JS_CLASS_FLOAT16_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT32_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_FLOAT64_ARRAY,     /* u.array (typed_array) */
+    JS_CLASS_DATAVIEW,          /* u.typed_array */
+    JS_CLASS_BIG_INT,           /* u.object_data */
+    JS_CLASS_MAP,               /* u.map_state */
+    JS_CLASS_SET,               /* u.map_state */
+    JS_CLASS_WEAKMAP,           /* u.map_state */
+    JS_CLASS_WEAKSET,           /* u.map_state */
+    JS_CLASS_MAP_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_SET_ITERATOR,      /* u.map_iterator_data */
+    JS_CLASS_ARRAY_ITERATOR,    /* u.array_iterator_data */
+    JS_CLASS_STRING_ITERATOR,   /* u.array_iterator_data */
+    JS_CLASS_REGEXP_STRING_ITERATOR,   /* u.regexp_string_iterator_data */
+    JS_CLASS_GENERATOR,         /* u.generator_data */
+    JS_CLASS_PROXY,             /* u.proxy_data */
+    JS_CLASS_PROMISE,           /* u.promise_data */
+    JS_CLASS_PROMISE_RESOLVE_FUNCTION,  /* u.promise_function_data */
+    JS_CLASS_PROMISE_REJECT_FUNCTION,   /* u.promise_function_data */
+    JS_CLASS_ASYNC_FUNCTION,            /* u.func */
+    JS_CLASS_ASYNC_FUNCTION_RESOLVE,    /* u.async_function_data */
+    JS_CLASS_ASYNC_FUNCTION_REJECT,     /* u.async_function_data */
+    JS_CLASS_ASYNC_FROM_SYNC_ITERATOR,  /* u.async_from_sync_iterator_data */
+    JS_CLASS_ASYNC_GENERATOR_FUNCTION,  /* u.func */
+    JS_CLASS_ASYNC_GENERATOR,   /* u.async_generator_data */
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_FINALIZATION_REGISTRY,
+    
+    JS_CLASS_INIT_COUNT, /* last entry for predefined classes */
+}
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/* Object class */
+/// Line number here: 38297
+static JSValue JS_ToObject(JSContext *ctx, JSValueConst val)
+{
+    int tag = JS_VALUE_GET_NORM_TAG(val);
+    JSValue obj;
+
+    switch(tag) {
+    default:
+    case JS_TAG_NULL:
+    case JS_TAG_UNDEFINED:
+        return JS_ThrowTypeError(ctx, "cannot convert to object");
+    case JS_TAG_OBJECT:
+    case JS_TAG_EXCEPTION:
+        return JS_DupValue(ctx, val);
+    case JS_TAG_SHORT_BIG_INT:
+    case JS_TAG_BIG_INT:
+        obj = JS_NewObjectClass(ctx, JS_CLASS_BIG_INT);
+        goto set_value;
+    case JS_TAG_INT:
+    case JS_TAG_FLOAT64:
+        obj = JS_NewObjectClass(ctx, JS_CLASS_NUMBER);
+        goto set_value;
+    case JS_TAG_STRING:
+    case JS_TAG_STRING_ROPE:
+        /* XXX: should call the string constructor */
+        {
+            JSValue str;
+            str = JS_ToString(ctx, val); /* ensure that we never store a rope */
+            if (JS_IsException(str))
+                return JS_EXCEPTION;
+            obj = JS_NewObjectClass(ctx, JS_CLASS_STRING);
+            if (!JS_IsException(obj)) {
+                JS_DefinePropertyValue(ctx, obj, JS_ATOM_length,
+                                       JS_NewInt32(ctx, JS_VALUE_GET_STRING(str)->len), 0);
+                JS_SetObjectData(ctx, obj, JS_DupValue(ctx, str));
+            }
+            JS_FreeValue(ctx, str);
+            return obj;
+        }
+    case JS_TAG_BOOL:
+        obj = JS_NewObjectClass(ctx, JS_CLASS_BOOLEAN);
+        goto set_value;
+    case JS_TAG_SYMBOL:
+        obj = JS_NewObjectClass(ctx, JS_CLASS_SYMBOL);
+    set_value:
+        if (!JS_IsException(obj))
+            JS_SetObjectData(ctx, obj, JS_DupValue(ctx, val));
+        return obj;
+    }
+}
+
+/// Line number here: 3479
+typedef struct StringBuffer {
+    JSContext *ctx;
+    JSString *str;
+    int len;
+    int size;
+    int is_wide_char;
+    int error_status;
+} StringBuffer
+
+/// Line number here: 42688
+static JSValue js_string_raw(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    // raw(temp,...a)
+    JSValue cooked, val, raw;
+    StringBuffer b_s, *b = &b_s;
+    int64_t i, n;
+
+    string_buffer_init(ctx, b, 0);
+    raw = JS_UNDEFINED;
+    cooked = JS_ToObject(ctx, argv[0]);
+    if (JS_IsException(cooked))
+        goto exception;
+    raw = JS_ToObjectFree(ctx, JS_GetProperty(ctx, cooked, JS_ATOM_raw));
+    if (JS_IsException(raw))
+        goto exception;
+    if (js_get_length64(ctx, &n, raw) < 0)
+        goto exception;
+
+    for (i = 0; i < n; i++) {
+        val = JS_ToStringFree(ctx, JS_GetPropertyInt64(ctx, raw, i));
+        if (JS_IsException(val))
+            goto exception;
+        string_buffer_concat_value_free(b, val);
+        if (i < n - 1 && i + 1 < argc) {
+            if (string_buffer_concat_value(b, argv[i + 1]))
+                goto exception;
+        }
+    }
+    JS_FreeValue(ctx, cooked);
+    JS_FreeValue(ctx, raw);
+    return string_buffer_end(b);
+
+exception:
+    JS_FreeValue(ctx, cooked);
+    JS_FreeValue(ctx, raw);
+    string_buffer_free(b);
+    return JS_EXCEPTION;
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_ToObjectFree(JSContext *, JSValue)";
+"JS_ToObjectFree(JSContext *, JSValue)" -> "JS_ToObject(JSContext *, JSValue)";
+"JS_ToObjectFree(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_ToObject(JSContext *, JSValue)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_ThrowTypeError(JSContext *, const char *, ...)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_DupValue(JSContext *, JSValue)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_NewObjectClass(JSContext *, int)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_ToString(JSContext *, JSValue)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_DefinePropertyValue(JSContext *, JSValue, JSAtom, JSValue, int)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_NewInt32(JSContext *, int32_t)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_SetObjectData(JSContext *, JSValue, JSValue)";
+"JS_ToObject(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)";
+"JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValue(JSContext *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_init(JSContext *, StringBuffer *, int)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObject(JSContext *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_IsException(JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_ToObjectFree(JSContext *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "js_get_length64(JSContext *, int64_t *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_ToStringFree(JSContext *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_GetPropertyInt64(JSContext *, JSValue, int64_t)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat_value_free(StringBuffer *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_concat_value(StringBuffer *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_end(StringBuffer *)";
+"js_string_raw(JSContext *, JSValue, int, JSValue *)" -> "string_buffer_free(StringBuffer *)";
+}

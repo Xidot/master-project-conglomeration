@@ -1,0 +1,33 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_IsConstructor(JSContext *, JSValue)
+-------------------------
+Based on the code and callgraph provided, I'll analyze the `JS_IsConstructor` function for potential logical bugs.
+
+Potential logical bug locations:
+
+1. :quickjs.c:10276 - The function only checks if the value is an object and returns its `is_constructor` flag, but doesn't verify if the object is actually callable as a constructor.
+
+Here's the diff to instrument this potential issue:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -10276,6 +10276,9 @@
+ {
+     JSObject *p;
+     if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
++        return FALSE;
++    p = JS_VALUE_GET_OBJ(val);
++    if (p->class_id >= JS_CLASS_C_FUNCTION && !p->is_constructor)
++        funlogline();
+         return FALSE;
+     p = JS_VALUE_GET_OBJ(val);
+     return p->is_constructor;
+```
+
+The reasoning for this potential bug:
+
+1. The function assumes any object with `is_constructor` flag set is valid, but doesn't verify if the object is actually callable (like a function). Some objects might incorrectly have this flag set. The instrumentation checks for function-like objects (class_id >= JS_CLASS_C_FUNCTION) that aren't marked as constructors.
+
+Note that this is a conservative check - the actual bug would manifest if an object that shouldn't be constructible has its `is_constructor` flag set incorrectly. The instrumentation helps detect such cases by logging when function-like objects aren't marked as constructors.

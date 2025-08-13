@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15232,6 +15232,8 @@
+     int ret;
+ 
+     arr = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_unscopables);
++    if (JS_IsException(arr) && !JS_IsObject(obj))
++        funlogline();
+     if (JS_IsException(arr))
+         return -1;
+     ret = 0;
+@@ -15239,6 +15241,8 @@
+         val = JS_GetProperty(ctx, arr, atom);
+         ret = JS_ToBoolFree(ctx, val);
+     }
++    if (ret == -1 && !JS_IsObject(arr))
++        funlogline();
+     JS_FreeValue(ctx, arr);
+     return ret;
+ }

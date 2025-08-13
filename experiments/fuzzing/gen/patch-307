@@ -1,0 +1,30 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2850,6 +2850,8 @@
+ #if 0   /* JS_ATOM_NULL is not refcounted: __JS_AtomIsConst() includes 0 */
+     if (unlikely(i == JS_ATOM_NULL)) {
+         p->header.ref_count = INT32_MAX / 2;
++        if (p == NULL)
++            funlogline();
+         return;
+     }
+ #endif
+@@ -2862,6 +2864,8 @@
+         h0 = p->hash & (rt->atom_hash_size - 1);
+         i = rt->atom_hash[h0];
+         p1 = rt->atom_array[i];
++        if (i == 0)
++            funlogline();
+         if (p1 == p) {
+             rt->atom_hash[h0] = p1->hash_next;
+         } else {
+@@ -2886,6 +2890,8 @@
+     if (p->atom_type == JS_ATOM_TYPE_SYMBOL &&
+         p->hash != JS_ATOM_HASH_PRIVATE && p->hash != 0) {
+         /* live weak references are still present on this object: keep
+            it */
++        if (rt->atom_count <= 0)
++            funlogline();
+     } else {
+         js_free_rt(rt, p);
+     }

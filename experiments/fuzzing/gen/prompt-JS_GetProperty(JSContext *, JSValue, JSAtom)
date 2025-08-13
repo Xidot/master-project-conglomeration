@@ -1,0 +1,127 @@
+Target function: "JS_GetProperty(JSContext *, JSValue, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 774
+static js_force_inline JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj,
+                                              JSAtom prop)
+{
+    return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, 0);
+}
+
+/// Line number here: 771
+JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
+                               JSAtom prop, JSValueConst receiver,
+                               JS_BOOL throw_ref_error)
+
+/* object class support */
+/// Line number here: 474
+typedef struct JSPropertyEnum {
+    JS_BOOL is_enumerable;
+    JSAtom atom;
+} JSPropertyEnum
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 2997
+static char **build_envp(JSContext *ctx, JSValueConst obj)
+{
+    uint32_t len, i;
+    JSPropertyEnum *tab;
+    char **envp, *pair;
+    const char *key, *str;
+    JSValue val;
+    size_t key_len, str_len;
+
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, obj,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) < 0)
+        return NULL;
+    envp = js_mallocz(ctx, sizeof(envp[0]) * ((size_t)len + 1));
+    if (!envp)
+        goto fail;
+    for(i = 0; i < len; i++) {
+        val = JS_GetProperty(ctx, obj, tab[i].atom);
+        if (JS_IsException(val))
+            goto fail;
+        str = JS_ToCString(ctx, val);
+        JS_FreeValue(ctx, val);
+        if (!str)
+            goto fail;
+        key = JS_AtomToCString(ctx, tab[i].atom);
+        if (!key) {
+            JS_FreeCString(ctx, str);
+            goto fail;
+        }
+        key_len = strlen(key);
+        str_len = strlen(str);
+        pair = js_malloc(ctx, key_len + str_len + 2);
+        if (!pair) {
+            JS_FreeCString(ctx, key);
+            JS_FreeCString(ctx, str);
+            goto fail;
+        }
+        memcpy(pair, key, key_len);
+        pair[key_len] = '=';
+        memcpy(pair + key_len + 1, str, str_len);
+        pair[key_len + 1 + str_len] = '\0';
+        envp[i] = pair;
+        JS_FreeCString(ctx, key);
+        JS_FreeCString(ctx, str);
+    }
+ done:
+    JS_FreePropertyEnum(ctx, tab, len);
+    return envp;
+ fail:
+    if (envp) {
+        for(i = 0; i < len; i++)
+            js_free(ctx, envp[i]);
+        js_free(ctx, envp);
+        envp = NULL;
+    }
+    goto done;
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"JS_GetProperty(JSContext *, JSValue, JSAtom)" -> "JS_GetPropertyInternal(JSContext *, JSValue, JSAtom, JSValue, int)";
+"build_envp(JSContext *, JSValue)";
+"build_envp(JSContext *, JSValue)" -> "JS_GetOwnPropertyNames(JSContext *, JSPropertyEnum **, uint32_t *, JSValue, int)";
+"build_envp(JSContext *, JSValue)" -> "js_mallocz(JSContext *, size_t)";
+"build_envp(JSContext *, JSValue)" -> "JS_GetProperty(JSContext *, JSValue, JSAtom)";
+"build_envp(JSContext *, JSValue)" -> "JS_IsException(JSValue)";
+"build_envp(JSContext *, JSValue)" -> "JS_ToCString(JSContext *, JSValue)";
+"build_envp(JSContext *, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"build_envp(JSContext *, JSValue)" -> "JS_AtomToCString(JSContext *, JSAtom)";
+"build_envp(JSContext *, JSValue)" -> "JS_FreeCString(JSContext *, const char *)";
+"build_envp(JSContext *, JSValue)" -> "strlen(const char *)";
+"build_envp(JSContext *, JSValue)" -> "js_malloc(JSContext *, size_t)";
+"build_envp(JSContext *, JSValue)" -> "memcpy(void *restrict, const void *restrict, size_t)";
+"build_envp(JSContext *, JSValue)" -> "JS_FreePropertyEnum(JSContext *, JSPropertyEnum *, uint32_t)";
+"build_envp(JSContext *, JSValue)" -> "js_free(JSContext *, void *)";
+}

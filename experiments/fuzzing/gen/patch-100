@@ -1,0 +1,20 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -6131,6 +6131,8 @@
+     /* keep the objects with a refcount > 0 and their children. */
+     list_for_each(el, &rt->gc_obj_list) {
+         p = list_entry(el, JSGCObjectHeader, link);
++        if (p->ref_count <= 0)
++            funlogline();
+         assert(p->ref_count > 0);
+         p->mark = 0; /* reset the mark for the next GC call */
+         mark_children(rt, p, gc_scan_incref_child);
+@@ -6138,6 +6140,8 @@
+ 
+     /* restore the refcount of the objects to be deleted. */
+     list_for_each(el, &rt->tmp_obj_list) {
++        if (p->ref_count <= 0)
++            funlogline();
+         p = list_entry(el, JSGCObjectHeader, link);
+         mark_children(rt, p, gc_scan_incref_child2);
+     }

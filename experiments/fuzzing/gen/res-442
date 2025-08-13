@@ -1,0 +1,56 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_NewObjectFromShape(JSContext *, JSShape *, JSClassID)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `JS_NewObjectFromShape` function:
+
+:quickjs.c:JS_NewObjectFromShape:5060
+:quickjs.c:JS_NewObjectFromShape:5085
+:quickjs.c:JS_NewObjectFromShape:5131
+
+---
+
+1. Line 5060: No check for NULL `ctx` or `sh` parameters which could lead to crashes
+2. Line 5085: Memory leak if `p->prop` allocation fails but `p` isn't freed before jumping to fail
+3. Line 5131: No validation of `class_id` against `JS_CLASS_INIT_COUNT` which could lead to out-of-bounds access in `ctx->rt->class_array`
+
+Here's the diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -5057,6 +5057,9 @@
+ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID class_id)
+ {
+     JSObject *p;
+ 
++    if (unlikely(!ctx || !sh))
++        return JS_EXCEPTION;
++
+     js_trigger_gc(ctx->rt, sizeof(JSObject));
+     p = js_malloc(ctx, sizeof(JSObject));
+     if (unlikely(!p))
+@@ -5082,6 +5085,7 @@
+     p->prop = js_malloc(ctx, sizeof(JSProperty) * sh->prop_size);
+     if (unlikely(!p->prop)) {
+         js_free(ctx, p);
++        funlogline();
+     fail:
+         js_free_shape(ctx->rt, sh);
+         return JS_EXCEPTION;
+@@ -5128,6 +5132,9 @@
+         p->u.regexp.bytecode = NULL;
+         goto set_exotic;
+     default:
++        if (unlikely(class_id >= JS_CLASS_INIT_COUNT)) {
++            funlogline();
++        }
+     set_exotic:
+         if (ctx->rt->class_array[class_id].exotic) {
+             p->is_exotic = 1;
+```
+
+The changes:
+1. Added NULL checks for input parameters
+2. Added instrumentation before fail label when prop allocation fails
+3. Added bounds check for class_id before accessing class_array

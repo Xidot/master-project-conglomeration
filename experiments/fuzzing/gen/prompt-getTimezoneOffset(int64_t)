@@ -1,0 +1,317 @@
+Target function: "getTimezoneOffset(int64_t)"
+
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 26
+typedef __int64_t int64_t
+
+---- File: /usr/include/bits/types/time_t.h
+
+/// Line number here: 9
+typedef __time_t time_t
+
+---- File: /usr/include/bits/types/struct_tm.h
+
+/// Line number here: 6
+struct tm
+{
+  int tm_sec;			/* Seconds.	[0-60] (1 leap second) */
+  int tm_min;			/* Minutes.	[0-59] */
+  int tm_hour;			/* Hours.	[0-23] */
+  int tm_mday;			/* Day.		[1-31] */
+  int tm_mon;			/* Month.	[0-11] */
+  int tm_year;			/* Year	- 1900.  */
+  int tm_wday;			/* Day of week.	[0-6] */
+  int tm_yday;			/* Days in year.[0-365]	*/
+  int tm_isdst;			/* DST.		[-1/0/1]*/
+
+# ifdef	__USE_MISC
+  long int tm_gmtoff;		/* Seconds east of UTC.  */
+  const char *tm_zone;		/* Timezone abbreviation.  */
+# else
+  long int __tm_gmtoff;		/* Seconds east of UTC.  */
+  const char *__tm_zone;	/* Timezone abbreviation.  */
+# endif
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/* OS dependent. d = argv[0] is in ms from 1970. Return the difference
+   between UTC time and local time 'd' in minutes */
+/// Line number here: 44559
+static int getTimezoneOffset(int64_t time)
+{
+    time_t ti;
+    int res;
+
+    time /= 1000; /* convert to seconds */
+    if (sizeof(time_t) == 4) {
+        /* on 32-bit systems, we need to clamp the time value to the
+           range of `time_t`. This is better than truncating values to
+           32 bits and hopefully provides the same result as 64-bit
+           implementation of localtime_r.
+         */
+        if ((time_t)-1 < 0) {
+            if (time < INT32_MIN) {
+                time = INT32_MIN;
+            } else if (time > INT32_MAX) {
+                time = INT32_MAX;
+            }
+        } else {
+            if (time < 0) {
+                time = 0;
+            } else if (time > UINT32_MAX) {
+                time = UINT32_MAX;
+            }
+        }
+    }
+    ti = time;
+#if defined(_WIN32)
+    {
+        struct tm *tm;
+        time_t gm_ti, loc_ti;
+
+        tm = gmtime(&ti);
+        if (!tm)
+            return 0;
+        gm_ti = mktime(tm);
+
+        tm = localtime(&ti);
+        if (!tm)
+            return 0;
+        loc_ti = mktime(tm);
+
+        res = (gm_ti - loc_ti) / 60;
+    }
+#else
+    {
+        struct tm tm;
+        localtime_r(&ti, &tm);
+        res = -tm.tm_gmtoff / 60;
+    }
+#endif
+    return res;
+}
+
+/// Line number here: 50985
+static __exception int get_date_fields(JSContext *ctx, JSValueConst obj,
+                                       double fields[minimum_length(9)], int is_local, int force)
+{
+    double dval;
+    int64_t d, days, wd, y, i, md, h, m, s, ms, tz = 0;
+
+    if (JS_ThisTimeValue(ctx, &dval, obj))
+        return -1;
+
+    if (isnan(dval)) {
+        if (!force)
+            return FALSE; /* NaN */
+        d = 0;        /* initialize all fields to 0 */
+    } else {
+        d = dval;     /* assuming -8.64e15 <= dval <= -8.64e15 */
+        if (is_local) {
+            tz = -getTimezoneOffset(d);
+            d += tz * 60000;
+        }
+    }
+
+    /* result is >= 0, we can use % */
+    h = math_mod(d, 86400000);
+    days = (d - h) / 86400000;
+    ms = h % 1000;
+    h = (h - ms) / 1000;
+    s = h % 60;
+    h = (h - s) / 60;
+    m = h % 60;
+    h = (h - m) / 60;
+    wd = math_mod(days + 4, 7); /* week day */
+    y = year_from_days(&days);
+
+    for(i = 0; i < 11; i++) {
+        md = month_days[i];
+        if (i == 1)
+            md += days_in_year(y) - 365;
+        if (days < md)
+            break;
+        days -= md;
+    }
+    fields[0] = y;
+    fields[1] = i;
+    fields[2] = days + 1;
+    fields[3] = h;
+    fields[4] = m;
+    fields[5] = s;
+    fields[6] = ms;
+    fields[7] = wd;
+    fields[8] = tz;
+    return TRUE;
+}
+
+/* The spec mandates the use of 'double' and it specifies the order
+   of the operations */
+/// Line number here: 51047
+static double set_date_fields(double fields[minimum_length(7)], int is_local) {
+    double y, m, dt, ym, mn, day, h, s, milli, time, tv;
+    int yi, mi, i;
+    int64_t days;
+    volatile double temp;  /* enforce evaluation order */
+
+    /* emulate 21.4.1.15 MakeDay ( year, month, date ) */
+    y = fields[0];
+    m = fields[1];
+    dt = fields[2];
+    ym = y + floor(m / 12);
+    mn = fmod(m, 12);
+    if (mn < 0)
+        mn += 12;
+    if (ym < -271821 || ym > 275760)
+        return NAN;
+
+    yi = ym;
+    mi = mn;
+    days = days_from_year(yi);
+    for(i = 0; i < mi; i++) {
+        days += month_days[i];
+        if (i == 1)
+            days += days_in_year(yi) - 365;
+    }
+    day = days + dt - 1;
+
+    /* emulate 21.4.1.14 MakeTime ( hour, min, sec, ms ) */
+    h = fields[3];
+    m = fields[4];
+    s = fields[5];
+    milli = fields[6];
+    /* Use a volatile intermediary variable to ensure order of evaluation
+     * as specified in ECMA. This fixes a test262 error on
+     * test262/test/built-ins/Date/UTC/fp-evaluation-order.js.
+     * Without the volatile qualifier, the compile can generate code
+     * that performs the computation in a different order or with instructions
+     * that produce a different result such as FMA (float multiply and add).
+     */
+    time = h * 3600000;
+    time += (temp = m * 60000);
+    time += (temp = s * 1000);
+    time += milli;
+
+    /* emulate 21.4.1.16 MakeDate ( day, time ) */
+    tv = (temp = day * 86400000) + time;   /* prevent generation of FMA */
+    if (!isfinite(tv))
+        return NAN;
+
+    /* adjust for local time and clip */
+    if (is_local) {
+        int64_t ti = tv < INT64_MIN ? INT64_MIN : tv >= 0x1p63 ? INT64_MAX : (int64_t)tv;
+        tv += getTimezoneOffset(ti) * 60000;
+    }
+    return time_clip(tv);
+}
+
+/// Line number here: 51878
+static JSValue js_date_getTimezoneOffset(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv)
+{
+    // getTimezoneOffset()
+    double v;
+
+    if (JS_ThisTimeValue(ctx, &v, this_val))
+        return JS_EXCEPTION;
+    if (isnan(v))
+        return JS_NAN;
+    else
+        /* assuming -8.64e15 <= v <= -8.64e15 */
+        return JS_NewInt64(ctx, getTimezoneOffset((int64_t)trunc(v)));
+}
+
+---- File: /usr/include/time.h
+
+/// Line number here: 158
+extern struct tm *localtime_r (const time_t *__restrict __timer,
+			       struct tm *__restrict __tp) __THROW
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 229
+typedef union JSValueUnion {
+    int32_t int32;
+    double float64;
+    void *ptr;
+#if JS_SHORT_BIG_INT_BITS == 32
+    int32_t short_big_int;
+#else
+    int64_t short_big_int;
+#endif
+} JSValueUnion
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"getTimezoneOffset(int64_t)";
+"getTimezoneOffset(int64_t)" -> "localtime_r(const time_t *restrict, struct tm *restrict)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "__builtin_isnan()";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "getTimezoneOffset(int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "math_mod(int64_t, int64_t)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "year_from_days(int64_t *)";
+"get_date_fields(JSContext *, JSValue, double *, int, int)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)";
+"set_date_fields(double *, int)" -> "floor(double)";
+"set_date_fields(double *, int)" -> "fmod(double, double)";
+"set_date_fields(double *, int)" -> "__builtin_nanf(const char *)";
+"set_date_fields(double *, int)" -> "days_from_year(int64_t)";
+"set_date_fields(double *, int)" -> "days_in_year(int64_t)";
+"set_date_fields(double *, int)" -> "__builtin_isfinite()";
+"set_date_fields(double *, int)" -> "getTimezoneOffset(int64_t)";
+"set_date_fields(double *, int)" -> "time_clip(double)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "JS_ThisTimeValue(JSContext *, double *, JSValue)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "__builtin_isnan()";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "__builtin_nanf(const char *)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "JS_NewInt64(JSContext *, int64_t)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "getTimezoneOffset(int64_t)";
+"js_date_getTimezoneOffset(JSContext *, JSValue, int, JSValue *)" -> "trunc(double)";
+}

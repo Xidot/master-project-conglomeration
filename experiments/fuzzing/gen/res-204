@@ -1,0 +1,41 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_bigint_new_di(JSContext *, js_sdlimb_t)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_bigint_new_di` function:
+
+:js_bigint_new_di:11000
+
+The main issue is in the handling of the 128-bit integer `a` when it doesn't fit in a 64-bit integer. The code stores the lower and upper parts of `a` into `tab[0]` and `tab[1]` respectively, but there's no check for proper sign extension when dealing with negative numbers.
+
+Here's the diff to add the check:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -11009,6 +11009,9 @@
+         if (!r)
+             return NULL;
+         r->tab[0] = a;
++        if (a < 0 && r->tab[0] >= 0) {
++            funlogline();
++        }
+     } else {
+         r = js_bigint_new(ctx, 2);
+         if (!r)
+@@ -11016,6 +11019,9 @@
+         r->tab[0] = a;
+         r->tab[1] = a >> JS_LIMB_BITS;
++        if (a < 0 && r->tab[1] != -1) {
++            funlogline();
++        }
+     }
+     return r;
+ }
+```
+
+The first check verifies that when storing a negative 64-bit value, it remains negative after truncation to the limb size. The second check ensures proper sign extension when storing a negative 128-bit value across two limbs.
+
+The bug could manifest when:
+1. Storing a negative 64-bit value that gets truncated to a positive value in the limb
+2. Storing a negative 128-bit value where the upper limb doesn't properly extend the sign bit (should be all 1s for a negative number)

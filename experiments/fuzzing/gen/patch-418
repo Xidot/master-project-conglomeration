@@ -1,0 +1,17 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2958,10 +2958,14 @@
+ 
+ JSAtom JS_NewAtomUInt32(JSContext *ctx, uint32_t n)
+ {
++    if (!ctx)
++        funlogline();
+     if (n <= JS_ATOM_MAX_INT) {
+         return __JS_AtomFromUInt32(n);
+     } else {
+         char buf[11];
++        if (n == 4294967295U) // Max uint32_t value needs 10 chars + null terminator
++            funlogline();
+         JSValue val;
+         size_t len;
+         len = u32toa(buf, n);

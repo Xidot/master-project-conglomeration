@@ -1,0 +1,330 @@
+Target function: "__JS_FreeValueRT(JSRuntime *, JSValue)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 53
+typedef struct JSRuntime JSRuntime
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+/// Line number here: 368
+typedef struct JSGCObjectHeader JSGCObjectHeader
+
+/// Line number here: 103
+typedef struct JSRefCountHeader {
+    int ref_count;
+} JSRefCountHeader
+
+/// Line number here: 692
+static inline void JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    if (JS_VALUE_HAS_REF_COUNT(v)) {
+        JSRefCountHeader *p = (JSRefCountHeader *)JS_VALUE_GET_PTR(v);
+        if (--p->ref_count <= 0) {
+            __JS_FreeValueRT(rt, v);
+        }
+    }
+}
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 216
+typedef struct JSString JSString
+
+/// Line number here: 531
+typedef struct JSStringRope {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len;
+    uint8_t is_wide_char; /* 0 = 8 bits, 1 = 16 bits characters */
+    uint8_t depth; /* max depth of the rope tree */
+    /* XXX: could reduce memory usage by using a direct pointer with
+       bit 0 to select rope or string */
+    JSValue left;
+    JSValue right; /* might be the empty string */
+} JSStringRope
+
+/// Line number here: 224
+enum {
+    JS_GC_PHASE_NONE,
+    JS_GC_PHASE_DECREF,
+    JS_GC_PHASE_REMOVE_CYCLES,
+}
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/// Line number here: 217
+typedef struct JSString JSAtomStruct
+
+/* called with the ref_count of 'v' reaches zero. */
+/// Line number here: 5827
+void __JS_FreeValueRT(JSRuntime *rt, JSValue v)
+{
+    uint32_t tag = JS_VALUE_GET_TAG(v);
+
+#ifdef DUMP_FREE
+    {
+        printf("Freeing ");
+        if (tag == JS_TAG_OBJECT) {
+            JS_DumpObject(rt, JS_VALUE_GET_OBJ(v));
+        } else {
+            JS_DumpValueShort(rt, v);
+            printf("\n");
+        }
+    }
+#endif
+
+    switch(tag) {
+    case JS_TAG_STRING:
+        {
+            JSString *p = JS_VALUE_GET_STRING(v);
+            if (p->atom_type) {
+                JS_FreeAtomStruct(rt, p);
+            } else {
+#ifdef DUMP_LEAKS
+                list_del(&p->link);
+#endif
+                js_free_rt(rt, p);
+            }
+        }
+        break;
+    case JS_TAG_STRING_ROPE:
+        /* Note: recursion is acceptable because the rope depth is bounded */
+        {
+            JSStringRope *p = JS_VALUE_GET_STRING_ROPE(v);
+            JS_FreeValueRT(rt, p->left);
+            JS_FreeValueRT(rt, p->right);
+            js_free_rt(rt, p);
+        }
+        break;
+    case JS_TAG_OBJECT:
+    case JS_TAG_FUNCTION_BYTECODE:
+    case JS_TAG_MODULE:
+        {
+            JSGCObjectHeader *p = JS_VALUE_GET_PTR(v);
+            if (rt->gc_phase != JS_GC_PHASE_REMOVE_CYCLES) {
+                list_del(&p->link);
+                list_add(&p->link, &rt->gc_zero_ref_count_list);
+                p->mark = 1; /* indicate that the object is about to be freed */
+                if (rt->gc_phase == JS_GC_PHASE_NONE) {
+                    free_zero_refcount(rt);
+                }
+            }
+        }
+        break;
+    case JS_TAG_BIG_INT:
+        {
+            JSBigInt *p = JS_VALUE_GET_PTR(v);
+            js_free_rt(rt, p);
+        }
+        break;
+    case JS_TAG_SYMBOL:
+        {
+            JSAtomStruct *p = JS_VALUE_GET_PTR(v);
+            JS_FreeAtomStruct(rt, p);
+        }
+        break;
+    default:
+        abort();
+    }
+}
+
+/// Line number here: 487
+enum {
+    JS_ATOM_TYPE_STRING = 1,
+    JS_ATOM_TYPE_GLOBAL_SYMBOL,
+    JS_ATOM_TYPE_SYMBOL,
+    JS_ATOM_TYPE_PRIVATE,
+}
+
+/// Line number here: 2853
+static void JS_FreeAtomStruct(JSRuntime *rt, JSAtomStruct *p)
+{
+#if 0   /* JS_ATOM_NULL is not refcounted: __JS_AtomIsConst() includes 0 */
+    if (unlikely(i == JS_ATOM_NULL)) {
+        p->header.ref_count = INT32_MAX / 2;
+        return;
+    }
+#endif
+    uint32_t i = p->hash_next;  /* atom_index */
+    if (p->atom_type != JS_ATOM_TYPE_SYMBOL) {
+        JSAtomStruct *p0, *p1;
+        uint32_t h0;
+
+        h0 = p->hash & (rt->atom_hash_size - 1);
+        i = rt->atom_hash[h0];
+        p1 = rt->atom_array[i];
+        if (p1 == p) {
+            rt->atom_hash[h0] = p1->hash_next;
+        } else {
+            for(;;) {
+                assert(i != 0);
+                p0 = p1;
+                i = p1->hash_next;
+                p1 = rt->atom_array[i];
+                if (p1 == p) {
+                    p0->hash_next = p1->hash_next;
+                    break;
+                }
+            }
+        }
+    }
+    /* insert in free atom list */
+    rt->atom_array[i] = atom_set_free(rt->atom_free_index);
+    rt->atom_free_index = i;
+    /* free the string structure */
+#ifdef DUMP_LEAKS
+    list_del(&p->link);
+#endif
+    if (p->atom_type == JS_ATOM_TYPE_SYMBOL &&
+        p->hash != JS_ATOM_HASH_PRIVATE && p->hash != 0) {
+        /* live weak references are still present on this object: keep
+           it */
+    } else {
+        js_free_rt(rt, p);
+    }
+    rt->atom_count--;
+    assert(rt->atom_count >= 0);
+}
+
+/// Line number here: 1337
+void js_free_rt(JSRuntime *rt, void *ptr)
+{
+    rt->mf.js_free(&rt->malloc_state, ptr);
+}
+
+/// Line number here: 5809
+static void free_zero_refcount(JSRuntime *rt)
+{
+    struct list_head *el;
+    JSGCObjectHeader *p;
+
+    rt->gc_phase = JS_GC_PHASE_DECREF;
+    for(;;) {
+        el = rt->gc_zero_ref_count_list.next;
+        if (el == &rt->gc_zero_ref_count_list)
+            break;
+        p = list_entry(el, JSGCObjectHeader, link);
+        assert(p->ref_count == 0);
+        free_gc_object(rt, p);
+    }
+    rt->gc_phase = JS_GC_PHASE_NONE;
+}
+
+/// Line number here: 5898
+void __JS_FreeValue(JSContext *ctx, JSValue v)
+{
+    __JS_FreeValueRT(ctx->rt, v);
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/list.h
+
+/// Line number here: 30
+struct list_head {
+    struct list_head *prev;
+    struct list_head *next;
+}
+
+/// Line number here: 68
+static inline void list_del(struct list_head *el)
+{
+    struct list_head *prev, *next;
+    prev = el->prev;
+    next = el->next;
+    prev->next = next;
+    next->prev = prev;
+    el->prev = NULL; /* fail safe */
+    el->next = NULL; /* fail safe */
+}
+
+/* add 'el' at the head of the list 'head' (= after element head) */
+/// Line number here: 57
+static inline void list_add(struct list_head *el, struct list_head *head)
+{
+    __list_add(el, head, head->next);
+}
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 729
+extern void abort (void) __THROW __attribute__ ((__noreturn__)) __COLD
+
+
+
+----- Callgraph:
+strict digraph G {
+"__JS_FreeValueRT(JSRuntime *, JSValue)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "js_free_rt(JSRuntime *, void *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "JS_FreeValueRT(JSRuntime *, JSValue)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "list_del(struct list_head *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "list_add(struct list_head *, struct list_head *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "free_zero_refcount(JSRuntime *)";
+"__JS_FreeValueRT(JSRuntime *, JSValue)" -> "abort()";
+"JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)";
+"JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)" -> "atom_set_free(uint32_t)";
+"JS_FreeAtomStruct(JSRuntime *, JSAtomStruct *)" -> "js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)";
+"js_free_rt(JSRuntime *, void *)" -> "JSMallocFunctions::js_free";
+"JS_FreeValueRT(JSRuntime *, JSValue)";
+"JS_FreeValueRT(JSRuntime *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+"list_add(struct list_head *, struct list_head *)";
+"list_add(struct list_head *, struct list_head *)" -> "__list_add(struct list_head *, struct list_head *, struct list_head *)";
+"free_zero_refcount(JSRuntime *)";
+"free_zero_refcount(JSRuntime *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"free_zero_refcount(JSRuntime *)" -> "free_gc_object(JSRuntime *, JSGCObjectHeader *)";
+"__JS_FreeValue(JSContext *, JSValue)";
+"__JS_FreeValue(JSContext *, JSValue)" -> "__JS_FreeValueRT(JSRuntime *, JSValue)";
+}

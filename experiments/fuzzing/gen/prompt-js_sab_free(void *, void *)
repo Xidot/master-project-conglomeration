@@ -1,0 +1,90 @@
+Target function: "js_sab_free(void *, void *)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs-libc.c
+
+/// Line number here: 3443
+typedef struct {
+    int ref_count;
+    uint64_t buf[0];
+} JSSABHeader
+
+/// Line number here: 3464
+static void js_sab_free(void *opaque, void *ptr)
+{
+    JSSABHeader *sab;
+    int ref_count;
+    sab = (JSSABHeader *)((uint8_t *)ptr - sizeof(JSSABHeader));
+    ref_count = atomic_add_int(&sab->ref_count, -1);
+    assert(ref_count >= 0);
+    if (ref_count == 0) {
+        free(sab);
+    }
+}
+
+/// Line number here: 3448
+static int atomic_add_int(int *ptr, int v)
+{
+    return atomic_fetch_add((_Atomic(uint32_t) *)ptr, v) + v;
+}
+
+/// Line number here: 112
+typedef struct {
+    struct list_head link;
+    uint8_t *data;
+    size_t data_len;
+    /* list of SharedArrayBuffers, necessary to free the message */
+    uint8_t **sab_tab;
+    size_t sab_tab_len;
+} JSWorkerMessage
+
+/// Line number here: 3506
+static void js_free_message(JSWorkerMessage *msg)
+{
+    size_t i;
+    /* free the SAB */
+    for(i = 0; i < msg->sab_tab_len; i++) {
+        js_sab_free(NULL, msg->sab_tab[i]);
+    }
+    free(msg->sab_tab);
+    free(msg->data);
+    free(msg);
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 23
+typedef __uint8_t uint8_t
+
+/// Line number here: 25
+typedef __uint32_t uint32_t
+
+---- File: /usr/include/assert.h
+
+/// Line number here: 66
+extern void __assert_fail (const char *__assertion, const char *__file,
+			   unsigned int __line, const char *__function)
+     __THROW __attribute__ ((__noreturn__)) __COLD
+
+---- File: /usr/include/stdlib.h
+
+/// Line number here: 686
+extern void free (void *__ptr) __THROW
+
+---- File: /usr/lib/clang/20/include/__stddef_size_t.h
+
+/// Line number here: 17
+typedef __SIZE_TYPE__ size_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_sab_free(void *, void *)";
+"js_sab_free(void *, void *)" -> "atomic_add_int(int *, int)";
+"js_sab_free(void *, void *)" -> "__assert_fail(const char *, const char *, unsigned int, const char *)";
+"js_sab_free(void *, void *)" -> "free(void *)";
+"js_free_message(JSWorkerMessage *)";
+"js_free_message(JSWorkerMessage *)" -> "js_sab_free(void *, void *)";
+"js_free_message(JSWorkerMessage *)" -> "free(void *)";
+}

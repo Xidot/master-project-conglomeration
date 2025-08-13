@@ -1,0 +1,12 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -3753,6 +3753,9 @@
+         return -1;
+     }
+     if (unlikely(JS_VALUE_GET_TAG(v) != JS_TAG_STRING)) {
++        if (JS_IsException(v)) {
++            funlogline();
++        }
+         v = JS_ToStringFree(s->ctx, v);
+         if (JS_IsException(v))
+             return string_buffer_set_error(s);

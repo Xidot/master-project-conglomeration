@@ -1,0 +1,38 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-add_resolve_entry(JSContext *, JSResolveState *, JSModuleDef *, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the target function `add_resolve_entry`:
+
+:add_resolve_entry:28693
+:add_resolve_entry:28700
+
+---
+
+Now the diff with the proposed fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28695,6 +28695,9 @@
+ {
+     JSResolveEntry *re;
+ 
++    if (s->count < 0 || s->size < 0) {
++        funlogline();
++    }
+     if (js_resize_array(ctx, (void **)&s->array,
+                         sizeof(JSResolveEntry),
+                         &s->size, s->count + 1))
+@@ -28702,6 +28705,9 @@
+     re = &s->array[s->count++];
+     re->module = m;
+     re->name = JS_DupAtom(ctx, name);
++    if (s->count > s->size) {
++        funlogline();
++    }
+     return 0;
+ }
+```
+
+The first check catches potential negative counts/sizes which could lead to incorrect array operations. The second check verifies that after incrementing count, we haven't exceeded the allocated size. Both conditions would indicate logical errors in the state management.

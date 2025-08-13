@@ -1,0 +1,44 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-js_has_unscopable(JSContext *, JSValue, JSAtom)
+-------------------------
+Based on the code analysis, here are the potential logical bugs in the `js_has_unscopable` function:
+
+:quickjs.c:js_has_unscopable:15233
+:quickjs.c:js_has_unscopable:15238
+:quickjs.c:js_has_unscopable:15240
+
+Here's the unified diff with the fixes:
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -15232,6 +15232,8 @@
+     int ret;
+ 
+     arr = JS_GetProperty(ctx, obj, JS_ATOM_Symbol_unscopables);
++    if (JS_IsException(arr) && !JS_IsObject(obj))
++        funlogline();
+     if (JS_IsException(arr))
+         return -1;
+     ret = 0;
+@@ -15239,6 +15241,8 @@
+         val = JS_GetProperty(ctx, arr, atom);
+         ret = JS_ToBoolFree(ctx, val);
+     }
++    if (ret == -1 && !JS_IsObject(arr))
++        funlogline();
+     JS_FreeValue(ctx, arr);
+     return ret;
+ }
+```
+
+The logical bugs identified are:
+
+1. At line 15233: The function doesn't properly handle the case where `obj` is not an object when getting the unscopables property. This could lead to incorrect exception handling.
+
+2. At line 15238: The function assumes `arr` is always an object after checking for exception, but it could be other types that would cause issues when used with `JS_GetProperty`.
+
+3. At line 15240: The function doesn't properly validate the return value from `JS_ToBoolFree` when `arr` is not an object.
+
+The fixes add checks to detect these edge cases and call `funlogline()` when the problematic conditions occur. The conditions are designed to only trigger when the bugs would manifest (non-object inputs where object inputs are expected).

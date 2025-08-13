@@ -1,0 +1,153 @@
+Target function: "find_exported_name(GetExportNamesState *, JSAtom)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 28868
+typedef struct GetExportNamesState {
+    JSModuleDef **modules;
+    int modules_size;
+    int modules_count;
+
+    ExportedNameEntry *exported_names;
+    int exported_names_size;
+    int exported_names_count;
+} GetExportNamesState
+
+/// Line number here: 28870
+static int find_exported_name(GetExportNamesState *s, JSAtom name)
+{
+    int i;
+    for(i = 0; i < s->exported_names_count; i++) {
+        if (s->exported_names[i].export_name == name)
+            return i;
+    }
+    return -1;
+}
+
+/// Line number here: 28858
+typedef struct ExportedNameEntry {
+    JSAtom export_name;
+    ExportedNameEntryEnum export_type;
+    union {
+        JSExportEntry *me; /* using when the list is built */
+        JSVarRef *var_ref; /* EXPORTED_NAME_NORMAL */
+    } u;
+} ExportedNameEntry
+
+/// Line number here: 785
+typedef struct JSExportEntry {
+    union {
+        struct {
+            int var_idx; /* closure variable index */
+            JSVarRef *var_ref; /* if != NULL, reference to the variable */
+        } local; /* for local export */
+        int req_module_idx; /* module for indirect export */
+    } u;
+    JSExportTypeEnum export_type;
+    JSAtom local_name; /* '*' if export ns from. not used for local
+                          export after compilation */
+    JSAtom export_name; /* exported variable name */
+} JSExportEntry
+
+/// Line number here: 1019
+enum {
+    __JS_ATOM_NULL = JS_ATOM_NULL,
+#define DEF(name, str) JS_ATOM_ ## name,
+#include "quickjs-atom.h"
+#undef DEF
+    JS_ATOM_END,
+}
+
+/// Line number here: 768
+enum JSExportTypeEnum {
+    JS_EXPORT_TYPE_LOCAL,
+    JS_EXPORT_TYPE_INDIRECT,
+}
+
+/// Line number here: 789
+typedef struct JSStarExportEntry {
+    int req_module_idx; /* in req_module_entries */
+} JSStarExportEntry
+
+/// Line number here: 28880
+static __exception int get_exported_names(JSContext *ctx,
+                                          GetExportNamesState *s,
+                                          JSModuleDef *m, BOOL from_star)
+{
+    ExportedNameEntry *en;
+    int i, j;
+
+    /* check circular reference */
+    for(i = 0; i < s->modules_count; i++) {
+        if (s->modules[i] == m)
+            return 0;
+    }
+    if (js_resize_array(ctx, (void **)&s->modules, sizeof(s->modules[0]),
+                        &s->modules_size, s->modules_count + 1))
+        return -1;
+    s->modules[s->modules_count++] = m;
+
+    for(i = 0; i < m->export_entries_count; i++) {
+        JSExportEntry *me = &m->export_entries[i];
+        if (from_star && me->export_name == JS_ATOM_default)
+            continue;
+        j = find_exported_name(s, me->export_name);
+        if (j < 0) {
+            if (js_resize_array(ctx, (void **)&s->exported_names, sizeof(s->exported_names[0]),
+                                &s->exported_names_size,
+                                s->exported_names_count + 1))
+                return -1;
+            en = &s->exported_names[s->exported_names_count++];
+            en->export_name = me->export_name;
+            /* avoid a second lookup for simple module exports */
+            if (from_star || me->export_type != JS_EXPORT_TYPE_LOCAL)
+                en->u.me = NULL;
+            else
+                en->u.me = me;
+        } else {
+            en = &s->exported_names[j];
+            en->u.me = NULL;
+        }
+    }
+    for(i = 0; i < m->star_export_entries_count; i++) {
+        JSStarExportEntry *se = &m->star_export_entries[i];
+        JSModuleDef *m1;
+        m1 = m->req_module_entries[se->req_module_idx].module;
+        if (get_exported_names(ctx, s, m1, TRUE))
+            return -1;
+    }
+    return 0;
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 57
+typedef uint32_t JSAtom
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 933
+typedef struct JSModuleDef JSModuleDef
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 59
+typedef int BOOL
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+
+
+----- Callgraph:
+strict digraph G {
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "js_resize_array(JSContext *, void **, int, int *, int)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "find_exported_name(GetExportNamesState *, JSAtom)";
+"get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)" -> "get_exported_names(JSContext *, GetExportNamesState *, JSModuleDef *, BOOL)";
+}

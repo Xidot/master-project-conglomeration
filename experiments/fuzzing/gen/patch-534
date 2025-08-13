@@ -1,0 +1,29 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -4421,6 +4421,8 @@
+         a = JS_NULL;
+         i = 0;
+         while (len >= rope_bucket_len[i + 1]) {
++            if (i >= ROPE_N_BUCKETS - 1)
++                funlogline();
+             b = buckets[i];
+             if (!JS_IsNull(b)) {
+                 buckets[i] = JS_NULL;
+@@ -4431,6 +4433,8 @@
+                     a = js_new_string_rope(ctx, b, a);
+                     if (JS_IsException(a))
+                         return -1;
++                    if (JS_IsNull(a))
++                        funlogline();
+                 }
+             }
+             i++;
+@@ -4438,6 +4442,8 @@
+         if (!JS_IsNull(a)) {
+             a = js_new_string_rope(ctx, a, JS_DupValue(ctx, val));
+             if (JS_IsException(a))
++                funlogline();
++            if (i >= ROPE_N_BUCKETS)
+                 return -1;
+         } else {
+             a = JS_DupValue(ctx, val);

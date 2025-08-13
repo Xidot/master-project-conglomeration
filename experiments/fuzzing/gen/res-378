@@ -1,0 +1,30 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-JS_IsExtensible(JSContext *, JSValue)
+-------------------------
+After analyzing the code, I've identified one potential logical bug in the `JS_IsExtensible` function:
+
+:quickjs.c:JS_IsExtensible:8246
+
+---
+
+```diff
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -8246,6 +8246,9 @@
+ int JS_IsExtensible(JSContext *ctx, JSValueConst obj)
+ {
+     JSObject *p;
++    
++    if (unlikely(!ctx || !ctx->rt))
++        funlogline();
+ 
+     if (unlikely(JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT))
+         return FALSE;
+```
+
+The bug occurs when the function is called with a NULL context or a context with a NULL runtime pointer. While the function checks the object tag, it doesn't validate the context parameter which is used to access the runtime and class array. This could lead to a crash if called with invalid context.
+
+The fix adds a check for these invalid conditions before proceeding with the function logic. While this doesn't change the behavior (as the function would crash anyway in these cases), it helps identify when this invalid condition occurs by logging it.
+
+Note that this is a defensive programming check rather than a pure logic bug fix, as the function's contract likely assumes valid parameters. However, given the function's widespread use in the codebase (as seen in the callgraph), such validation is prudent.

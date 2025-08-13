@@ -1,0 +1,309 @@
+Target function: "js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)"
+
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.h
+
+/// Line number here: 54
+typedef struct JSContext JSContext
+
+/// Line number here: 234
+typedef struct JSValue {
+    JSValueUnion u;
+    int64_t tag;
+} JSValue
+
+/// Line number here: 78
+enum {
+    /* all tags with a reference count are negative */
+    JS_TAG_FIRST       = -9, /* first negative tag */
+    JS_TAG_BIG_INT     = -9,
+    JS_TAG_SYMBOL      = -8,
+    JS_TAG_STRING      = -7,
+    JS_TAG_STRING_ROPE = -6,
+    JS_TAG_MODULE      = -3, /* used internally */
+    JS_TAG_FUNCTION_BYTECODE = -2, /* used internally */
+    JS_TAG_OBJECT      = -1,
+
+    JS_TAG_INT         = 0,
+    JS_TAG_BOOL        = 1,
+    JS_TAG_NULL        = 2,
+    JS_TAG_UNDEFINED   = 3,
+    JS_TAG_UNINITIALIZED = 4,
+    JS_TAG_CATCH_OFFSET = 5,
+    JS_TAG_EXCEPTION   = 6,
+    JS_TAG_SHORT_BIG_INT = 7,
+    JS_TAG_FLOAT64     = 8,
+    /* any larger tag is FLOAT64 if JS_NAN_BOXING */
+}
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/quickjs.c
+
+/// Line number here: 419
+typedef struct JSBigInt {
+    JSRefCountHeader header; /* must come first, 32-bit */
+    uint32_t len; /* number of limbs, >= 1 */
+    js_limb_t tab[]; /* two's complement representation, always
+                        normalized so that 'len' is the minimum
+                        possible length >= 1 */
+} JSBigInt
+
+/* return -1, 0, 1 or (2) (unordered) */
+/// Line number here: 11630
+static int js_bigint_float64_cmp(JSContext *ctx, const JSBigInt *a,
+                                 double b)
+{
+    int b_sign, a_sign, e, f;
+    uint64_t mant, b1, a_mant;
+    
+    b1 = float64_as_uint64(b);
+    b_sign = b1 >> 63;
+    e = (b1 >> 52) & ((1 << 11) - 1);
+    mant = b1 & (((uint64_t)1 << 52) - 1);
+    a_sign = js_bigint_sign(a);
+    if (e == 2047) {
+        if (mant != 0) {
+            /* NaN */
+            return 2;
+        } else {
+            /* +/- infinity */
+            return 2 * b_sign - 1;
+        }
+    } else if (e == 0 && mant == 0) {
+        /* b = +/-0 */
+        if (a->len == 1 && a->tab[0] == 0)
+            return 0;
+        else
+            return 1 - 2 * a_sign;
+    } else if (a->len == 1 && a->tab[0] == 0) {
+        /* a = 0, b != 0 */
+        return 2 * b_sign - 1;
+    } else if (a_sign != b_sign) {
+        return 1 - 2 * a_sign;
+    } else {
+        e -= 1023;
+        /* Note: handling denormals is not necessary because we
+           compare to integers hence f >= 0 */
+        /* compute f so that 2^f <= abs(a) < 2^(f+1) */
+        a_mant = js_bigint_get_mant_exp(ctx, &f, a);
+        if (f != e) {
+            if (f < e)
+                return -1;
+            else
+                return 1;
+        } else {
+            mant = (mant | ((uint64_t)1 << 52)) << 11; /* align to a_mant */
+            if (a_mant < mant)
+                return 2 * a_sign - 1;
+            else if (a_mant > mant)
+                return 1 - 2 * a_sign;
+            else
+                return 0;
+        }
+    }
+}
+
+/* return 0 or 1 depending on the sign */
+/// Line number here: 11051
+static inline int js_bigint_sign(const JSBigInt *a)
+{
+    return a->tab[a->len - 1] >> (JS_LIMB_BITS - 1);
+}
+
+/// Line number here: 405
+typedef uint64_t js_limb_t
+
+/* return (mant, exp) so that abs(a) ~ mant*2^(exp - (limb_bits -
+   1). a must be != 0. */
+/// Line number here: 11481
+static uint64_t js_bigint_get_mant_exp(JSContext *ctx,
+                                       int *pexp, const JSBigInt *a)
+{
+    js_limb_t t[4 - JS_LIMB_BITS / 32], carry, v, low_bits;
+    int n1, n2, sgn, shift, i, j, e;
+    uint64_t a1, a0;
+
+    n2 = 4 - JS_LIMB_BITS / 32;
+    n1 = a->len - n2;
+    sgn = js_bigint_sign(a);
+
+    /* low_bits != 0 if there are a non zero low bit in abs(a) */
+    low_bits = 0;
+    carry = sgn;
+    for(i = 0; i < n1; i++) {
+        v = (a->tab[i] ^ (-sgn)) + carry;
+        carry = v < carry;
+        low_bits |= v;
+    }
+    /* get the n2 high limbs of abs(a) */
+    for(j = 0; j < n2; j++) {
+        i = j + n1;
+        if (i < 0) {
+            v = 0;
+        } else {
+            v = (a->tab[i] ^ (-sgn)) + carry;
+            carry = v < carry;
+        }
+        t[j] = v;
+    }
+    
+#if JS_LIMB_BITS == 32
+    a1 = ((uint64_t)t[2] << 32) | t[1];
+    a0 = (uint64_t)t[0] << 32;
+#else
+    a1 = t[1];
+    a0 = t[0];
+#endif
+    a0 |= (low_bits != 0);
+    /* normalize */
+    if (a1 == 0) {
+        /* JS_LIMB_BITS = 64 bit only */
+        shift = 64;
+        a1 = a0;
+        a0 = 0;
+    } else {
+        shift = clz64(a1);
+        if (shift != 0) {
+            a1 = (a1 << shift) | (a0 >> (64 - shift));
+            a0 <<= shift;
+        }
+    }
+    a1 |= (a0 != 0); /* keep the bits for the final rounding */
+    /* compute the exponent */
+    e = a->len * JS_LIMB_BITS - shift - 1;
+    *pexp = e;
+    return a1;
+}
+
+/// Line number here: 230
+typedef enum OPCodeEnum OPCodeEnum
+
+/* this bigint structure can hold a 64 bit integer */
+/// Line number here: 426
+typedef struct {
+    js_limb_t big_int_buf[sizeof(JSBigInt) / sizeof(js_limb_t)]; /* for JSBigInt */
+    /* must come just after */
+    js_limb_t tab[(64 + JS_LIMB_BITS - 1) / JS_LIMB_BITS];
+} JSBigIntBuf
+
+/// Line number here: 404
+typedef int64_t js_slimb_t
+
+/* op1 and op2 must be numeric types and at least one must be a
+   bigint. No exception is generated. */
+/// Line number here: 14631
+static int js_compare_bigint(JSContext *ctx, OPCodeEnum op,
+                             JSValue op1, JSValue op2)
+{
+    int res, val, tag1, tag2;
+    JSBigIntBuf buf1, buf2;
+    JSBigInt *p1, *p2;
+    
+    tag1 = JS_VALUE_GET_NORM_TAG(op1);
+    tag2 = JS_VALUE_GET_NORM_TAG(op2);
+    if ((tag1 == JS_TAG_SHORT_BIG_INT || tag1 == JS_TAG_INT) &&
+        (tag2 == JS_TAG_SHORT_BIG_INT || tag2 == JS_TAG_INT)) {
+        /* fast path */
+        js_slimb_t v1, v2;
+        if (tag1 == JS_TAG_INT)
+            v1 = JS_VALUE_GET_INT(op1);
+        else
+            v1 = JS_VALUE_GET_SHORT_BIG_INT(op1);
+        if (tag2 == JS_TAG_INT)
+            v2 = JS_VALUE_GET_INT(op2);
+        else
+            v2 = JS_VALUE_GET_SHORT_BIG_INT(op2);
+        val = (v1 > v2) - (v1 < v2);
+    } else {
+        if (tag1 == JS_TAG_FLOAT64) {
+            p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
+            val = js_bigint_float64_cmp(ctx, p2, JS_VALUE_GET_FLOAT64(op1));
+            if (val == 2)
+                goto unordered;
+            val = -val;
+        } else if (tag2 == JS_TAG_FLOAT64) {
+            p1 = JS_ToBigIntBuf(ctx, &buf1, op1);
+            val = js_bigint_float64_cmp(ctx, p1, JS_VALUE_GET_FLOAT64(op2));
+            if (val == 2) {
+            unordered:
+                JS_FreeValue(ctx, op1);
+                JS_FreeValue(ctx, op2);
+                return FALSE;
+            }
+        } else {
+            p1 = JS_ToBigIntBuf(ctx, &buf1, op1);
+            p2 = JS_ToBigIntBuf(ctx, &buf2, op2);
+            val = js_bigint_cmp(ctx, p1, p2);
+        }
+        JS_FreeValue(ctx, op1);
+        JS_FreeValue(ctx, op2);
+    }
+
+    switch(op) {
+    case OP_lt:
+        res = val < 0;
+        break;
+    case OP_lte:
+        res = val <= 0;
+        break;
+    case OP_gt:
+        res = val > 0;
+        break;
+    case OP_gte:
+        res = val >= 0;
+        break;
+    case OP_eq:
+        res = val == 0;
+        break;
+    default:
+        abort();
+    }
+    return res;
+}
+
+---- File: /usr/include/bits/stdint-uintn.h
+
+/// Line number here: 26
+typedef __uint64_t uint64_t
+
+---- File: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/quickjs/cutils.h
+
+/// Line number here: 346
+static inline uint64_t float64_as_uint64(double d)
+{
+    union {
+        double d;
+        uint64_t u64;
+    } u;
+    u.d = d;
+    return u.u64;
+}
+
+/// Line number here: 62
+enum {
+    FALSE = 0,
+    TRUE = 1,
+}
+
+---- File: /usr/include/bits/stdint-intn.h
+
+/// Line number here: 25
+typedef __int32_t int32_t
+
+
+
+----- Callgraph:
+strict digraph G {
+"js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)";
+"js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)" -> "float64_as_uint64(double)";
+"js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)" -> "js_bigint_get_mant_exp(JSContext *, int *, const JSBigInt *)";
+"js_bigint_get_mant_exp(JSContext *, int *, const JSBigInt *)";
+"js_bigint_get_mant_exp(JSContext *, int *, const JSBigInt *)" -> "js_bigint_sign(const JSBigInt *)";
+"js_bigint_get_mant_exp(JSContext *, int *, const JSBigInt *)" -> "clz64(uint64_t)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "JS_ToBigIntBuf(JSContext *, JSBigIntBuf *, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "js_bigint_float64_cmp(JSContext *, const JSBigInt *, double)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "JS_FreeValue(JSContext *, JSValue)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "js_bigint_cmp(JSContext *, const JSBigInt *, const JSBigInt *)";
+"js_compare_bigint(JSContext *, OPCodeEnum, JSValue, JSValue)" -> "abort()";
+}

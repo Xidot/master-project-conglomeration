@@ -1,0 +1,31 @@
+Using paths:
+System prompt path: /var/home/sproid/_workspace/vu/proj-master/prompts/system.fullex-alt
+User prompt path: /var/home/sproid/_workspace/vu/proj-master/experiments/fuzzing/gen/prompt-bswap64(uint64_t)
+-------------------------
+After analyzing the `bswap64` function, here are the potential logical bugs:
+
+:cutils.h:bswap64:239
+
+---
+
+The logical error in this function is in the shift operations. The shifts for bytes 6, 5, and 4 are incorrect - they're shifting by the wrong number of bits. For example:
+- Byte 6 should be shifted right by 5*8 (40 bits) but should be shifted right by 6*8 (48 bits)
+- Byte 5 should be shifted right by 3*8 (24 bits) but should be shifted right by 5*8 (40 bits)
+- Byte 4 should be shifted right by 1*8 (8 bits) but should be shifted right by 4*8 (32 bits)
+
+Here's the diff to instrument this:
+
+```diff
+--- a/cutils.h
++++ b/cutils.h
+@@ -239,6 +239,7 @@ static inline uint64_t bswap64(uint64_t v)
+     return ((v & ((uint64_t)0xff << (7 * 8))) >> (7 * 8)) |
+         ((v & ((uint64_t)0xff << (6 * 8))) >> (5 * 8)) |
+         ((v & ((uint64_t)0xff << (5 * 8))) >> (3 * 8)) |
++        funlogline(); // Incorrect shift operations for bytes 6,5,4
+         ((v & ((uint64_t)0xff << (4 * 8))) >> (1 * 8)) |
+         ((v & ((uint64_t)0xff << (3 * 8))) << (1 * 8)) |
+         ((v & ((uint64_t)0xff << (2 * 8))) << (3 * 8)) |
+```
+
+Note: Since this is a single logical error affecting multiple lines, we only need one instrumentation point. The function will produce incorrect results for any non-zero input due to these incorrect shifts.
