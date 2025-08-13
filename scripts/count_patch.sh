@@ -1,6 +1,5 @@
 #!/bin/env bash
 
-# stop on error
 set -e
 
 USAGE="Usage: $0 patchfile-1 patchfile-2 ..."
@@ -11,8 +10,6 @@ if [ "$#" -lt 1 ]; then
 fi
 
 args=($*)
-
-# echo "${args[@]}"
 
 total=0
 for patch in "${args[@]}"; do
