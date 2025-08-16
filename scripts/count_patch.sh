@@ -2,12 +2,20 @@
 
 set -e
 
-THIS=$(dirname $(realpath ${BASH_SOURCE[0]}))
-FUZZING_DIR=$(realpath $THIS/experiments/fuzzing)
+USAGE="Usage: $0 patchfile-1 patchfile-2 ..."
 
-popd $FUZZING_DIR;
+if [ "$#" -lt 1 ]; then
+    echo "$USAGE"
+    exit 1
+fi
 
-# This is a dry compilation run
-./fuzz.sh
+args=($*)
 
-pushd;
+total=0
+for patch in "${args[@]}"; do
+    num=$(grep -E "^@@.*@@$" $patch | wc -l)
+    echo -e "$num\t$patch"
+    (( total += num ))
+done
+
+echo "$total total"

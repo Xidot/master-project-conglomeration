@@ -220,8 +220,8 @@ def plot_inst_freq():
     # plot.show()
 
 if __name__ == '__main__':
-    # plot_rejects()
-    # plot_bar_patches()
-    # plot_overhead()
-    # plot_inst_freq()
+    plot_rejects()
+    plot_bar_patches()
+    plot_overhead()
+    plot_inst_freq()
     pass
